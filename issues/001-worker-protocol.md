@@ -1,7 +1,5 @@
 # Worker Protocol
 
-**Status: Completed** - The rename from scribe to jig has been completed.
-
 ## Description
 
 Implement a per-worktree worker protocol for better status tracking and task communication between the orchestrator and spawned workers.
