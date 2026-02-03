@@ -1,0 +1,5 @@
+[package]
+name = "worktree"
+version = "0.3.0"
+description = "Git worktree manager for parallel Claude Code sessions"
+repository = "https://github.com/amiller68/worktree"

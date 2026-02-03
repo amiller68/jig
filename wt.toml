@@ -1,0 +1,6 @@
+# wt configuration
+# See: https://github.com/amiller68/worktree
+
+[spawn]
+# Always use auto mode (--auto flag)
+auto = true
