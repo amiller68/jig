@@ -6,7 +6,7 @@ Implement a per-worktree worker protocol for better status tracking and task com
 
 ## Current State
 
-Currently, worker status is tracked centrally in `.worktrees/.wt-state.json` and status is inferred from tmux process state. This doesn't allow workers to communicate back to the orchestrator.
+Currently, worker status is tracked centrally in `.worktrees/.jig-state.json` and status is inferred from tmux process state. This doesn't allow workers to communicate back to the orchestrator.
 
 ## Proposed Design
 

@@ -1,0 +1,29 @@
+[package]
+name = "jig-cli"
+description = "CLI for jig - git worktree manager for parallel Claude Code sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "jig"
+path = "src/main.rs"
+
+[dependencies]
+jig-core.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+colored.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+glob.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["process"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true

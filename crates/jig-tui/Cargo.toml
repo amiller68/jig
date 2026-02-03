@@ -1,0 +1,20 @@
+[package]
+name = "jig-tui"
+description = "TUI for jig - visual dashboard for managing Claude Code sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "jig-tui"
+path = "src/main.rs"
+
+[dependencies]
+jig-core.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

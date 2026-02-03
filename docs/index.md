@@ -6,7 +6,7 @@ You are working on `jig` — a Rust CLI for managing git worktrees, designed for
 
 ```
 crates/
-├── wt-core/           # Core library
+├── jig-core/          # Core library
 │   └── src/
 │       ├── config.rs   # Config management (jig.toml, ~/.config/jig/)
 │       ├── git.rs      # Git operations (worktrees, branches)
@@ -14,11 +14,11 @@ crates/
 │       ├── session.rs  # tmux session/window management
 │       ├── state.rs    # Persistent orchestrator state
 │       └── worker.rs   # Worker/task model
-├── wt-cli/            # CLI binary (jig)
+├── jig-cli/           # CLI binary (jig)
 │   └── src/
 │       ├── cli.rs      # Command definitions (clap)
 │       └── commands/   # Command handlers
-└── wt-tui/            # TUI binary (placeholder)
+└── jig-tui/           # TUI binary (placeholder)
 templates/
 ├── skills/            # Claude Code skills for init
 │   ├── check/         # /check skill
@@ -63,7 +63,7 @@ cargo fmt                # Format
 
 - **Worktrees** live in `.worktrees/` (auto-excluded via `.git/info/exclude`)
 - **Config** stored in `~/.config/jig/config`
-- **Spawn state** tracked in `.worktrees/.wt-state.json`
+- **Spawn state** tracked in `.worktrees/.jig-state.json`
 - **tmux** manages spawned sessions: `jig-<reponame>` session, one window per task
 - **Shell integration**: wrapper function evals `cd` commands from stdout
 - **stdout** is reserved for eval-able output — all user-facing messages go to stderr

@@ -9,9 +9,9 @@ Guide for AI agents and developers working on jig - a git worktree manager.
 ## Key Files
 
 **Rust crates:**
-- `crates/wt-core/` — Core library (git ops, config, state, spawn)
-- `crates/wt-cli/` — CLI binary (`jig`)
-- `crates/wt-tui/` — TUI binary (`jig-tui`, placeholder)
+- `crates/jig-core/` — Core library (git ops, config, state, spawn)
+- `crates/jig-cli/` — CLI binary (`jig`)
+- `crates/jig-tui/` — TUI binary (`jig-tui`, placeholder)
 
 **Configuration:**
 - `Cargo.toml` — Workspace configuration

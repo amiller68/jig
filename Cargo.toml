@@ -52,6 +52,6 @@ assert_cmd = "2"
 predicates = "3"
 
 # Internal crates
-wt-core = { path = "crates/wt-core" }
-wt-cli = { path = "crates/wt-cli" }
-wt-tui = { path = "crates/wt-tui" }
+jig-core = { path = "crates/jig-core" }
+jig-cli = { path = "crates/jig-cli" }
+jig-tui = { path = "crates/jig-tui" }
