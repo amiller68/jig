@@ -1,11 +1,11 @@
 #!/bin/bash
-# scribe installer
-# Downloads and installs scribe from GitHub releases
+# jig installer
+# Downloads and installs jig from GitHub releases
 
 set -e
 
-REPO="amiller68/scribe-rs"
-BINARY="scribe"
+REPO="amiller68/jig"
+BINARY="jig"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Colors
@@ -63,7 +63,7 @@ download() {
 }
 
 main() {
-    info "Installing scribe..."
+    info "Installing jig..."
     echo
 
     # Detect platform
@@ -112,10 +112,6 @@ main() {
     chmod +x "$INSTALL_DIR/$BINARY"
     success "Installed $BINARY to $INSTALL_DIR/$BINARY"
 
-    # Create sc alias (symlink)
-    ln -sf "$INSTALL_DIR/$BINARY" "$INSTALL_DIR/sc"
-    success "Created 'sc' alias"
-
     echo
     success "Installation complete!"
     echo
@@ -133,17 +129,17 @@ main() {
     echo "To enable shell integration (cd into worktrees), add to your shell profile:"
     echo
     echo "  # For bash (~/.bashrc)"
-    echo "  eval \"\$(scribe shell-init bash)\""
+    echo "  eval \"\$(jig shell-init bash)\""
     echo
     echo "  # For zsh (~/.zshrc)"
-    echo "  eval \"\$(scribe shell-init zsh)\""
+    echo "  eval \"\$(jig shell-init zsh)\""
     echo
 
     # Verify installation
-    if command -v scribe >/dev/null 2>&1; then
-        echo "Run 'scribe --help' to get started."
+    if command -v jig >/dev/null 2>&1; then
+        echo "Run 'jig --help' to get started."
     else
-        echo "Run '$INSTALL_DIR/scribe --help' to get started."
+        echo "Run '$INSTALL_DIR/jig --help' to get started."
     fi
 }
 

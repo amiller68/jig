@@ -1,4 +1,4 @@
-# scribe
+# jig
 
 Git worktree manager for running parallel Claude Code sessions.
 
@@ -15,60 +15,58 @@ Git worktree manager for running parallel Claude Code sessions.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/amiller68/scribe-rs/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash
 ```
 
 Then add shell integration to your profile:
 
 ```bash
 # For bash (~/.bashrc)
-eval "$(scribe shell-init bash)"
+eval "$(jig shell-init bash)"
 
 # For zsh (~/.zshrc)
-eval "$(scribe shell-init zsh)"
+eval "$(jig shell-init zsh)"
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `scribe create <name> [branch]` | Create a worktree with a new branch |
-| `scribe create <name> -o` | Create and cd into the worktree |
-| `scribe create <name> --no-hooks` | Create without running on-create hook |
-| `scribe open <name>` | cd into an existing worktree |
-| `scribe open --all` | Open all worktrees in new terminal tabs |
-| `scribe list` | List worktrees in `.worktrees/` |
-| `scribe list --all` | List all git worktrees |
-| `scribe remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
-| `scribe exit [--force]` | Exit current worktree (removes it, returns to base) |
-| `scribe health` | Show terminal detection and dependency status |
-| `scribe config` | Show config for current repo |
-| `scribe config base <branch>` | Set base branch for current repo |
-| `scribe config base --global <branch>` | Set global default base branch |
-| `scribe config on-create <cmd>` | Set on-create hook for current repo |
-| `scribe config on-create --unset` | Remove on-create hook |
-| `scribe config --list` | List all configuration |
-| `scribe spawn <name> [options]` | Create worktree + launch Claude in tmux |
-| `scribe spawn --context <text>` | Provide task context for Claude |
-| `scribe spawn --auto` | Auto-start Claude with full prompt |
-| `scribe ps` | Show status of spawned sessions |
-| `scribe attach [name]` | Attach to tmux session (optionally to specific window) |
-| `scribe review <name>` | Show diff for parent review |
-| `scribe merge <name>` | Merge reviewed worktree into current branch |
-| `scribe kill <name>` | Kill a running tmux window |
-| `scribe init [--force] [--backup]` | Initialize scribe.toml, docs/, issues/, and .claude/ |
-| `scribe update` | Show update instructions |
-| `scribe version` | Show version |
-| `scribe which` | Show path to scribe executable |
-
-**Short alias:** `sc` is available as an alias for `scribe` (e.g., `sc ps`, `sc create foo`).
+| `jig create <name> [branch]` | Create a worktree with a new branch |
+| `jig create <name> -o` | Create and cd into the worktree |
+| `jig create <name> --no-hooks` | Create without running on-create hook |
+| `jig open <name>` | cd into an existing worktree |
+| `jig open --all` | Open all worktrees in new terminal tabs |
+| `jig list` | List worktrees in `.worktrees/` |
+| `jig list --all` | List all git worktrees |
+| `jig remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
+| `jig exit [--force]` | Exit current worktree (removes it, returns to base) |
+| `jig health` | Show terminal detection and dependency status |
+| `jig config` | Show config for current repo |
+| `jig config base <branch>` | Set base branch for current repo |
+| `jig config base --global <branch>` | Set global default base branch |
+| `jig config on-create <cmd>` | Set on-create hook for current repo |
+| `jig config on-create --unset` | Remove on-create hook |
+| `jig config --list` | List all configuration |
+| `jig spawn <name> [options]` | Create worktree + launch Claude in tmux |
+| `jig spawn --context <text>` | Provide task context for Claude |
+| `jig spawn --auto` | Auto-start Claude with full prompt |
+| `jig ps` | Show status of spawned sessions |
+| `jig attach [name]` | Attach to tmux session (optionally to specific window) |
+| `jig review <name>` | Show diff for parent review |
+| `jig merge <name>` | Merge reviewed worktree into current branch |
+| `jig kill <name>` | Kill a running tmux window |
+| `jig init [--force] [--backup]` | Initialize jig.toml, docs/, issues/, and .claude/ |
+| `jig update` | Show update instructions |
+| `jig version` | Show version |
+| `jig which` | Show path to jig executable |
 
 ## Quick Start
 
 ```bash
 cd ~/projects/my-app
-scribe create feature-auth -o    # Creates worktree, cd's into it
-claude                           # Start Claude Code in isolation
+jig create feature-auth -o    # Creates worktree, cd's into it
+claude                        # Start Claude Code in isolation
 ```
 
 Open a second terminal and do the same — both sessions work independently on their own branches.
@@ -77,9 +75,9 @@ Open a second terminal and do the same — both sessions work independently on t
 
 - [Working with Worktrees](docs/usage/worktrees.md) — Create, open, remove, glob patterns, terminal tabs
 - [Configuration and Hooks](docs/usage/configuration.md) — Base branch, config file format, on-create hooks
-- [Setting Up a Repo with `scribe init`](docs/usage/init.md) — Bootstrap docs, skills, and permissions
+- [Setting Up a Repo with `jig init`](docs/usage/init.md) — Bootstrap docs, skills, and permissions
 - [Multi-Agent Orchestration](docs/usage/orchestration.md) — Spawn parallel Claude workers with tmux
-- [Shell Integration](docs/usage/shell-integration.md) — Tab completion, how `-o` works, `scribe which`
+- [Shell Integration](docs/usage/shell-integration.md) — Tab completion, how `-o` works, `jig which`
 
 ## Development
 
@@ -87,7 +85,7 @@ Build from source:
 
 ```bash
 cargo build --release
-./target/release/scribe --help
+./target/release/jig --help
 ```
 
 Run tests:
@@ -101,21 +99,20 @@ cargo test
 Reinstall from the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/amiller68/scribe-rs/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash
 ```
 
 Or rebuild from source:
 
 ```bash
-cargo install --git https://github.com/amiller68/scribe-rs
+cargo install --git https://github.com/amiller68/jig
 ```
 
 ## Uninstall
 
 ```bash
-rm ~/.local/bin/scribe
-rm ~/.local/bin/sc
-rm -rf ~/.config/scribe
+rm ~/.local/bin/jig
+rm -rf ~/.config/jig
 # Remove eval line from ~/.bashrc and ~/.zshrc
 ```
 
@@ -124,7 +121,7 @@ rm -rf ~/.config/scribe
 - Git
 - Bash or Zsh
 
-**For `scribe spawn` (optional):**
+**For `jig spawn` (optional):**
 - `tmux` - Terminal multiplexer
 - `claude` CLI
 

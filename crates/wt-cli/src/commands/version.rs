@@ -6,7 +6,7 @@ use colored::Colorize;
 pub fn run() -> Result<()> {
     eprintln!(
         "{} {}",
-        "scribe".bold(),
+        "jig".bold(),
         env!("CARGO_PKG_VERSION").cyan()
     );
     Ok(())

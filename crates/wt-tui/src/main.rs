@@ -1,4 +1,4 @@
-//! scribe-tui - Terminal UI for managing Claude Code sessions
+//! jig-tui - Terminal UI for managing Claude Code sessions
 //!
 //! This provides a visual dashboard for:
 //! - Viewing all spawned workers and their status
@@ -20,13 +20,13 @@ fn main() -> Result<()> {
         )
         .init();
 
-    eprintln!("scribe-tui is a placeholder. TUI implementation coming soon.");
+    eprintln!("jig-tui is a placeholder. TUI implementation coming soon.");
     eprintln!();
     eprintln!("For now, use:");
-    eprintln!("  scribe ps       - show worker status");
-    eprintln!("  scribe attach   - attach to tmux session");
-    eprintln!("  scribe review   - review a worker's diff");
-    eprintln!("  scribe status   - show detailed worker info");
+    eprintln!("  jig ps       - show worker status");
+    eprintln!("  jig attach   - attach to tmux session");
+    eprintln!("  jig review   - review a worker's diff");
+    eprintln!("  jig status   - show detailed worker info");
 
     Ok(())
 }

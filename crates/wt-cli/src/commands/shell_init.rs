@@ -3,10 +3,10 @@
 use anyhow::Result;
 
 const BASH_INIT: &str = r#"
-# scribe shell integration for bash
-scribe() {
+# jig shell integration for bash
+jig() {
     local output
-    output=$(command scribe "$@")
+    output=$(command jig "$@")
     local exit_code=$?
 
     # Check if output starts with 'cd ' - if so, eval it
@@ -17,19 +17,14 @@ scribe() {
     fi
 
     return $exit_code
-}
-
-# Short alias
-sc() {
-    scribe "$@"
 }
 "#;
 
 const ZSH_INIT: &str = r#"
-# scribe shell integration for zsh
-scribe() {
+# jig shell integration for zsh
+jig() {
     local output
-    output=$(command scribe "$@")
+    output=$(command jig "$@")
     local exit_code=$?
 
     # Check if output starts with 'cd ' - if so, eval it
@@ -41,17 +36,12 @@ scribe() {
 
     return $exit_code
 }
-
-# Short alias
-sc() {
-    scribe "$@"
-}
 "#;
 
 const FISH_INIT: &str = r#"
-# scribe shell integration for fish
-function scribe
-    set -l output (command scribe $argv)
+# jig shell integration for fish
+function jig
+    set -l output (command jig $argv)
     set -l exit_code $status
 
     # Check if output starts with 'cd ' - if so, eval it
@@ -62,11 +52,6 @@ function scribe
     end
 
     return $exit_code
-end
-
-# Short alias
-function sc
-    scribe $argv
 end
 "#;
 

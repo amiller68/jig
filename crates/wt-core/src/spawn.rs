@@ -48,7 +48,7 @@ pub fn get_session_name() -> Result<String> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
-    Ok(format!("scribe-{}", name))
+    Ok(format!("jig-{}", name))
 }
 
 /// Register a new spawn (creates worker state)

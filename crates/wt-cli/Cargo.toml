@@ -1,13 +1,13 @@
 [package]
 name = "wt-cli"
-description = "CLI for scribe - git worktree manager for parallel Claude Code sessions"
+description = "CLI for jig - git worktree manager for parallel Claude Code sessions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "scribe"
+name = "jig"
 path = "src/main.rs"
 
 [dependencies]

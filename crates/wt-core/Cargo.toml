@@ -1,6 +1,6 @@
 [package]
 name = "wt-core"
-description = "Core library for scribe - worktree operations, state, git, config"
+description = "Core library for jig - worktree operations, state, git, config"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

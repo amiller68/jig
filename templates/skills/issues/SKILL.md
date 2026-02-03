@@ -15,7 +15,7 @@ allowed-tools:
 
 Discover and manage work items for the project.
 
-Run this command to explore what needs to be done before spawning workers with `/scribe`.
+Run this command to explore what needs to be done before spawning workers with `/jig`.
 
 ## Actions
 

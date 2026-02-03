@@ -2,10 +2,10 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "scribe",
+    name = "jig",
     about = "Git worktree manager for parallel Claude Code sessions",
     version,
-    after_help = "Use 'scribe <command> --help' for more information about a command."
+    after_help = "Use 'jig <command> --help' for more information about a command."
 )]
 pub struct Cli {
     /// Open/cd into worktree after creating
@@ -124,7 +124,7 @@ pub enum Commands {
         name: String,
     },
 
-    /// Initialize repository for scribe
+    /// Initialize repository for jig
     Init {
         /// Reinitialize, overwriting existing files
         #[arg(long, short)]
@@ -139,7 +139,7 @@ pub enum Commands {
         audit: bool,
     },
 
-    /// Update scribe to latest version
+    /// Update jig to latest version
     Update {
         /// Force update, discarding local changes
         #[arg(long, short)]
@@ -149,7 +149,7 @@ pub enum Commands {
     /// Show version information
     Version,
 
-    /// Show path to scribe executable
+    /// Show path to jig executable
     Which,
 
     /// Show terminal and dependency status

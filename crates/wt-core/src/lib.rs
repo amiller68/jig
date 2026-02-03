@@ -1,6 +1,6 @@
-//! wt-core - Core library for scribe
+//! wt-core - Core library for jig
 //!
-//! This crate provides the core functionality for scribe:
+//! This crate provides the core functionality for jig:
 //! - Git worktree operations
 //! - Configuration management
 //! - Worker state management
@@ -17,7 +17,7 @@ pub mod terminal;
 pub mod worker;
 pub mod worktree;
 
-pub use config::{Config, RepoConfig, ScribeToml};
+pub use config::{Config, JigToml, RepoConfig};
 pub use error::{Error, Result};
 pub use state::OrchestratorState;
 pub use worker::{DiffStats, FileDiff, TaskContext, Worker, WorkerId, WorkerStatus};

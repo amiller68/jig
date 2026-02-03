@@ -1,13 +1,13 @@
 [package]
 name = "wt-tui"
-description = "TUI for scribe - visual dashboard for managing Claude Code sessions"
+description = "TUI for jig - visual dashboard for managing Claude Code sessions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "scribe-tui"
+name = "jig-tui"
 path = "src/main.rs"
 
 [dependencies]

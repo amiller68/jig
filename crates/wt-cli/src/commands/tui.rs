@@ -4,8 +4,8 @@ use anyhow::Result;
 use std::process::Command;
 
 pub fn run() -> Result<()> {
-    // Try to find and launch scribe-tui
-    let status = Command::new("scribe-tui").status();
+    // Try to find and launch jig-tui
+    let status = Command::new("jig-tui").status();
 
     match status {
         Ok(exit_status) => {
@@ -15,10 +15,10 @@ pub fn run() -> Result<()> {
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("scribe-tui is not installed.");
+            eprintln!("jig-tui is not installed.");
             eprintln!();
             eprintln!("Install it with:");
-            eprintln!("  cargo install --git https://github.com/amiller68/scribe-rs scribe-tui");
+            eprintln!("  cargo install --git https://github.com/amiller68/jig jig-tui");
             std::process::exit(1);
         }
         Err(e) => Err(e.into()),

@@ -1,4 +1,4 @@
-//! Init command - initialize repository for scribe
+//! Init command - initialize repository for jig
 
 use anyhow::Result;
 use colored::Colorize;
@@ -7,7 +7,7 @@ use std::path::Path;
 
 use wt_core::{config, git, Error};
 
-const SCRIBE_TOML_CONTENT: &str = r#"[spawn]
+const JIG_TOML_CONTENT: &str = r#"[spawn]
 auto = false
 "#;
 
@@ -34,7 +34,7 @@ Guide for AI agents and developers working on this project.
 
 const DOCS_INDEX_TEMPLATE: &str = r#"# Agent Instructions
 
-Instructions for spawned Claude Code workers (via `scribe spawn`).
+Instructions for spawned Claude Code workers (via `jig spawn`).
 
 ## Task Guidelines
 
@@ -109,11 +109,11 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
     let repo = git::get_base_repo()?;
 
     // Check if already initialized
-    if config::has_scribe_toml()? && !force {
+    if config::has_jig_toml()? && !force {
         return Err(Error::AlreadyInitialized.into());
     }
 
-    eprintln!("{} Initializing scribe in {}", "→".cyan(), repo.display());
+    eprintln!("{} Initializing jig in {}", "→".cyan(), repo.display());
 
     // Create directories
     let dirs = ["docs", "issues", ".claude/skills"];
@@ -125,8 +125,8 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
         }
     }
 
-    // Write scribe.toml
-    write_file(&repo.join("scribe.toml"), SCRIBE_TOML_CONTENT, force, backup)?;
+    // Write jig.toml
+    write_file(&repo.join("jig.toml"), JIG_TOML_CONTENT, force, backup)?;
 
     // Write CLAUDE.md
     write_file(&repo.join("CLAUDE.md"), CLAUDE_MD_TEMPLATE, force, backup)?;

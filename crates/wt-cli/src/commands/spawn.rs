@@ -49,8 +49,8 @@ pub fn run(name: &str, context: Option<&str>, auto: bool) -> Result<()> {
     let use_auto = if auto {
         true
     } else {
-        // Check scribe.toml for spawn.auto setting
-        config::read_scribe_toml()?
+        // Check jig.toml for spawn.auto setting
+        config::read_jig_toml()?
             .map(|c| c.spawn.auto)
             .unwrap_or(false)
     };
@@ -73,8 +73,8 @@ pub fn run(name: &str, context: Option<&str>, auto: bool) -> Result<()> {
     }
 
     eprintln!();
-    eprintln!("  Use '{}' to attach", format!("scribe attach {}", name).cyan());
-    eprintln!("  Use '{}' to check status", "scribe ps".cyan());
+    eprintln!("  Use '{}' to attach", format!("jig attach {}", name).cyan());
+    eprintln!("  Use '{}' to check status", "jig ps".cyan());
 
     Ok(())
 }

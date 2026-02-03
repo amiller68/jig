@@ -16,10 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Configure git
         run: |
           git config --global user.email "test@example.com"
           git config --global user.name "Test User"
 
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --all-targets
+
       - name: Run tests
-        run: ./test.sh
+        run: cargo test --all-targets

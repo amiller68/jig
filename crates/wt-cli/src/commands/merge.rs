@@ -40,7 +40,7 @@ pub fn run(name: &str) -> Result<()> {
     eprintln!(
         "  {} Remove worktree with: {}",
         "→".dimmed(),
-        format!("scribe remove {}", name).cyan()
+        format!("jig remove {}", name).cyan()
     );
 
     Ok(())

@@ -1,7 +1,7 @@
 //! Configuration management
 //!
-//! Handles both file-based user config (~/.config/scribe/config) and
-//! repository config (scribe.toml).
+//! Handles both file-based user config (~/.config/jig/config) and
+//! repository config (jig.toml).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,12 +47,12 @@ impl Config {
     /// Get the config directory path
     pub fn config_dir() -> Result<PathBuf> {
         let config_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            PathBuf::from(xdg).join("scribe")
+            PathBuf::from(xdg).join("jig")
         } else {
             dirs::home_dir()
                 .ok_or_else(|| Error::Custom("Could not find home directory".to_string()))?
                 .join(".config")
-                .join("scribe")
+                .join("jig")
         };
 
         Ok(config_dir)
@@ -235,28 +235,28 @@ pub fn run_on_create_hook(hook: &str, dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
-/// ScribeToml configuration from scribe.toml
+/// JigToml configuration from jig.toml
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct ScribeToml {
+pub struct JigToml {
     #[serde(default)]
     pub spawn: SpawnConfig,
 }
 
-/// Spawn configuration in scribe.toml
+/// Spawn configuration in jig.toml
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SpawnConfig {
     #[serde(default)]
     pub auto: bool,
 }
 
-impl ScribeToml {
-    /// Read scribe.toml from a repository (falls back to wt.toml for compatibility)
+impl JigToml {
+    /// Read jig.toml from a repository (falls back to wt.toml for compatibility)
     pub fn load(repo_root: &Path) -> Result<Option<Self>> {
-        // Try scribe.toml first
-        let toml_path = repo_root.join("scribe.toml");
+        // Try jig.toml first
+        let toml_path = repo_root.join("jig.toml");
         if toml_path.exists() {
             let content = fs::read_to_string(&toml_path)?;
-            let config: ScribeToml = toml::from_str(&content)?;
+            let config: JigToml = toml::from_str(&content)?;
             return Ok(Some(config));
         }
 
@@ -264,16 +264,16 @@ impl ScribeToml {
         let legacy_path = repo_root.join("wt.toml");
         if legacy_path.exists() {
             let content = fs::read_to_string(&legacy_path)?;
-            let config: ScribeToml = toml::from_str(&content)?;
+            let config: JigToml = toml::from_str(&content)?;
             return Ok(Some(config));
         }
 
         Ok(None)
     }
 
-    /// Check if scribe.toml (or wt.toml) exists
+    /// Check if jig.toml (or wt.toml) exists
     pub fn exists(repo_root: &Path) -> bool {
-        repo_root.join("scribe.toml").exists() || repo_root.join("wt.toml").exists()
+        repo_root.join("jig.toml").exists() || repo_root.join("wt.toml").exists()
     }
 }
 
@@ -284,10 +284,10 @@ pub fn get_base_branch() -> Result<String> {
     Ok(config.get_base_branch(&repo_path))
 }
 
-/// Read scribe.toml from current repository (convenience function)
-pub fn read_scribe_toml() -> Result<Option<ScribeToml>> {
+/// Read jig.toml from current repository (convenience function)
+pub fn read_jig_toml() -> Result<Option<JigToml>> {
     let repo_root = crate::git::get_base_repo()?;
-    ScribeToml::load(&repo_root)
+    JigToml::load(&repo_root)
 }
 
 /// Run on-create hook if configured for current repo (convenience function)
@@ -405,8 +405,8 @@ pub fn get_on_create_hook() -> Result<Option<String>> {
     Ok(config.get_on_create_hook(&repo_path))
 }
 
-/// Check if scribe.toml exists in current repo
-pub fn has_scribe_toml() -> Result<bool> {
+/// Check if jig.toml exists in current repo
+pub fn has_jig_toml() -> Result<bool> {
     let repo_root = crate::git::get_base_repo()?;
-    Ok(ScribeToml::exists(&repo_root))
+    Ok(JigToml::exists(&repo_root))
 }

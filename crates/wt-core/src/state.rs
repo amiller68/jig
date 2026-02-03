@@ -31,7 +31,7 @@ impl OrchestratorState {
     /// Create a new orchestrator state
     pub fn new(repo_root: PathBuf, config: RepoConfig) -> Self {
         let tmux_session = format!(
-            "scribe-{}",
+            "jig-{}",
             repo_root
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -150,7 +150,7 @@ mod tests {
         );
 
         assert_eq!(state.version, STATE_VERSION);
-        assert_eq!(state.tmux_session, "scribe-project");
+        assert_eq!(state.tmux_session, "jig-project");
         assert!(state.workers.is_empty());
     }
 
@@ -166,7 +166,7 @@ mod tests {
             PathBuf::from("/home/user/project/.worktrees/test-worker"),
             "test-worker".to_string(),
             "main".to_string(),
-            "scribe-project".to_string(),
+            "jig-project".to_string(),
         );
 
         let id = worker.id;

@@ -1,4 +1,4 @@
-//! scribe CLI - Git worktree manager for parallel Claude Code sessions
+//! jig CLI - Git worktree manager for parallel Claude Code sessions
 
 mod cli;
 mod commands;
@@ -72,11 +72,10 @@ fn run() -> Result<()> {
 }
 
 fn print_help() {
-    eprintln!("{}", "scribe - Git worktree manager".bold());
+    eprintln!("{}", "jig - Git worktree manager".bold());
     eprintln!();
     eprintln!("{}", "USAGE:".bold());
-    eprintln!("  scribe <COMMAND> [OPTIONS]");
-    eprintln!("  sc <COMMAND> [OPTIONS]  (alias)");
+    eprintln!("  jig <COMMAND> [OPTIONS]");
     eprintln!();
     eprintln!("{}", "WORKTREE COMMANDS:".bold());
     eprintln!("  {}      Create a new worktree", "create".cyan());
@@ -107,10 +106,10 @@ fn print_help() {
     eprintln!("  {}         Launch the terminal UI", "tui".cyan());
     eprintln!();
     eprintln!("{}", "UTILITY:".bold());
-    eprintln!("  {}        Initialize repository for scribe", "init".cyan());
-    eprintln!("  {}      Update scribe to latest version", "update".cyan());
+    eprintln!("  {}        Initialize repository for jig", "init".cyan());
+    eprintln!("  {}      Update jig to latest version", "update".cyan());
     eprintln!("  {}     Show version information", "version".cyan());
-    eprintln!("  {}       Show path to scribe executable", "which".cyan());
+    eprintln!("  {}       Show path to jig executable", "which".cyan());
     eprintln!("  {}      Show terminal and dependency status", "health".cyan());
     eprintln!();
     eprintln!("{}", "GLOBAL OPTIONS:".bold());
@@ -122,6 +121,6 @@ fn print_help() {
     eprintln!();
     eprintln!(
         "Use '{}' for more information about a command.",
-        "scribe <command> --help".cyan()
+        "jig <command> --help".cyan()
     );
 }
