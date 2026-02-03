@@ -1,21 +1,21 @@
 # Project Guide
 
-Guide for AI agents and developers working on scribe - a git worktree manager.
+Guide for AI agents and developers working on jig - a git worktree manager.
 
 ## Project Overview
 
-`scribe` is a Rust CLI tool for managing git worktrees, designed for parallel Claude Code sessions.
+`jig` is a Rust CLI tool for managing git worktrees, designed for parallel Claude Code sessions.
 
 ## Key Files
 
 **Rust crates:**
-- `crates/wt-core/` — Core library (git ops, config, state, spawn)
-- `crates/wt-cli/` — CLI binary (`scribe`)
-- `crates/wt-tui/` — TUI binary (`scribe-tui`, placeholder)
+- `crates/jig-core/` — Core library (git ops, config, state, spawn)
+- `crates/jig-cli/` — CLI binary (`jig`)
+- `crates/jig-tui/` — TUI binary (`jig-tui`, placeholder)
 
 **Configuration:**
 - `Cargo.toml` — Workspace configuration
-- `scribe.toml` — Per-repo spawn configuration
+- `jig.toml` — Per-repo spawn configuration
 
 **Templates:**
 - `templates/skills/` — Claude Code skills for init

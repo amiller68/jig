@@ -1,31 +1,31 @@
 # Agent Instructions
 
-You are working on `scribe` — a Rust CLI for managing git worktrees, designed for parallel Claude Code sessions.
+You are working on `jig` — a Rust CLI for managing git worktrees, designed for parallel Claude Code sessions.
 
 ## Key Files
 
 ```
 crates/
-├── wt-core/           # Core library
+├── jig-core/          # Core library
 │   └── src/
-│       ├── config.rs   # Config management (scribe.toml, ~/.config/scribe/)
+│       ├── config.rs   # Config management (jig.toml, ~/.config/jig/)
 │       ├── git.rs      # Git operations (worktrees, branches)
 │       ├── spawn.rs    # Spawn state tracking
 │       ├── session.rs  # tmux session/window management
 │       ├── state.rs    # Persistent orchestrator state
 │       └── worker.rs   # Worker/task model
-├── wt-cli/            # CLI binary (scribe)
+├── jig-cli/           # CLI binary (jig)
 │   └── src/
 │       ├── cli.rs      # Command definitions (clap)
 │       └── commands/   # Command handlers
-└── wt-tui/            # TUI binary (placeholder)
+└── jig-tui/           # TUI binary (placeholder)
 templates/
 ├── skills/            # Claude Code skills for init
 │   ├── check/         # /check skill
 │   ├── draft/         # /draft skill
 │   ├── issues/        # /issues skill
 │   ├── review/        # /review skill
-│   └── scribe/        # /scribe skill
+│   └── jig/           # /jig skill
 └── CLAUDE.md          # Project guide template
 tests/                 # Integration tests
 ```
@@ -55,16 +55,16 @@ cargo fmt                # Format
 | `review` | Show diff for spawned worktree |
 | `merge` | Merge spawned work into current branch |
 | `kill` | Kill a spawned tmux window |
-| `init` | Initialize scribe config for a repo |
+| `init` | Initialize jig config for a repo |
 | `health` | Check dependencies and config |
 | `shell-init` | Print shell integration code |
 
 ## Architecture
 
 - **Worktrees** live in `.worktrees/` (auto-excluded via `.git/info/exclude`)
-- **Config** stored in `~/.config/scribe/config`
-- **Spawn state** tracked in `.worktrees/.wt-state.json`
-- **tmux** manages spawned sessions: `scribe-<reponame>` session, one window per task
+- **Config** stored in `~/.config/jig/config`
+- **Spawn state** tracked in `.worktrees/.jig-state.json`
+- **tmux** manages spawned sessions: `jig-<reponame>` session, one window per task
 - **Shell integration**: wrapper function evals `cd` commands from stdout
 - **stdout** is reserved for eval-able output — all user-facing messages go to stderr
 

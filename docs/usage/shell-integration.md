@@ -1,6 +1,6 @@
 # Shell Integration
 
-How `scribe` integrates with your shell — tab completion, directory changing, and troubleshooting.
+How `jig` integrates with your shell — tab completion, directory changing, and troubleshooting.
 
 ## Setup
 
@@ -8,17 +8,17 @@ Add shell integration to your profile:
 
 ```bash
 # For bash (~/.bashrc)
-eval "$(scribe shell-init bash)"
+eval "$(jig shell-init bash)"
 
 # For zsh (~/.zshrc)
-eval "$(scribe shell-init zsh)"
+eval "$(jig shell-init zsh)"
 
 # For fish (~/.config/fish/config.fish)
-eval (scribe shell-init fish)
+eval (jig shell-init fish)
 ```
 
 This enables:
-- The `scribe` command with directory-changing support
+- The `jig` command with directory-changing support
 - The `sc` short alias
 - Tab completion for both
 
@@ -27,41 +27,41 @@ This enables:
 Both bash and zsh get tab completion:
 
 ```bash
-scribe <TAB>           # Shows: create list open remove exit config spawn ps...
-scribe open <TAB>      # Shows available worktrees
-scribe remove <TAB>    # Shows available worktrees
-scribe config <TAB>    # Shows: base on-create --list
+jig <TAB>           # Shows: create list open remove exit config spawn ps...
+jig open <TAB>      # Shows available worktrees
+jig remove <TAB>    # Shows available worktrees
+jig config <TAB>    # Shows: base on-create --list
 sc <TAB>               # Same completions work with the alias
 ```
 
 ## How the `-o` Flag Works
 
-The `scribe` shell function wraps the underlying binary. When you use `open` or the `-o` flag, the binary outputs a `cd` command that the shell function `eval`s:
+The `jig` shell function wraps the underlying binary. When you use `open` or the `-o` flag, the binary outputs a `cd` command that the shell function `eval`s:
 
 ```bash
 # What happens internally:
-scribe open my-feature  # outputs: cd "/path/to/.worktrees/my-feature"
+jig open my-feature  # outputs: cd "/path/to/.worktrees/my-feature"
 eval "cd ..."           # shell function evals it
 ```
 
-This is why `scribe open` can change your current directory — it's a shell function, not just an external binary.
+This is why `jig open` can change your current directory — it's a shell function, not just an external binary.
 
 ## The `sc` Alias
 
-`sc` is a short alias for `scribe`:
+`sc` is a short alias for `jig`:
 
 ```bash
-sc create feature-auth -o    # Same as: scribe create feature-auth -o
-sc ps                        # Same as: scribe ps
-sc open my-feature           # Same as: scribe open my-feature
+sc create feature-auth -o    # Same as: jig create feature-auth -o
+sc ps                        # Same as: jig ps
+sc open my-feature           # Same as: jig open my-feature
 ```
 
-The alias supports the same tab completion as `scribe`.
+The alias supports the same tab completion as `jig`.
 
 ## Finding the Binary
 
-Since `scribe` is a shell function (required for `cd` functionality), `which scribe` shows the function definition instead of a path. Use this instead:
+Since `jig` is a shell function (required for `cd` functionality), `which jig` shows the function definition instead of a path. Use this instead:
 
 ```bash
-scribe which    # Shows path to the scribe executable
+jig which    # Shows path to the jig executable
 ```

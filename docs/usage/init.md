@@ -1,13 +1,13 @@
-# Setting Up a Repo with `scribe init`
+# Setting Up a Repo with `jig init`
 
-`scribe init` bootstraps a repository for use with `scribe` and Claude Code. It creates project documentation, skills, sensible permissions, and issue tracking — everything an AI coding agent needs to be productive from the start.
+`jig init` bootstraps a repository for use with `jig` and Claude Code. It creates project documentation, skills, sensible permissions, and issue tracking — everything an AI coding agent needs to be productive from the start.
 
 ## New Repo
 
 ```bash
 mkdir my-project && cd my-project
 git init
-scribe init
+jig init
 ```
 
 This creates:
@@ -15,7 +15,7 @@ This creates:
 ```
 my-project/
 ├── CLAUDE.md                 # Project guide — points Claude at docs/
-├── scribe.toml               # scribe spawn configuration
+├── jig.toml                  # jig spawn configuration
 ├── docs/
 │   ├── index.md              # Agent instructions (key files, conventions, how to build/test)
 │   └── issue-tracking.md     # File-based issue tracking convention
@@ -27,7 +27,7 @@ my-project/
         ├── draft/            # /draft — push and create draft PR
         ├── issues/           # /issues — discover and manage work items
         ├── review/           # /review — review branch changes
-        └── scribe/           # /scribe — orchestrate parallel workers
+        └── jig/              # /jig — orchestrate parallel workers
 ```
 
 After init, edit `docs/index.md` with your project's specifics — key files, build commands, conventions. This is what every spawned worker reads first.
@@ -36,36 +36,36 @@ After init, edit `docs/index.md` with your project's specifics — key files, bu
 
 ```bash
 cd ~/projects/my-app
-scribe init
+jig init
 ```
 
 If files already exist (`CLAUDE.md`, `docs/`, `.claude/`), init skips them. Use `--force` to overwrite:
 
 ```bash
-scribe init --force
+jig init --force
 ```
 
 ## Updating Templates with `--backup`
 
-When `scribe` ships new templates, apply them without losing your customizations:
+When `jig` ships new templates, apply them without losing your customizations:
 
 ```bash
-scribe init --force --backup
+jig init --force --backup
 ```
 
 This:
-1. **Backs up** your existing `CLAUDE.md`, `scribe.toml`, `docs/`, and `.claude/` to `.scribe-backup/`
+1. **Backs up** your existing `CLAUDE.md`, `jig.toml`, `docs/`, and `.claude/` to `.jig-backup/`
 2. **Overwrites** with fresh templates (`--force`)
 
 After verifying the result, remove the backup:
 
 ```bash
-rm -rf .scribe-backup/
+rm -rf .jig-backup/
 ```
 
 ## Iterating After Init
 
-`scribe init` is a first pass. The generated docs and skills are a starting point — you should iterate on them to match how your team actually works.
+`jig init` is a first pass. The generated docs and skills are a starting point — you should iterate on them to match how your team actually works.
 
 The fastest way to iterate is to work with Claude directly:
 
@@ -129,7 +129,7 @@ Permissions for Claude Code. The defaults allow common safe operations (git, gh,
 
 Skills available in Claude Code sessions via slash commands. The defaults are generic — tailor them to your project (e.g., replacing multi-language detection in `/check` with your actual `npm test` or `cargo test`).
 
-### `scribe.toml`
+### `jig.toml`
 
 Spawn configuration:
 
@@ -147,6 +147,6 @@ Convention for file-based issue tracking in `issues/`. If you use Linear, Jira, 
 | Flag | Description |
 |------|-------------|
 | `--force` | Overwrite existing files |
-| `--backup` | Save existing files to `.scribe-backup/` before overwriting |
+| `--backup` | Save existing files to `.jig-backup/` before overwriting |
 
-Flags combine: `scribe init --force --backup` is the recommended way to apply template updates.
+Flags combine: `jig init --force --backup` is the recommended way to apply template updates.

@@ -6,15 +6,15 @@ Create isolated worktrees for parallel development — each gets its own branch 
 
 ```bash
 cd ~/projects/my-app
-scribe create feature-auth -o    # Creates worktree, cd's into it
+jig create feature-auth -o    # Creates worktree, cd's into it
 claude                           # Start Claude Code
 ```
 
 The `-o` flag can be placed anywhere:
 
 ```bash
-scribe -o create feature-auth    # Same as above
-scribe create -o feature-auth    # Also works
+jig -o create feature-auth    # Same as above
+jig create -o feature-auth    # Also works
 ```
 
 ## Parallel Sessions
@@ -24,14 +24,14 @@ Each worktree is independent. Run multiple Claude Code sessions side by side:
 Terminal 1:
 ```bash
 cd ~/projects/my-app
-scribe create feature-auth -o
+jig create feature-auth -o
 claude
 ```
 
 Terminal 2:
 ```bash
 cd ~/projects/my-app
-scribe create fix-bug-123 -o
+jig create fix-bug-123 -o
 claude
 ```
 
@@ -42,13 +42,13 @@ Both instances work independently with their own branches.
 Open every worktree in a new terminal tab:
 
 ```bash
-scribe open --all
+jig open --all
 ```
 
 This detects your terminal emulator and opens each worktree in a new tab. Check compatibility with:
 
 ```bash
-scribe health
+jig health
 ```
 
 **Supported terminals:**
@@ -67,7 +67,7 @@ scribe health
 Create a worktree using a branch that already exists:
 
 ```bash
-scribe create my-worktree existing-branch
+jig create my-worktree existing-branch
 ```
 
 ## Nested Paths
@@ -75,16 +75,16 @@ scribe create my-worktree existing-branch
 Branch names with slashes create nested directories:
 
 ```bash
-scribe create feature/auth/oauth -o
+jig create feature/auth/oauth -o
 # Creates .worktrees/feature/auth/oauth/
 ```
 
 ## Remove with Glob Patterns
 
 ```bash
-scribe remove test1              # Remove exact match
-scribe remove 'test*'            # Remove all starting with "test"
-scribe remove 'feature/*'        # Remove all under feature/
+jig remove test1              # Remove exact match
+jig remove 'test*'            # Remove all starting with "test"
+jig remove 'feature/*'        # Remove all under feature/
 ```
 
 ## How It Works

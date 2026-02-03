@@ -6,7 +6,7 @@ Implement a per-worktree worker protocol for better status tracking and task com
 
 ## Current State
 
-Currently, worker status is tracked centrally in `.worktrees/.wt-state.json` and status is inferred from tmux process state. This doesn't allow workers to communicate back to the orchestrator.
+Currently, worker status is tracked centrally in `.worktrees/.jig-state.json` and status is inferred from tmux process state. This doesn't allow workers to communicate back to the orchestrator.
 
 ## Proposed Design
 
@@ -16,7 +16,7 @@ Each spawned worktree would have:
 
 ```
 .worktrees/<name>/
-├── .scribe/
+├── .jig/
 │   ├── task.md         # Task context written by orchestrator
 │   └── status.json     # Status written by worker
 ```
@@ -72,10 +72,10 @@ Written by worker to communicate state:
 
 ## Implementation
 
-1. Update `scribe spawn` to write `task.md` from `--context`
-2. Update `scribe ps` to read `status.json` for rich status display
-3. Create `/scribe` skill instructions for workers to update `status.json`
-4. Add `scribe status <name>` for detailed worker status
+1. Update `jig spawn` to write `task.md` from `--context`
+2. Update `jig ps` to read `status.json` for rich status display
+3. Create `/jig` skill instructions for workers to update `status.json`
+4. Add `jig status <name>` for detailed worker status
 
 ## Benefits
 

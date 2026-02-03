@@ -8,22 +8,22 @@ By default, new branches are created from `origin/main`. Override this per-repo 
 
 ```bash
 # Set base branch for current repo
-scribe config base origin/develop
+jig config base origin/develop
 
 # Set global default (used when no repo config exists)
-scribe config base --global origin/main
+jig config base --global origin/main
 
 # View current config
-scribe config
+jig config
 
 # List all configuration
-scribe config --list
+jig config --list
 
 # Unset repo config
-scribe config base --unset
+jig config base --unset
 
 # Unset global default
-scribe config base --global --unset
+jig config base --global --unset
 ```
 
 **Resolution order:**
@@ -33,14 +33,14 @@ scribe config base --global --unset
 
 ## Config File Format
 
-Configuration is stored in `~/.config/scribe/config` (follows XDG spec). The file uses simple `key=value` pairs, one per line:
+Configuration is stored in `~/.config/jig/config` (follows XDG spec). The file uses simple `key=value` pairs, one per line:
 
 ```bash
 # View config file
-cat ~/.config/scribe/config
+cat ~/.config/jig/config
 
 # Edit manually
-$EDITOR ~/.config/scribe/config
+$EDITOR ~/.config/jig/config
 ```
 
 **Format reference:**
@@ -72,16 +72,16 @@ Run commands automatically when creating worktrees. Useful for installing depend
 
 ```bash
 # Set on-create hook for current repo
-scribe config on-create 'pnpm install'
+jig config on-create 'pnpm install'
 
 # View current hook
-scribe config on-create
+jig config on-create
 
 # Create without running hook
-scribe create feature-branch --no-hooks
+jig create feature-branch --no-hooks
 
 # Unset hook
-scribe config on-create --unset
+jig config on-create --unset
 ```
 
 Hooks run in the new worktree directory after creation. If a hook fails, a warning is displayed but the worktree remains usable.
@@ -89,8 +89,8 @@ Hooks run in the new worktree directory after creation. If a hook fails, a warni
 **Examples:**
 
 ```bash
-scribe config on-create 'npm install'           # Node.js project
-scribe config on-create 'uv sync'               # Python UV project
-scribe config on-create 'make install'          # Makefile-based project
-scribe config on-create 'bundle install'        # Ruby project
+jig config on-create 'npm install'           # Node.js project
+jig config on-create 'uv sync'               # Python UV project
+jig config on-create 'make install'          # Makefile-based project
+jig config on-create 'bundle install'        # Ruby project
 ```
