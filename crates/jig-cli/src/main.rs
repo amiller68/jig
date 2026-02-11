@@ -68,6 +68,7 @@ fn run() -> Result<()> {
         Some(Commands::Tui) => commands::tui(),
         Some(Commands::Status { name }) => commands::status(name.as_deref()),
         Some(Commands::ShellInit { shell }) => commands::shell_init(&shell),
+        Some(Commands::ShellSetup { dry_run }) => commands::shell_setup(dry_run),
     }
 }
 
@@ -114,6 +115,7 @@ fn print_help() {
         "  {}      Show terminal and dependency status",
         "health".cyan()
     );
+    eprintln!("  {} Configure shell integration", "shell-setup".cyan());
     eprintln!();
     eprintln!("{}", "GLOBAL OPTIONS:".bold());
     eprintln!(

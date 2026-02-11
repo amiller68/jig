@@ -564,6 +564,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
+ "dirs",
  "glob",
  "jig-core",
  "nix",

@@ -170,6 +170,14 @@ pub enum Commands {
         /// Shell type (bash, zsh, fish)
         shell: String,
     },
+
+    /// Automatically configure shell integration
+    #[command(name = "shell-setup")]
+    ShellSetup {
+        /// Show what would be done without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
