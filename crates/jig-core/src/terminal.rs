@@ -160,7 +160,6 @@ pub fn command_exists(cmd: &str) -> bool {
 pub struct DependencyStatus {
     pub name: String,
     pub available: bool,
-    pub required: bool,
 }
 
 /// Get all dependencies status
@@ -169,27 +168,14 @@ pub fn check_dependencies() -> Vec<DependencyStatus> {
         DependencyStatus {
             name: "git".to_string(),
             available: command_exists("git"),
-            required: true,
         },
         DependencyStatus {
             name: "tmux".to_string(),
             available: command_exists("tmux"),
-            required: false,
-        },
-        DependencyStatus {
-            name: "jq".to_string(),
-            available: command_exists("jq"),
-            required: false,
         },
         DependencyStatus {
             name: "claude".to_string(),
             available: command_exists("claude"),
-            required: false,
-        },
-        DependencyStatus {
-            name: "gh".to_string(),
-            available: command_exists("gh"),
-            required: false,
         },
     ]
 }
