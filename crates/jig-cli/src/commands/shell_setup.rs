@@ -67,8 +67,8 @@ fn detect_shell() -> Result<Shell> {
     })
 }
 
-fn find_path_line_end(content: &str) -> Option<usize> {
-    // Look for common PATH setup patterns and return position after the last one
+/// Returns the line number (0-indexed) of the last PATH-related line, if any
+fn find_last_path_line(content: &str) -> Option<usize> {
     let path_patterns = [
         "export PATH=",
         "PATH=",
@@ -84,25 +84,19 @@ fn find_path_line_end(content: &str) -> Option<usize> {
         "eval (brew shellenv)",
     ];
 
-    let mut last_path_end = None;
+    let mut last_path_line = None;
 
     for (i, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         for pattern in &path_patterns {
             if trimmed.contains(pattern) {
-                // Find the byte offset of the end of this line
-                let line_end = content
-                    .lines()
-                    .take(i + 1)
-                    .map(|l| l.len() + 1) // +1 for newline
-                    .sum::<usize>();
-                last_path_end = Some(line_end);
+                last_path_line = Some(i);
                 break;
             }
         }
     }
 
-    last_path_end
+    last_path_line
 }
 
 fn has_existing_integration(content: &str) -> bool {
@@ -149,10 +143,29 @@ pub fn run(dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    let new_content = if let Some(insert_pos) = find_path_line_end(&existing_content) {
+    // Create a backup before modifying
+    if config_path.exists() && !existing_content.is_empty() {
+        let backup_path = config_path.with_extension("bak");
+        fs::write(&backup_path, &existing_content)
+            .with_context(|| format!("Failed to create backup at {}", backup_path.display()))?;
+        println!("Created backup: {}", backup_path.display());
+    }
+
+    // Build new content using line-based approach (safer than byte slicing)
+    let new_content = if let Some(insert_after_line) = find_last_path_line(&existing_content) {
         // Insert after the last PATH-related line
-        let (before, after) = existing_content.split_at(insert_pos);
-        format!("{}\n{}{}", before.trim_end(), integration_block, after)
+        let lines: Vec<&str> = existing_content.lines().collect();
+        let before: Vec<&str> = lines[..=insert_after_line].to_vec();
+        let after: Vec<&str> = lines[insert_after_line + 1..].to_vec();
+
+        let mut result = before.join("\n");
+        result.push_str("\n\n");
+        result.push_str(&integration_block);
+        if !after.is_empty() {
+            result.push_str(&after.join("\n"));
+            result.push('\n');
+        }
+        result
     } else {
         // No PATH setup found, append to end
         if existing_content.is_empty() {
