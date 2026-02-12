@@ -1,5 +1,4 @@
 ---
-name: review
 description: Review branch changes against project conventions. Use when preparing to merge, checking code quality, or validating changes before PR.
 allowed-tools:
   - Bash(git diff:*)

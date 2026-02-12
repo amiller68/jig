@@ -2,12 +2,14 @@
 
 File-based issue tracking for AI agents and contributors.
 
-This is the default convention for projects using `wt`. If your project uses an external tracker like Linear, Jira, or GitHub Issues, you can replace this workflow with your own — the `/issues` command can be adapted to query external tools (e.g., Linear MCP) instead of scanning local files.
+This is the default convention for projects using `jig`. If your project uses an external tracker like Linear, Jira, or GitHub Issues, you can replace this workflow with your own — the `/issues` command can be adapted to query external tools (e.g., Linear MCP) instead of scanning local files.
 
 ## Directory Structure
 
 ```
 issues/
+├── README.md                   # This file (convention docs)
+├── _template.md                # Ticket template
 ├── cloud-sync.md               # Epic (high-level overview)
 ├── cloud-sync-01-sdk-setup.md  # Ticket (specific task)
 ├── cloud-sync-02-oauth.md
@@ -35,6 +37,8 @@ Focused, actionable tasks that can be completed in a single session.
 - **Links to**: Parent epic for full context
 
 ## Ticket Format
+
+See `_template.md` for the standard ticket format, or use this structure:
 
 ```markdown
 # [Ticket Title]
@@ -86,9 +90,9 @@ How to test that this is working.
 
 ## Creating New Tickets
 
-1. If working on an existing epic, follow its naming pattern
-2. For new features, create an epic first if the scope is large
-3. Use the ticket format template above
+1. Copy `_template.md` to a new file with the appropriate name
+2. If working on an existing epic, follow its naming pattern
+3. For new features, create an epic first if the scope is large
 
 ## Dependencies
 

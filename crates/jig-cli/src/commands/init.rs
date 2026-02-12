@@ -13,30 +13,59 @@ auto = true
 "#;
 
 const CLAUDE_MD_TEMPLATE: &str = include_str!("../../../../templates/CLAUDE.md");
-const DOCS_INDEX_TEMPLATE: &str = include_str!("../../../../templates/docs/index.md");
-const ISSUE_TRACKING_TEMPLATE: &str = include_str!("../../../../templates/docs/issue-tracking.md");
+
+// Docs templates
+const DOCS_INDEX: &str = include_str!("../../../../templates/docs/index.md");
+const DOCS_PATTERNS: &str = include_str!("../../../../templates/docs/PATTERNS.md");
+const DOCS_CONTRIBUTING: &str = include_str!("../../../../templates/docs/CONTRIBUTING.md");
+const DOCS_SUCCESS_CRITERIA: &str = include_str!("../../../../templates/docs/SUCCESS_CRITERIA.md");
+const DOCS_PROJECT_LAYOUT: &str = include_str!("../../../../templates/docs/PROJECT_LAYOUT.md");
+
+// Issues templates
+const ISSUES_README: &str = include_str!("../../../../templates/issues/README.md");
+const ISSUES_TEMPLATE: &str = include_str!("../../../../templates/issues/_template.md");
 
 // Skills
 const SKILL_CHECK: &str = include_str!("../../../../templates/skills/check/SKILL.md");
 const SKILL_DRAFT: &str = include_str!("../../../../templates/skills/draft/SKILL.md");
 const SKILL_ISSUES: &str = include_str!("../../../../templates/skills/issues/SKILL.md");
 const SKILL_REVIEW: &str = include_str!("../../../../templates/skills/review/SKILL.md");
-const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/jig/SKILL.md");
+const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/spawn/SKILL.md");
 
 const SETTINGS_JSON: &str = r#"{
+  "$schema": "https://claude.ai/schemas/claude-settings.json",
   "permissions": {
     "allow": [
-      "Bash(git *)",
-      "Bash(gh *)",
+      "Bash(git status)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git stash:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr checkout:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh repo view:*)",
       "Bash(cargo *)",
       "Bash(npm *)",
       "Bash(pnpm *)",
       "Bash(yarn *)",
+      "Bash(bun *)",
       "Bash(make *)",
       "Bash(go *)",
       "Bash(python *)",
+      "Bash(python3 *)",
       "Bash(pytest *)",
       "Bash(uv *)",
+      "Bash(pip *)",
       "Bash(bundle *)",
       "Bash(rake *)",
       "Bash(jig *)",
@@ -52,11 +81,25 @@ const SETTINGS_JSON: &str = r#"{
       "Bash(grep *)",
       "Bash(./test.sh *)"
     ],
+    "ask": [
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)",
+      "Bash(git reset:*)",
+      "Bash(gh pr merge:*)"
+    ],
     "deny": [
       "Bash(rm -rf /)",
       "Bash(rm -rf ~)",
+      "Bash(rm -rf .)",
       "Bash(sudo *)",
-      "Bash(git push --force *)"
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(cat .env*)",
+      "Bash(cat */.env*)",
+      "Bash(cat *.pem)",
+      "Bash(cat *.key)",
+      "Bash(cat *credentials*)"
     ]
   }
 }
@@ -97,15 +140,32 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
     write_file(&repo.join("CLAUDE.md"), CLAUDE_MD_TEMPLATE, force, backup)?;
 
     // Write docs files
+    write_file(&repo.join("docs/index.md"), DOCS_INDEX, force, backup)?;
+    write_file(&repo.join("docs/PATTERNS.md"), DOCS_PATTERNS, force, backup)?;
     write_file(
-        &repo.join("docs/index.md"),
-        DOCS_INDEX_TEMPLATE,
+        &repo.join("docs/CONTRIBUTING.md"),
+        DOCS_CONTRIBUTING,
         force,
         backup,
     )?;
     write_file(
-        &repo.join("docs/issue-tracking.md"),
-        ISSUE_TRACKING_TEMPLATE,
+        &repo.join("docs/SUCCESS_CRITERIA.md"),
+        DOCS_SUCCESS_CRITERIA,
+        force,
+        backup,
+    )?;
+    write_file(
+        &repo.join("docs/PROJECT_LAYOUT.md"),
+        DOCS_PROJECT_LAYOUT,
+        force,
+        backup,
+    )?;
+
+    // Write issues files
+    write_file(&repo.join("issues/README.md"), ISSUES_README, force, backup)?;
+    write_file(
+        &repo.join("issues/_template.md"),
+        ISSUES_TEMPLATE,
         force,
         backup,
     )?;

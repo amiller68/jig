@@ -1,5 +1,4 @@
 ---
-name: check
 description: Run project checks (build, test, lint, format). Use when validating code quality, preparing for merge, or verifying changes pass CI.
 allowed-tools:
   - Bash(make:*)
