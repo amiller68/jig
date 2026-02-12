@@ -62,28 +62,6 @@ const SETTINGS_JSON: &str = r#"{
 }
 "#;
 
-const AUDIT_PROMPT: &str = r#"Audit this codebase and populate the project documentation.
-
-## Tasks
-
-1. **Explore the codebase** - Identify languages, frameworks, build system, test runner, package manager, and project structure.
-
-2. **Update CLAUDE.md** - Replace placeholder sections with project-specific content:
-   - Project overview (what it does, key concepts)
-   - Key files and their purposes
-   - Development commands (build, test, lint, format)
-   - Testing instructions
-
-3. **Update docs/index.md** - Write agent instructions specific to this project:
-   - Code style conventions
-   - Testing requirements
-   - Documentation standards
-   - Project-specific context
-
-4. **Commit the changes** - Create a single commit with message "docs: populate project documentation via audit"
-
-Be thorough but concise. Focus on information that helps developers and AI agents be productive in this codebase."#;
-
 pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
     let repo = git::get_base_repo()?;
 
@@ -176,44 +154,10 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
     eprintln!("{} Initialization complete", "✓".green().bold());
 
     if audit {
-        use jig_core::terminal::command_exists;
-
         eprintln!();
-        eprintln!("{} Launching Claude to audit documentation...", "→".cyan());
-
-        // Check claude is available
-        if !command_exists("claude") {
-            return Err(Error::MissingDependency("claude".to_string()).into());
-        }
-
-        // Use exec to replace current process with Claude for full terminal control
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            use std::process::Command;
-
-            let err = Command::new("claude")
-                .arg(AUDIT_PROMPT)
-                .current_dir(&repo)
-                .exec();
-
-            // exec only returns if there was an error
-            return Err(anyhow::anyhow!("Failed to exec claude: {}", err));
-        }
-
-        #[cfg(not(unix))]
-        {
-            use std::process::Command;
-
-            let status = Command::new("claude")
-                .arg(AUDIT_PROMPT)
-                .current_dir(&repo)
-                .status()?;
-
-            if !status.success() {
-                eprintln!("{} Claude exited with non-zero status", "!".yellow());
-            }
-        }
+        eprintln!("{} Run this to audit and populate documentation:", "→".cyan());
+        eprintln!();
+        eprintln!("  claude \"Audit this codebase and populate CLAUDE.md and docs/index.md with project-specific content, then commit.\"");
     }
 
     Ok(())
