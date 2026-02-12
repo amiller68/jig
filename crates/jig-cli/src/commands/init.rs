@@ -155,7 +155,10 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
 
     if audit {
         eprintln!();
-        eprintln!("{} Run this to audit and populate documentation:", "→".cyan());
+        eprintln!(
+            "{} Run this to audit and populate documentation:",
+            "→".cyan()
+        );
         eprintln!();
         eprintln!("  claude \"Audit this codebase and populate CLAUDE.md and docs/index.md with project-specific content, then commit.\"");
     }
