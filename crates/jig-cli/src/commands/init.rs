@@ -7,75 +7,21 @@ use std::path::Path;
 
 use jig_core::{config, git, Error};
 
+// Embed templates at compile time from the templates/ directory
 const JIG_TOML_CONTENT: &str = r#"[spawn]
-auto = false
+auto = true
 "#;
 
-const CLAUDE_MD_TEMPLATE: &str = r#"# Project Guide
+const CLAUDE_MD_TEMPLATE: &str = include_str!("../../../../templates/CLAUDE.md");
+const DOCS_INDEX_TEMPLATE: &str = include_str!("../../../../templates/docs/index.md");
+const ISSUE_TRACKING_TEMPLATE: &str = include_str!("../../../../templates/docs/issue-tracking.md");
 
-Guide for AI agents and developers working on this project.
-
-## Project Overview
-
-<!-- Describe your project here -->
-
-## Key Files
-
-<!-- List important files and their purposes -->
-
-## Development
-
-<!-- Add development instructions -->
-
-## Testing
-
-<!-- Add testing instructions -->
-"#;
-
-const DOCS_INDEX_TEMPLATE: &str = r#"# Agent Instructions
-
-Instructions for spawned Claude Code workers (via `jig spawn`).
-
-## Task Guidelines
-
-When working on tasks in this project:
-
-1. Follow existing code style and conventions
-2. Write tests for new functionality
-3. Update documentation as needed
-4. Commit changes with clear messages
-
-## Project Context
-
-<!-- Add project-specific context here -->
-"#;
-
-const ISSUE_TRACKING_TEMPLATE: &str = r#"# Issue Tracking
-
-File-based issue tracking for this project.
-
-## Convention
-
-Issues are tracked in the `issues/` directory as markdown files:
-
-- `issues/001-feature-name.md` - Feature requests
-- `issues/002-bug-description.md` - Bug reports
-
-## Issue Template
-
-```markdown
-# Issue Title
-
-## Description
-
-## Acceptance Criteria
-
-- [ ] Criteria 1
-- [ ] Criteria 2
-
-## Notes
-```
-"#;
+// Skills
+const SKILL_CHECK: &str = include_str!("../../../../templates/skills/check/SKILL.md");
+const SKILL_DRAFT: &str = include_str!("../../../../templates/skills/draft/SKILL.md");
+const SKILL_ISSUES: &str = include_str!("../../../../templates/skills/issues/SKILL.md");
+const SKILL_REVIEW: &str = include_str!("../../../../templates/skills/review/SKILL.md");
+const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/jig/SKILL.md");
 
 const SETTINGS_JSON: &str = r#"{
   "permissions": {
@@ -87,13 +33,24 @@ const SETTINGS_JSON: &str = r#"{
       "Bash(pnpm *)",
       "Bash(yarn *)",
       "Bash(make *)",
+      "Bash(go *)",
+      "Bash(python *)",
+      "Bash(pytest *)",
+      "Bash(uv *)",
+      "Bash(bundle *)",
+      "Bash(rake *)",
+      "Bash(jig *)",
+      "Bash(tmux *)",
       "Bash(ls *)",
       "Bash(pwd)",
       "Bash(which *)",
       "Bash(cat *)",
       "Bash(head *)",
       "Bash(tail *)",
-      "Bash(wc *)"
+      "Bash(wc *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(./test.sh *)"
     ],
     "deny": [
       "Bash(rm -rf /)",
@@ -138,7 +95,15 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
     eprintln!("{} Initializing jig in {}", "→".cyan(), repo.display());
 
     // Create directories
-    let dirs = ["docs", "issues", ".claude/skills"];
+    let dirs = [
+        "docs",
+        "issues",
+        ".claude/skills/check",
+        ".claude/skills/draft",
+        ".claude/skills/issues",
+        ".claude/skills/review",
+        ".claude/skills/spawn",
+    ];
     for dir in dirs {
         let path = repo.join(dir);
         if !path.exists() {
@@ -171,6 +136,38 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
     write_file(
         &repo.join(".claude/settings.json"),
         SETTINGS_JSON,
+        force,
+        backup,
+    )?;
+
+    // Write skills
+    write_file(
+        &repo.join(".claude/skills/check/SKILL.md"),
+        SKILL_CHECK,
+        force,
+        backup,
+    )?;
+    write_file(
+        &repo.join(".claude/skills/draft/SKILL.md"),
+        SKILL_DRAFT,
+        force,
+        backup,
+    )?;
+    write_file(
+        &repo.join(".claude/skills/issues/SKILL.md"),
+        SKILL_ISSUES,
+        force,
+        backup,
+    )?;
+    write_file(
+        &repo.join(".claude/skills/review/SKILL.md"),
+        SKILL_REVIEW,
+        force,
+        backup,
+    )?;
+    write_file(
+        &repo.join(".claude/skills/spawn/SKILL.md"),
+        SKILL_SPAWN,
         force,
         backup,
     )?;
