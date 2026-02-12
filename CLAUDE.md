@@ -1,51 +1,53 @@
 # Project Guide
 
-Guide for AI agents and developers working on jig - a git worktree manager.
+jig is a git worktree manager for running parallel Claude Code sessions. It creates isolated worktrees with tmux integration for multi-agent orchestration.
 
-## Project Overview
-
-`jig` is a Rust CLI tool for managing git worktrees, designed for parallel Claude Code sessions.
-
-## Key Files
-
-**Rust crates:**
-- `crates/jig-core/` — Core library (git ops, config, state, spawn)
-- `crates/jig-cli/` — CLI binary (`jig`)
-- `crates/jig-tui/` — TUI binary (`jig-tui`, placeholder)
-
-**Configuration:**
-- `Cargo.toml` — Workspace configuration
-- `jig.toml` — Per-repo spawn configuration
-
-**Templates:**
-- `templates/skills/` — Claude Code skills for init
-- `templates/CLAUDE.md` — Project guide template
-
-**Tests:**
-- `tests/` — Integration tests (`cargo test`)
-
-## Development
+## Quick Reference
 
 ```bash
-cargo build --release    # Build
-cargo test               # Run tests
-cargo clippy             # Lint
-cargo fmt                # Format
+cargo build                    # Build all crates
+cargo test                     # Run tests
+cargo clippy                   # Lint
+cargo fmt --check              # Check formatting
+cargo build --release          # Release build
 ```
 
-## Testing
+## Architecture
 
-Run all tests:
-```bash
-cargo test
 ```
+crates/
+├── jig-core/     # Core library (worktree, worker, config, git, spawn)
+├── jig-cli/      # CLI binary (commands/)
+└── jig-tui/      # Terminal UI (not yet fully implemented)
+
+templates/        # Templates for `jig init` (CLAUDE.md, skills, docs)
+tests/            # Integration tests
+```
+
+### Key Modules
+
+- `jig-core::worktree` — Git worktree operations (create, list, remove)
+- `jig-core::worker` — Worker state machine (Spawned → Running → WaitingReview → Merged)
+- `jig-core::spawn` — Tmux session management and worker registration
+- `jig-core::config` — Global config (~/.config/jig/config) and repo config (jig.toml)
+- `jig-core::git` — Low-level git operations
+
+### CLI Commands
+
+Commands are in `crates/jig-cli/src/commands/`. Each command is a separate module with a `run()` function.
+
+## Conventions
+
+- Use `anyhow::Result` for CLI commands, `jig_core::Result` for library code
+- Errors go to stderr, machine-readable output (like `cd` paths) goes to stdout
+- The `-o` flag outputs a `cd` command to stdout for shell integration
+- Worktrees live in `.worktrees/` (automatically gitignored)
+- Tests use `tempfile` for isolated git repos
 
 ## Documentation
 
-Project docs live in `docs/`:
 - `docs/index.md` — Agent instructions for spawned workers
 - `docs/issue-tracking.md` — File-based issue tracking convention
-- `docs/usage/` — User documentation
 
 ## Issues
 

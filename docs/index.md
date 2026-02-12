@@ -1,88 +1,89 @@
 # Agent Instructions
 
-You are working on `jig` — a Rust CLI for managing git worktrees, designed for parallel Claude Code sessions.
+You are an autonomous coding agent working on jig, a git worktree manager for parallel Claude Code sessions.
 
-## Key Files
+## Build & Test
+
+```bash
+cargo build                    # Build all crates
+cargo test                     # Run all tests
+cargo clippy                   # Run linter
+cargo fmt --check              # Check formatting
+```
+
+Always run `cargo test` before committing to verify your changes work.
+
+## Project Structure
 
 ```
 crates/
-├── jig-core/          # Core library
+├── jig-core/                  # Core library
 │   └── src/
-│       ├── config.rs   # Config management (jig.toml, ~/.config/jig/)
-│       ├── git.rs      # Git operations (worktrees, branches)
-│       ├── spawn.rs    # Spawn state tracking
-│       ├── session.rs  # tmux session/window management
-│       ├── state.rs    # Persistent orchestrator state
-│       └── worker.rs   # Worker/task model
-├── jig-cli/           # CLI binary (jig)
+│       ├── config.rs          # Config management (jig.toml, ~/.config/jig/)
+│       ├── git.rs             # Git operations
+│       ├── spawn.rs           # Worker spawning and tmux integration
+│       ├── worker.rs          # Worker state machine
+│       └── worktree.rs        # Worktree operations
+├── jig-cli/                   # CLI binary
 │   └── src/
-│       ├── cli.rs      # Command definitions (clap)
-│       └── commands/   # Command handlers
-└── jig-tui/           # TUI binary (placeholder)
-templates/
-├── skills/            # Claude Code skills for init
-│   ├── check/         # /check skill
-│   ├── draft/         # /draft skill
-│   ├── issues/        # /issues skill
-│   ├── review/        # /review skill
-│   └── jig/           # /jig skill
-└── CLAUDE.md          # Project guide template
-tests/                 # Integration tests
+│       ├── cli.rs             # Clap argument definitions
+│       └── commands/          # One module per command
+└── jig-tui/                   # Terminal UI
+
+templates/                     # Templates for `jig init`
+tests/integration_tests.rs     # Integration tests
 ```
-
-## Development
-
-```bash
-cargo build --release    # Build
-cargo test               # Run all tests
-cargo clippy             # Lint
-cargo fmt                # Format
-```
-
-## Commands
-
-| Command | Purpose |
-|---------|---------|
-| `create` | Create a new worktree branch |
-| `list` | List worktrees (local or --all) |
-| `open` | cd into a worktree (--all opens tabs) |
-| `remove` | Remove worktree(s), supports glob patterns |
-| `exit` | Remove current worktree and return to base |
-| `config` | Get/set base branch, on-create hooks |
-| `spawn` | Create worktree + launch Claude in tmux |
-| `ps` | Show status of spawned sessions |
-| `attach` | Attach to a tmux spawn session |
-| `review` | Show diff for spawned worktree |
-| `merge` | Merge spawned work into current branch |
-| `kill` | Kill a spawned tmux window |
-| `init` | Initialize jig config for a repo |
-| `health` | Check dependencies and config |
-| `shell-init` | Print shell integration code |
-
-## Architecture
-
-- **Worktrees** live in `.worktrees/` (auto-excluded via `.git/info/exclude`)
-- **Config** stored in `~/.config/jig/config`
-- **Spawn state** tracked in `.worktrees/.jig-state.json`
-- **tmux** manages spawned sessions: `jig-<reponame>` session, one window per task
-- **Shell integration**: wrapper function evals `cd` commands from stdout
-- **stdout** is reserved for eval-able output — all user-facing messages go to stderr
-
-## Testing
-
-- **Run:** `cargo test`
-- **Structure:** Integration tests in `tests/` directory
-- **Isolation:** Tests use temporary git repos
 
 ## Workflow
 
-1. Read the task description
-2. Explore the codebase for context and patterns
-3. Implement following existing conventions
-4. Run `cargo test`
-5. Commit with a clear message
+1. **Understand** - Read the task description and related code
+2. **Explore** - Search for existing patterns (`Grep`, `Glob`)
+3. **Plan** - Break down the work into small steps
+4. **Implement** - Follow existing conventions
+5. **Test** - Run `cargo test` to verify
+6. **Commit** - One logical change per commit
+
+## Coding Conventions
+
+### Error Handling
+- Use `anyhow::Result` in CLI commands
+- Use `jig_core::Result` (wraps `jig_core::Error`) in library code
+- Define new error variants in `crates/jig-core/src/error.rs`
+
+### Output Conventions
+- Errors and status messages go to **stderr** (use `eprintln!`)
+- Machine-readable output (like paths for shell `cd`) goes to **stdout**
+- Use `colored` crate for terminal colors (only on stderr)
+
+### CLI Commands
+- Each command lives in `crates/jig-cli/src/commands/<name>.rs`
+- Export a `pub fn run(...) -> Result<()>` function
+- Register in `commands/mod.rs` and `cli.rs`
+
+### Tests
+- Integration tests use `TestRepo` struct from `tests/integration_tests.rs`
+- Tests create isolated temp git repos with `tempfile`
+- Use `assert_cmd` for CLI testing
+
+## Key Patterns
+
+### Adding a New Command
+1. Create `crates/jig-cli/src/commands/mycommand.rs`
+2. Add to `crates/jig-cli/src/commands/mod.rs`
+3. Add enum variant to `Commands` in `cli.rs`
+4. Add match arm in `main.rs`
+
+### Worktree Operations
+```rust
+use jig_core::{git, Worktree};
+
+let worktrees_dir = git::get_worktrees_dir()?;
+let worktree = Worktree::create(&worktrees_dir, &git_dir, name, branch, base)?;
+```
+
+### Worker State
+Workers have a state machine: `Spawned → Running → WaitingReview → Approved → Merged`
 
 ## When Complete
 
-Your work will be reviewed and merged by the parent session.
-Ensure all tests pass before finishing.
+Ensure all tests pass (`cargo test`) before finishing. Your work will be reviewed and merged by the parent session.
