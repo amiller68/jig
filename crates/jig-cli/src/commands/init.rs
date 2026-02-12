@@ -32,6 +32,52 @@ const SKILL_ISSUES: &str = include_str!("../../../../templates/skills/issues/SKI
 const SKILL_REVIEW: &str = include_str!("../../../../templates/skills/review/SKILL.md");
 const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/spawn/SKILL.md");
 
+const AUDIT_PROMPT: &str = r#"
+Audit this codebase and populate the skeleton documentation files with project-specific content.
+
+## Files to populate
+
+1. **CLAUDE.md** — Fill in:
+   - One-line project description
+   - Quick Reference commands (build, test, lint, run)
+   - Project structure overview
+   - Constraints specific to this project
+   - Do Not rules specific to this project
+
+2. **docs/index.md** — Fill in:
+   - Quick Start section with actual commands
+   - Any project-specific agent guidelines
+
+3. **docs/PATTERNS.md** — Document:
+   - Error handling patterns used in the codebase
+   - Module/file organization conventions
+   - Naming conventions
+   - Output conventions (stderr/stdout usage)
+   - Testing patterns
+
+4. **docs/SUCCESS_CRITERIA.md** — Fill in:
+   - Actual build command
+   - Actual test command
+   - Actual lint command
+   - Actual format check command
+
+5. **docs/PROJECT_LAYOUT.md** — Document:
+   - Actual directory structure with descriptions
+   - Key files and their purposes
+   - Entry points
+
+6. **docs/CONTRIBUTING.md** — Fill in:
+   - Setup instructions
+   - Commit message conventions used
+   - Any project-specific contribution rules
+
+7. **Skills** — Review each skill in .claude/skills/ and update if needed:
+   - /check — Update with project-specific check commands
+   - /review — Ensure review criteria match project conventions
+
+Remove HTML comment placeholders as you fill in actual content. Commit when done.
+"#;
+
 const SETTINGS_JSON: &str = r#"{
   "$schema": "https://claude.ai/schemas/claude-settings.json",
   "permissions": {
@@ -115,6 +161,13 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
 
     eprintln!("{} Initializing jig in {}", "→".cyan(), repo.display());
 
+    // Create backup directory if backup is enabled
+    let backup_dir = repo.join(".backup");
+    if backup {
+        fs::create_dir_all(&backup_dir)?;
+        eprintln!("  {} Created .backup/", "✓".green());
+    }
+
     // Create directories
     let dirs = [
         "docs",
@@ -133,82 +186,38 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
         }
     }
 
+    let backup_dir_opt = if backup {
+        Some(backup_dir.as_path())
+    } else {
+        None
+    };
+
     // Write jig.toml
-    write_file(&repo.join("jig.toml"), JIG_TOML_CONTENT, force, backup)?;
+    write_file(&repo, "jig.toml", JIG_TOML_CONTENT, force, backup_dir_opt)?;
 
     // Write CLAUDE.md
-    write_file(&repo.join("CLAUDE.md"), CLAUDE_MD_TEMPLATE, force, backup)?;
+    write_file(&repo, "CLAUDE.md", CLAUDE_MD_TEMPLATE, force, backup_dir_opt)?;
 
     // Write docs files
-    write_file(&repo.join("docs/index.md"), DOCS_INDEX, force, backup)?;
-    write_file(&repo.join("docs/PATTERNS.md"), DOCS_PATTERNS, force, backup)?;
-    write_file(
-        &repo.join("docs/CONTRIBUTING.md"),
-        DOCS_CONTRIBUTING,
-        force,
-        backup,
-    )?;
-    write_file(
-        &repo.join("docs/SUCCESS_CRITERIA.md"),
-        DOCS_SUCCESS_CRITERIA,
-        force,
-        backup,
-    )?;
-    write_file(
-        &repo.join("docs/PROJECT_LAYOUT.md"),
-        DOCS_PROJECT_LAYOUT,
-        force,
-        backup,
-    )?;
+    write_file(&repo, "docs/index.md", DOCS_INDEX, force, backup_dir_opt)?;
+    write_file(&repo, "docs/PATTERNS.md", DOCS_PATTERNS, force, backup_dir_opt)?;
+    write_file(&repo, "docs/CONTRIBUTING.md", DOCS_CONTRIBUTING, force, backup_dir_opt)?;
+    write_file(&repo, "docs/SUCCESS_CRITERIA.md", DOCS_SUCCESS_CRITERIA, force, backup_dir_opt)?;
+    write_file(&repo, "docs/PROJECT_LAYOUT.md", DOCS_PROJECT_LAYOUT, force, backup_dir_opt)?;
 
     // Write issues files
-    write_file(&repo.join("issues/README.md"), ISSUES_README, force, backup)?;
-    write_file(
-        &repo.join("issues/_template.md"),
-        ISSUES_TEMPLATE,
-        force,
-        backup,
-    )?;
+    write_file(&repo, "issues/README.md", ISSUES_README, force, backup_dir_opt)?;
+    write_file(&repo, "issues/_template.md", ISSUES_TEMPLATE, force, backup_dir_opt)?;
 
     // Write .claude/settings.json
-    write_file(
-        &repo.join(".claude/settings.json"),
-        SETTINGS_JSON,
-        force,
-        backup,
-    )?;
+    write_file(&repo, ".claude/settings.json", SETTINGS_JSON, force, backup_dir_opt)?;
 
     // Write skills
-    write_file(
-        &repo.join(".claude/skills/check/SKILL.md"),
-        SKILL_CHECK,
-        force,
-        backup,
-    )?;
-    write_file(
-        &repo.join(".claude/skills/draft/SKILL.md"),
-        SKILL_DRAFT,
-        force,
-        backup,
-    )?;
-    write_file(
-        &repo.join(".claude/skills/issues/SKILL.md"),
-        SKILL_ISSUES,
-        force,
-        backup,
-    )?;
-    write_file(
-        &repo.join(".claude/skills/review/SKILL.md"),
-        SKILL_REVIEW,
-        force,
-        backup,
-    )?;
-    write_file(
-        &repo.join(".claude/skills/spawn/SKILL.md"),
-        SKILL_SPAWN,
-        force,
-        backup,
-    )?;
+    write_file(&repo, ".claude/skills/check/SKILL.md", SKILL_CHECK, force, backup_dir_opt)?;
+    write_file(&repo, ".claude/skills/draft/SKILL.md", SKILL_DRAFT, force, backup_dir_opt)?;
+    write_file(&repo, ".claude/skills/issues/SKILL.md", SKILL_ISSUES, force, backup_dir_opt)?;
+    write_file(&repo, ".claude/skills/review/SKILL.md", SKILL_REVIEW, force, backup_dir_opt)?;
+    write_file(&repo, ".claude/skills/spawn/SKILL.md", SKILL_SPAWN, force, backup_dir_opt)?;
 
     eprintln!();
     eprintln!("{} Initialization complete", "✓".green().bold());
@@ -220,29 +229,38 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
             "→".cyan()
         );
         eprintln!();
-        eprintln!("  claude \"Audit this codebase and populate CLAUDE.md and docs/index.md with project-specific content, then commit.\"");
+        eprintln!("  claude \"{}\"", AUDIT_PROMPT.trim());
     }
 
     Ok(())
 }
 
-fn write_file(path: &Path, content: &str, force: bool, backup: bool) -> Result<()> {
-    let name = path.file_name().unwrap().to_string_lossy();
+fn write_file(
+    repo: &Path,
+    relative_path: &str,
+    content: &str,
+    force: bool,
+    backup_dir: Option<&Path>,
+) -> Result<()> {
+    let path = repo.join(relative_path);
 
     if path.exists() {
-        if backup {
-            let backup_path = path.with_extension("bak");
-            fs::copy(path, &backup_path)?;
-            eprintln!("  {} Backed up {}", "→".dimmed(), name);
+        if let Some(backup_dir) = backup_dir {
+            let backup_path = backup_dir.join(relative_path);
+            if let Some(parent) = backup_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&path, &backup_path)?;
+            eprintln!("  {} Backed up {}", "→".dimmed(), relative_path);
         }
 
         if !force {
-            eprintln!("  {} Skipped {} (exists)", "→".dimmed(), name);
+            eprintln!("  {} Skipped {} (exists)", "→".dimmed(), relative_path);
             return Ok(());
         }
     }
 
-    fs::write(path, content)?;
-    eprintln!("  {} Created {}", "✓".green(), name);
+    fs::write(&path, content)?;
+    eprintln!("  {} Created {}", "✓".green(), relative_path);
     Ok(())
 }
