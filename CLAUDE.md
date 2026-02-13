@@ -1,53 +1,56 @@
 # Project Guide
 
-jig is a git worktree manager for running parallel Claude Code sessions. It creates isolated worktrees with tmux integration for multi-agent orchestration.
+Git worktree manager for parallel Claude Code sessions.
 
 ## Quick Reference
 
 ```bash
-cargo build                    # Build all crates
-cargo test                     # Run tests
-cargo clippy                   # Lint
-cargo fmt --check              # Check formatting
-cargo build --release          # Release build
+cargo build              # Build all crates
+cargo test               # Run all tests
+cargo clippy             # Lint
+cargo fmt --check        # Check formatting
+cargo fmt                # Fix formatting
+cargo run -- <args>      # Run CLI (e.g., cargo run -- list)
 ```
 
-## Architecture
+## Project Structure
 
 ```
 crates/
-├── jig-core/     # Core library (worktree, worker, config, git, spawn)
-├── jig-cli/      # CLI binary (commands/)
-└── jig-tui/      # Terminal UI (not yet fully implemented)
+├── jig-core/      # Core library (worktree, config, worker, git)
+├── jig-cli/       # CLI binary (wt command)
+└── jig-tui/       # Terminal UI
 
-templates/        # Templates for `jig init` (CLAUDE.md, skills, docs)
-tests/            # Integration tests
+templates/         # Templates for jig init
+tests/             # Integration tests
+docs/              # Documentation
+issues/            # File-based issue tracking
 ```
 
-### Key Modules
-
-- `jig-core::worktree` — Git worktree operations (create, list, remove)
-- `jig-core::worker` — Worker state machine (Spawned → Running → WaitingReview → Merged)
-- `jig-core::spawn` — Tmux session management and worker registration
-- `jig-core::config` — Global config (~/.config/jig/config) and repo config (jig.toml)
-- `jig-core::git` — Low-level git operations
-
-### CLI Commands
-
-Commands are in `crates/jig-cli/src/commands/`. Each command is a separate module with a `run()` function.
-
-## Conventions
-
-- Use `anyhow::Result` for CLI commands, `jig_core::Result` for library code
-- Errors go to stderr, machine-readable output (like `cd` paths) goes to stdout
-- The `-o` flag outputs a `cd` command to stdout for shell integration
-- Worktrees live in `.worktrees/` (automatically gitignored)
-- Tests use `tempfile` for isolated git repos
+For detailed structure, see `docs/PROJECT_LAYOUT.md`.
 
 ## Documentation
 
-- `docs/index.md` — Agent instructions for spawned workers
+- `docs/index.md` — Documentation hub and agent instructions
+- `docs/PATTERNS.md` — Coding conventions
+- `docs/SUCCESS_CRITERIA.md` — CI checks
+- `docs/CONTRIBUTING.md` — Contribution guide
+- `docs/PROJECT_LAYOUT.md` — Codebase structure
 
 ## Issues
 
 Track work items in `issues/`. See `issues/README.md` for the convention.
+
+## Constraints
+
+- Use `thiserror` for typed errors in jig-core, `anyhow::Result` at CLI level
+- Integration tests required for new CLI commands
+- Status messages go to stderr, machine-readable output to stdout
+- CLI binary is named `wt` (not `jig`)
+
+## Do Not
+
+- Push directly to main
+- Skip CI checks with --no-verify
+- Add new dependencies without justification
+- Output ANSI color codes to stdout (breaks shell integration)

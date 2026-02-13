@@ -1,89 +1,59 @@
-# Agent Instructions
+# Documentation Index
 
-You are an autonomous coding agent working on jig, a git worktree manager for parallel Claude Code sessions.
+Central hub for project documentation. AI agents should read this first.
 
-## Build & Test
+## Quick Start
 
 ```bash
-cargo build                    # Build all crates
-cargo test                     # Run all tests
-cargo clippy                   # Run linter
-cargo fmt --check              # Check formatting
+# Build the project
+cargo build
+
+# Run tests
+cargo test
+
+# Run linter
+cargo clippy
+
+# Check formatting
+cargo fmt --check
+
+# Run the CLI
+cargo run -- list
+cargo run -- create <name>
+cargo run -- spawn <name> --context "task description"
 ```
 
-Always run `cargo test` before committing to verify your changes work.
+## Documentation
 
-## Project Structure
+| Document | Purpose |
+|----------|---------|
+| [PATTERNS.md](./PATTERNS.md) | Coding conventions and patterns |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute (agents + humans) |
+| [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | CI checks that must pass |
+| [PROJECT_LAYOUT.md](./PROJECT_LAYOUT.md) | Codebase structure overview |
 
-```
-crates/
-├── jig-core/                  # Core library
-│   └── src/
-│       ├── config.rs          # Config management (jig.toml, ~/.config/jig/)
-│       ├── git.rs             # Git operations
-│       ├── spawn.rs           # Worker spawning and tmux integration
-│       ├── worker.rs          # Worker state machine
-│       └── worktree.rs        # Worktree operations
-├── jig-cli/                   # CLI binary
-│   └── src/
-│       ├── cli.rs             # Clap argument definitions
-│       └── commands/          # One module per command
-└── jig-tui/                   # Terminal UI
+## For AI Agents
 
-templates/                     # Templates for `jig init`
-tests/integration_tests.rs     # Integration tests
-```
+You are an autonomous coding agent working on a focused task.
 
-## Workflow
+### Workflow
 
-1. **Understand** - Read the task description and related code
-2. **Explore** - Search for existing patterns (`Grep`, `Glob`)
-3. **Plan** - Break down the work into small steps
-4. **Implement** - Follow existing conventions
-5. **Test** - Run `cargo test` to verify
-6. **Commit** - One logical change per commit
+1. **Understand** — Read the task description and relevant docs
+2. **Explore** — Search the codebase to understand context
+3. **Plan** — Break down work into small steps
+4. **Implement** — Follow existing patterns in `PATTERNS.md`
+5. **Verify** — Run checks from `SUCCESS_CRITERIA.md`
+6. **Commit** — Clear, atomic commits
 
-## Coding Conventions
+### Guidelines
 
-### Error Handling
-- Use `anyhow::Result` in CLI commands
-- Use `jig_core::Result` (wraps `jig_core::Error`) in library code
-- Define new error variants in `crates/jig-core/src/error.rs`
+- Follow existing code patterns and conventions
+- Make atomic commits (one logical change per commit)
+- Add tests for new functionality
+- Update documentation if behavior changes
+- If blocked, commit what you have and note the blocker
 
-### Output Conventions
-- Errors and status messages go to **stderr** (use `eprintln!`)
-- Machine-readable output (like paths for shell `cd`) goes to **stdout**
-- Use `colored` crate for terminal colors (only on stderr)
+### When Complete
 
-### CLI Commands
-- Each command lives in `crates/jig-cli/src/commands/<name>.rs`
-- Export a `pub fn run(...) -> Result<()>` function
-- Register in `commands/mod.rs` and `cli.rs`
-
-### Tests
-- Integration tests use `TestRepo` struct from `tests/integration_tests.rs`
-- Tests create isolated temp git repos with `tempfile`
-- Use `assert_cmd` for CLI testing
-
-## Key Patterns
-
-### Adding a New Command
-1. Create `crates/jig-cli/src/commands/mycommand.rs`
-2. Add to `crates/jig-cli/src/commands/mod.rs`
-3. Add enum variant to `Commands` in `cli.rs`
-4. Add match arm in `main.rs`
-
-### Worktree Operations
-```rust
-use jig_core::{git, Worktree};
-
-let worktrees_dir = git::get_worktrees_dir()?;
-let worktree = Worktree::create(&worktrees_dir, &git_dir, name, branch, base)?;
-```
-
-### Worker State
-Workers have a state machine: `Spawned → Running → WaitingReview → Approved → Merged`
-
-## When Complete
-
-Ensure all tests pass (`cargo test`) before finishing. Your work will be reviewed and merged by the parent session.
+Your work will be reviewed and merged by the parent session.
+Ensure all checks pass before finishing.
