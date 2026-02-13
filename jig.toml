@@ -1,5 +1,12 @@
+# Worktree configuration
+[worktree]
+base = "origin/main"
+# on_create = "cargo build"  # Uncomment to run after worktree creation
+
+# Spawn configuration
 [spawn]
 auto = true
 
+# Agent configuration
 [agent]
 type = "claude"

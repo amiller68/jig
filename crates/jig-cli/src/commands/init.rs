@@ -168,9 +168,16 @@ pub fn run(agent: &str, force: bool, backup: bool, audit: bool) -> Result<()> {
 
     // Write jig.toml with agent type
     let jig_toml_content = format!(
-        r#"[spawn]
+        r#"# Worktree configuration
+[worktree]
+# base = "origin/main"    # Base branch for new worktrees
+# on_create = "npm install"  # Command to run after worktree creation
+
+# Spawn configuration
+[spawn]
 auto = true
 
+# Agent configuration
 [agent]
 type = "{}"
 "#,

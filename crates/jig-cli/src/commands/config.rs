@@ -35,16 +35,24 @@ fn show_config() -> Result<()> {
         display.effective_base.cyan()
     );
 
+    if let Some(ref toml) = display.toml_base {
+        eprintln!("    {} {}", "(jig.toml)".dimmed(), toml);
+    }
     if let Some(ref repo) = display.repo_base {
-        eprintln!("    {} {}", "(repo)".dimmed(), repo);
+        eprintln!("    {} {}", "(global config)".dimmed(), repo);
     }
     if let Some(ref global) = display.global_base {
-        eprintln!("    {} {}", "(global)".dimmed(), global);
+        eprintln!("    {} {}", "(global default)".dimmed(), global);
     }
 
-    if let Some(ref hook) = display.on_create_hook {
+    if let Some(ref hook) = display.effective_on_create {
         eprintln!();
         eprintln!("  {} {}", "On-create hook:".dimmed(), hook.cyan());
+        if display.toml_on_create.is_some() {
+            eprintln!("    {} jig.toml", "(from)".dimmed());
+        } else {
+            eprintln!("    {} global config", "(from)".dimmed());
+        }
     }
 
     Ok(())
