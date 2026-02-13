@@ -1,5 +1,4 @@
 ---
-name: issues
 description: Discover and manage file-based work items. Use to explore tasks before spawning workers or to track project progress.
 allowed-tools:
   - Bash(ls:*)
@@ -41,11 +40,11 @@ Read a specific issue file and display its full contents.
 
 ### Create epic
 
-Create a new epic file using the template format from `docs/issue-tracking.md`.
+Create a new epic file using the convention from `issues/README.md`.
 
 ### Create ticket
 
-Create a new ticket file linked to an epic, using the template format from `docs/issue-tracking.md`.
+Create a new ticket file linked to an epic, using `issues/_template.md`.
 
 ### Update status
 
@@ -53,7 +52,7 @@ Change a ticket's status field (Planned → In Progress → Complete).
 
 ## Convention
 
-See `docs/issue-tracking.md` for the full issue tracking convention.
+See `issues/README.md` for the full issue tracking convention.
 
 ## External Trackers
 

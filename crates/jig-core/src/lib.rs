@@ -19,7 +19,7 @@ pub mod terminal;
 pub mod worker;
 pub mod worktree;
 
-pub use adapter::{get_adapter, AgentAdapter, CLAUDE_CODE};
+pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
 pub use config::{Config, JigToml, RepoConfig};
 pub use error::{Error, Result};
 pub use state::OrchestratorState;

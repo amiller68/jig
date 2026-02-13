@@ -5,10 +5,10 @@ use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
-use jig_core::{adapter, config, git, Error};
+use jig_core::{adapter, config, git, terminal, Error};
 
 // Embed templates at compile time from the templates/ directory
-const PROJECT_MD_TEMPLATE: &str = include_str!("../../../../templates/CLAUDE.md");
+const PROJECT_MD_TEMPLATE: &str = include_str!("../../../../templates/PROJECT.md");
 
 // Docs templates
 const DOCS_INDEX: &str = include_str!("../../../../templates/docs/index.md");
@@ -32,12 +32,14 @@ const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/spawn/SKILL
 const CLAUDE_SETTINGS_JSON: &str =
     include_str!("../../../../templates/adapters/claude-code/settings.json");
 
-const AUDIT_PROMPT: &str = r#"
-Audit this codebase and populate the skeleton documentation files with project-specific content.
+/// Generate audit prompt with adapter-specific file paths
+fn audit_prompt(adapter: &adapter::AgentAdapter) -> String {
+    format!(
+        r#"Audit this codebase and populate the skeleton documentation files with project-specific content.
 
 ## Files to populate
 
-1. **CLAUDE.md** — Fill in:
+1. **{}** — Fill in:
    - One-line project description
    - Quick Reference commands (build, test, lint, run)
    - Project structure overview
@@ -71,12 +73,14 @@ Audit this codebase and populate the skeleton documentation files with project-s
    - Commit message conventions used
    - Any project-specific contribution rules
 
-7. **Skills** — Review each skill in .claude/skills/ and update if needed:
+7. **Skills** — Review each skill in {}/  and update if needed:
    - /check — Update with project-specific check commands
    - /review — Ensure review criteria match project conventions
 
-Remove HTML comment placeholders as you fill in actual content. Commit when done.
-"#;
+Remove HTML comment placeholders as you fill in actual content. Commit when done."#,
+        adapter.project_file, adapter.skills_dir
+    )
+}
 
 pub fn run(agent: &str, force: bool, backup: bool, audit: bool) -> Result<()> {
     let repo = git::get_base_repo()?;
@@ -89,6 +93,15 @@ pub fn run(agent: &str, force: bool, backup: bool, audit: bool) -> Result<()> {
             adapter::supported_agents().join(", ")
         )
     })?;
+
+    // Check if agent is installed
+    if !terminal::command_exists(adapter.command) {
+        eprintln!(
+            "{} '{}' not found in PATH. Install it before running agents.",
+            "warning:".yellow().bold(),
+            adapter.command
+        );
+    }
 
     // Check if already initialized
     if config::has_jig_toml()? && !force {
@@ -248,10 +261,8 @@ type = "{}"
 
 /// Get settings file content for an adapter
 fn get_settings_content(adapter: &adapter::AgentAdapter) -> &'static str {
-    match adapter.name {
-        "claude-code" => CLAUDE_SETTINGS_JSON,
-        // Future adapters can have their own settings
-        _ => "",
+    match adapter.agent_type {
+        adapter::AgentType::Claude => CLAUDE_SETTINGS_JSON,
     }
 }
 
@@ -263,7 +274,7 @@ fn print_audit_prompt(adapter: &adapter::AgentAdapter) {
         "→".cyan()
     );
     eprintln!();
-    eprintln!("  {} \"{}\"", adapter.command, AUDIT_PROMPT.trim());
+    eprintln!("  {} \"{}\"", adapter.command, audit_prompt(adapter));
 }
 
 fn write_file(

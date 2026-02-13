@@ -1,5 +1,4 @@
 ---
-name: jig
 description: Spawn parallel Claude Code workers for task execution. Use to parallelize work across multiple worktrees.
 allowed-tools:
   - Bash(jig spawn:*)

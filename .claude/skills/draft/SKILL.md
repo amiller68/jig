@@ -1,5 +1,4 @@
 ---
-name: draft
 description: Push current branch and create a draft PR. Use when ready to share work for review or collaborate on a branch.
 allowed-tools:
   - Bash(git:*)

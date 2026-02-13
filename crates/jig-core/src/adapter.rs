@@ -2,10 +2,19 @@
 //!
 //! Each adapter knows how to lay out files for a specific agent (Claude Code, Cursor, etc.)
 
+/// Agent type enum for compile-time safe matching
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentType {
+    Claude,
+    // Cursor,  // Future
+}
+
 /// Agent adapter containing all agent-specific configuration
 #[derive(Debug, Clone)]
 pub struct AgentAdapter {
-    /// Agent name (e.g., "claude-code", "cursor")
+    /// Agent type for pattern matching
+    pub agent_type: AgentType,
+    /// Agent name (e.g., "claude", "cursor")
     pub name: &'static str,
     /// Command to invoke the agent
     pub command: &'static str,
@@ -23,6 +32,7 @@ pub struct AgentAdapter {
 
 /// Claude Code adapter
 pub const CLAUDE_CODE: AgentAdapter = AgentAdapter {
+    agent_type: AgentType::Claude,
     name: "claude",
     command: "claude",
     skills_dir: ".claude/skills",
