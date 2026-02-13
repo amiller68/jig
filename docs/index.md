@@ -31,6 +31,7 @@ cargo run -- spawn <name> --context "task description"
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute (agents + humans) |
 | [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | CI checks that must pass |
 | [PROJECT_LAYOUT.md](./PROJECT_LAYOUT.md) | Codebase structure overview |
+| [RELEASING.md](./RELEASING.md) | Release workflow and automation |
 
 ## For AI Agents
 
