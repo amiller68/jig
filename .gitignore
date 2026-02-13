@@ -1,9 +1,12 @@
 # Symlink created by test.sh
 _wt
 
-# wt spawn files
+# jig spawn files
 .claude-task
 .claude-spawn-prompt
+
+# jig init --backup
+.backup/
 
 
 # Added by cargo

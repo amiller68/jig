@@ -64,7 +64,7 @@ impl TestRepo {
             .expect("Failed to fetch");
 
         // Set global config to use "main" as base branch (since origin/main doesn't exist in test repos)
-        let config_file = config_dir.path().join("wt").join("config");
+        let config_file = config_dir.path().join("jig").join("config");
         fs::create_dir_all(config_file.parent().unwrap()).unwrap();
         fs::write(&config_file, "_default=main\n").expect("Failed to write config");
 
@@ -79,8 +79,8 @@ impl TestRepo {
         self.dir.path().join(".worktrees")
     }
 
-    fn wt(&self) -> Command {
-        let mut cmd = Command::cargo_bin("wt").expect("Failed to find wt binary");
+    fn jig(&self) -> Command {
+        let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
         cmd.current_dir(self.path());
         cmd.env("XDG_CONFIG_HOME", self.config_dir.path());
         cmd
@@ -95,7 +95,7 @@ impl TestRepo {
 fn test_create_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "test1"])
         .assert()
         .success()
@@ -110,10 +110,10 @@ fn test_list_worktrees() {
     let repo = TestRepo::new();
 
     // Create a worktree first
-    repo.wt().args(["create", "test1"]).assert().success();
+    repo.jig().args(["create", "test1"]).assert().success();
 
     // List should show it
-    repo.wt()
+    repo.jig()
         .args(["list"])
         .assert()
         .success()
@@ -124,7 +124,7 @@ fn test_list_worktrees() {
 fn test_create_with_o_outputs_cd() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "test2", "-o"])
         .assert()
         .success()
@@ -135,9 +135,9 @@ fn test_create_with_o_outputs_cd() {
 fn test_open_outputs_cd() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "test1"]).assert().success();
+    repo.jig().args(["create", "test1"]).assert().success();
 
-    repo.wt()
+    repo.jig()
         .args(["open", "test1"])
         .assert()
         .success()
@@ -149,10 +149,10 @@ fn test_open_outputs_cd() {
 fn test_remove_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "test1"]).assert().success();
+    repo.jig().args(["create", "test1"]).assert().success();
     assert!(repo.worktrees_path().join("test1").exists());
 
-    repo.wt()
+    repo.jig()
         .args(["remove", "test1"])
         .assert()
         .success()
@@ -165,10 +165,10 @@ fn test_remove_worktree() {
 fn test_list_after_remove() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "test1"]).assert().success();
-    repo.wt().args(["remove", "test1"]).assert().success();
+    repo.jig().args(["create", "test1"]).assert().success();
+    repo.jig().args(["remove", "test1"]).assert().success();
 
-    repo.wt()
+    repo.jig()
         .args(["list"])
         .assert()
         .success()
@@ -179,11 +179,11 @@ fn test_list_after_remove() {
 fn test_create_error_no_color_in_stdout() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "errortest"]).assert().success();
+    repo.jig().args(["create", "errortest"]).assert().success();
 
     // Try to create same one with -o
     let output = repo
-        .wt()
+        .jig()
         .args(["create", "errortest", "-o"])
         .output()
         .expect("Failed to run command");
@@ -205,7 +205,7 @@ fn test_create_error_no_color_in_stdout() {
 fn test_nested_path_create() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "feature/test/nested"])
         .assert()
         .success();
@@ -220,12 +220,12 @@ fn test_nested_path_create() {
 fn test_list_shows_nested() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "feature/test/nested"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["list"])
         .assert()
         .success()
@@ -236,15 +236,15 @@ fn test_list_shows_nested() {
 fn test_glob_remove() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "regex-test1"]).assert().success();
-    repo.wt().args(["create", "regex-test2"]).assert().success();
+    repo.jig().args(["create", "regex-test1"]).assert().success();
+    repo.jig().args(["create", "regex-test2"]).assert().success();
 
-    repo.wt()
+    repo.jig()
         .args(["remove", "regex-test*"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["list"])
         .assert()
         .success()
@@ -260,7 +260,7 @@ fn test_config_default() {
     let repo = TestRepo::new();
 
     // Test setup sets _default=main, so we expect "main" (not "origin/main")
-    repo.wt()
+    repo.jig()
         .args(["config"])
         .assert()
         .success()
@@ -271,12 +271,12 @@ fn test_config_default() {
 fn test_config_set_repo_base() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "origin/develop"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base"])
         .assert()
         .success()
@@ -287,17 +287,17 @@ fn test_config_set_repo_base() {
 fn test_config_unset_repo_base() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "origin/develop"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "--unset"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base"])
         .assert()
         .success()
@@ -308,12 +308,12 @@ fn test_config_unset_repo_base() {
 fn test_config_set_global() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "--global", "origin/master"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "--global"])
         .assert()
         .success()
@@ -324,12 +324,12 @@ fn test_config_set_global() {
 fn test_config_global_fallback() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "--global", "origin/master"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config"])
         .assert()
         .success()
@@ -340,17 +340,17 @@ fn test_config_global_fallback() {
 fn test_config_repo_over_global() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "--global", "origin/master"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "origin/feature"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config"])
         .assert()
         .success()
@@ -361,17 +361,17 @@ fn test_config_repo_over_global() {
 fn test_config_list() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "--global", "origin/master"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "base", "origin/feature"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "--list"])
         .assert()
         .success()
@@ -386,12 +386,12 @@ fn test_config_list() {
 fn test_on_create_hook_set_get() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "echo hello"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create"])
         .assert()
         .success()
@@ -402,12 +402,12 @@ fn test_on_create_hook_set_get() {
 fn test_on_create_hook_shows_in_config() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "echo hello"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config"])
         .assert()
         .success()
@@ -419,12 +419,12 @@ fn test_on_create_hook_shows_in_config() {
 fn test_on_create_hook_runs() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "touch hook_ran.txt"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "hook-test"])
         .assert()
         .success();
@@ -440,12 +440,12 @@ fn test_on_create_hook_runs() {
 fn test_no_hooks_skips_hook() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "touch hook_ran.txt"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "no-hook-test", "--no-hooks"])
         .assert()
         .success();
@@ -461,17 +461,17 @@ fn test_no_hooks_skips_hook() {
 fn test_on_create_hook_unset() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "echo hello"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "--unset"])
         .assert()
         .success();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create"])
         .assert()
         .success()
@@ -482,13 +482,13 @@ fn test_on_create_hook_unset() {
 fn test_hook_failure_still_creates_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["config", "on-create", "exit 1"])
         .assert()
         .success();
 
     // The command may fail, but worktree should still exist
-    let _ = repo.wt().args(["create", "fail-hook-test"]).output();
+    let _ = repo.jig().args(["create", "fail-hook-test"]).output();
 
     assert!(repo.worktrees_path().join("fail-hook-test").exists());
 }
@@ -501,7 +501,7 @@ fn test_hook_failure_still_creates_worktree() {
 fn test_exit_from_base_errors() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["exit"])
         .assert()
         .failure()
@@ -512,12 +512,12 @@ fn test_exit_from_base_errors() {
 fn test_exit_from_worktree_removes_only_that_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "exit-test1"]).assert().success();
-    repo.wt().args(["create", "exit-test2"]).assert().success();
+    repo.jig().args(["create", "exit-test1"]).assert().success();
+    repo.jig().args(["create", "exit-test2"]).assert().success();
 
     // Run exit from within the worktree
     let wt_path = repo.worktrees_path().join("exit-test1");
-    let mut cmd = Command::cargo_bin("wt").expect("Failed to find wt binary");
+    let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
     cmd.current_dir(&wt_path);
     cmd.env("XDG_CONFIG_HOME", repo.config_dir.path());
     cmd.args(["exit"])
@@ -536,7 +536,7 @@ fn test_exit_from_worktree_removes_only_that_worktree() {
 fn test_exit_preserves_dirty_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "exit-dirty-test"])
         .assert()
         .success();
@@ -551,7 +551,7 @@ fn test_exit_preserves_dirty_worktree() {
         .expect("Failed to stage file");
 
     // Try to exit without --force (should fail)
-    let mut cmd = Command::cargo_bin("wt").expect("Failed to find wt binary");
+    let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
     cmd.current_dir(&wt_path);
     cmd.env("XDG_CONFIG_HOME", repo.config_dir.path());
     cmd.args(["exit"])
@@ -567,7 +567,7 @@ fn test_exit_preserves_dirty_worktree() {
 fn test_exit_force_removes_dirty_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "exit-force-test"])
         .assert()
         .success();
@@ -582,7 +582,7 @@ fn test_exit_force_removes_dirty_worktree() {
         .expect("Failed to stage file");
 
     // Exit with --force
-    let mut cmd = Command::cargo_bin("wt").expect("Failed to find wt binary");
+    let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
     cmd.current_dir(&wt_path);
     cmd.env("XDG_CONFIG_HOME", repo.config_dir.path());
     cmd.args(["exit", "--force"]).assert().success();
@@ -595,13 +595,13 @@ fn test_exit_force_removes_dirty_worktree() {
 fn test_exit_from_nested_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["create", "feature/nested/test"])
         .assert()
         .success();
 
     let wt_path = repo.worktrees_path().join("feature/nested/test");
-    let mut cmd = Command::cargo_bin("wt").expect("Failed to find wt binary");
+    let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
     cmd.current_dir(&wt_path);
     cmd.env("XDG_CONFIG_HOME", repo.config_dir.path());
     cmd.args(["exit"]).assert().success();
@@ -620,7 +620,7 @@ fn test_exit_from_nested_worktree() {
 fn test_spawn_requires_name() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["spawn"])
         .assert()
         .failure()
@@ -631,7 +631,7 @@ fn test_spawn_requires_name() {
 fn test_ps_with_no_sessions() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["ps"])
         .assert()
         .success()
@@ -642,7 +642,7 @@ fn test_ps_with_no_sessions() {
 fn test_review_requires_name() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["review"])
         .assert()
         .failure()
@@ -653,7 +653,7 @@ fn test_review_requires_name() {
 fn test_merge_requires_name() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["merge"])
         .assert()
         .failure()
@@ -664,7 +664,7 @@ fn test_merge_requires_name() {
 fn test_kill_requires_name() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["kill"])
         .assert()
         .failure()
@@ -675,7 +675,7 @@ fn test_kill_requires_name() {
 fn test_review_nonexistent_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["review", "FAKE-123"])
         .assert()
         .failure()
@@ -686,7 +686,7 @@ fn test_review_nonexistent_worktree() {
 fn test_merge_nonexistent_worktree() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["merge", "FAKE-123"])
         .assert()
         .failure()
@@ -697,7 +697,7 @@ fn test_merge_nonexistent_worktree() {
 fn test_help_includes_spawn_commands() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["--help"])
         .assert()
         .success()
@@ -715,7 +715,7 @@ fn test_help_includes_spawn_commands() {
 fn test_health_command() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["health"])
         .assert()
         .success()
@@ -727,7 +727,7 @@ fn test_health_command() {
 fn test_open_all_no_worktrees() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["open", "--all"])
         .assert()
         .success()
@@ -738,12 +738,12 @@ fn test_open_all_no_worktrees() {
 fn test_open_all_no_cd_output() {
     let repo = TestRepo::new();
 
-    repo.wt().args(["create", "openall-test1"]).assert().success();
-    repo.wt().args(["create", "openall-test2"]).assert().success();
+    repo.jig().args(["create", "openall-test1"]).assert().success();
+    repo.jig().args(["create", "openall-test2"]).assert().success();
 
     // Set a terminal that we know won't have tab support
     let output = repo
-        .wt()
+        .jig()
         .env("TERM_PROGRAM", "test-runner")
         .args(["open", "--all"])
         .output()
@@ -767,7 +767,7 @@ fn test_init_command_exists() {
     let repo = TestRepo::new();
 
     // Init should work or fail with known errors
-    let result = repo.wt().args(["init"]).output().expect("Failed to run");
+    let result = repo.jig().args(["init", "claude"]).output().expect("Failed to run");
 
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
@@ -781,11 +781,11 @@ fn test_init_command_exists() {
 fn test_init_errors_without_force() {
     let repo = TestRepo::new();
 
-    // Create wt.toml to simulate already-initialized repo
-    fs::write(repo.path().join("wt.toml"), "[spawn]\nauto = true\n").unwrap();
+    // Create jig.toml to simulate already-initialized repo
+    fs::write(repo.path().join("jig.toml"), "[spawn]\nauto = true\n").unwrap();
 
-    repo.wt()
-        .args(["init"])
+    repo.jig()
+        .args(["init", "claude"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Already initialized"));
@@ -799,14 +799,14 @@ fn test_init_creates_expected_files() {
     let _ = fs::remove_dir_all(repo.path().join("docs"));
     let _ = fs::remove_dir_all(repo.path().join("issues"));
     let _ = fs::remove_file(repo.path().join("CLAUDE.md"));
-    let _ = fs::remove_file(repo.path().join("wt.toml"));
+    let _ = fs::remove_file(repo.path().join("jig.toml"));
     let _ = fs::remove_dir_all(repo.path().join(".claude"));
 
-    repo.wt().args(["init"]).assert().success();
+    repo.jig().args(["init", "claude"]).assert().success();
 
     assert!(repo.path().join("docs").is_dir());
     assert!(repo.path().join("issues").is_dir());
-    assert!(repo.path().join("wt.toml").is_file());
+    assert!(repo.path().join("jig.toml").is_file());
     assert!(repo.path().join(".claude").is_dir());
 }
 
@@ -814,13 +814,13 @@ fn test_init_creates_expected_files() {
 fn test_wt_toml_no_agents_section() {
     let repo = TestRepo::new();
 
-    let _ = fs::remove_file(repo.path().join("wt.toml"));
-    repo.wt().args(["init"]).assert().success();
+    let _ = fs::remove_file(repo.path().join("jig.toml"));
+    repo.jig().args(["init", "claude"]).assert().success();
 
-    let content = fs::read_to_string(repo.path().join("wt.toml")).unwrap();
+    let content = fs::read_to_string(repo.path().join("jig.toml")).unwrap();
     assert!(
         !content.contains("[agents]"),
-        "wt.toml should not contain [agents] section"
+        "jig.toml should not contain [agents] section"
     );
 }
 
@@ -832,20 +832,20 @@ fn test_wt_toml_no_agents_section() {
 fn test_version() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["version"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("wt"));
+        .stderr(predicate::str::contains("jig"));
 }
 
 #[test]
 fn test_which() {
     let repo = TestRepo::new();
 
-    repo.wt()
+    repo.jig()
         .args(["which"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("wt"));
+        .stdout(predicate::str::contains("jig"));
 }

@@ -4,7 +4,8 @@
 
 use std::path::Path;
 
-use crate::config::{get_base_branch, RepoConfig};
+use crate::adapter;
+use crate::config::{get_base_branch, JigToml, RepoConfig};
 use crate::error::{Error, Result};
 use crate::git;
 use crate::session;
@@ -94,21 +95,18 @@ pub fn launch_tmux_window(
     context: Option<&str>,
 ) -> Result<()> {
     let session_name = get_session_name()?;
+    let repo_root = git::get_base_repo()?;
+
+    // Get adapter from config (fallback to claude-code if not configured)
+    let config = JigToml::load(&repo_root)?.unwrap_or_default();
+    let agent_adapter =
+        adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
 
     // Create window in tmux
     session::create_window(&session_name, name, worktree_path)?;
 
-    // Build claude command
-    let mut cmd = "claude".to_string();
-    if let Some(ctx) = context {
-        // Escape single quotes in context
-        let escaped = ctx.replace('\'', "'\\''");
-        cmd = format!("claude '{}'", escaped);
-    }
-
-    if auto {
-        cmd.push_str(" --dangerously-skip-permissions");
-    }
+    // Build spawn command using adapter
+    let cmd = adapter::build_spawn_command(agent_adapter, context, auto);
 
     // Send command to window
     session::send_keys(&session_name, name, &cmd)?;

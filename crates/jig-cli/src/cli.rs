@@ -126,6 +126,10 @@ pub enum Commands {
 
     /// Initialize repository for jig
     Init {
+        /// Agent framework to initialize (claude, cursor)
+        #[arg(value_name = "AGENT")]
+        agent: String,
+
         /// Reinitialize, overwriting existing files
         #[arg(long, short)]
         force: bool,
@@ -134,7 +138,7 @@ pub enum Commands {
         #[arg(long)]
         backup: bool,
 
-        /// Run Claude audit to populate docs
+        /// Print audit prompt after init
         #[arg(long)]
         audit: bool,
     },
@@ -154,9 +158,6 @@ pub enum Commands {
 
     /// Show terminal and dependency status
     Health,
-
-    /// Launch the terminal UI
-    Tui,
 
     /// Show detailed worker status
     Status {

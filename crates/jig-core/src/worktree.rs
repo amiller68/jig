@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::run_on_create_hook;
+use crate::config::{copy_worktree_files, run_on_create_hook};
 use crate::error::{Error, Result};
 use crate::git;
 
@@ -21,13 +21,16 @@ pub struct Worktree {
 
 impl Worktree {
     /// Create a new worktree
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
+        repo_root: &Path,
         worktrees_dir: &Path,
         git_common_dir: &Path,
         name: &str,
         branch: Option<&str>,
         base_branch: &str,
         on_create_hook: Option<&str>,
+        copy_files: &[String],
     ) -> Result<Self> {
         let worktree_path = worktrees_dir.join(name);
 
@@ -49,6 +52,11 @@ impl Worktree {
 
         // Create the worktree
         git::create_worktree(&worktree_path, branch, base_branch)?;
+
+        // Copy configured files (e.g., .env)
+        if !copy_files.is_empty() {
+            copy_worktree_files(repo_root, &worktree_path, copy_files)?;
+        }
 
         // Run on-create hook if configured
         if let Some(hook) = on_create_hook {

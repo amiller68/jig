@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 const DEFAULT_BASE_BRANCH: &str = "origin/main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 
-/// Repository configuration (stored in wt.toml and state file)
+/// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoConfig {
     /// Default base branch for new worktrees
@@ -239,7 +239,25 @@ pub fn run_on_create_hook(hook: &str, dir: &Path) -> Result<bool> {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JigToml {
     #[serde(default)]
+    pub worktree: WorktreeConfig,
+    #[serde(default)]
     pub spawn: SpawnConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
+}
+
+/// Worktree configuration in jig.toml
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct WorktreeConfig {
+    /// Base branch for new worktrees (overrides global config)
+    #[serde(default)]
+    pub base: Option<String>,
+    /// Shell command to run after worktree creation
+    #[serde(default)]
+    pub on_create: Option<String>,
+    /// Gitignored files to copy to new worktrees (e.g., [".env", ".env.local"])
+    #[serde(default)]
+    pub copy: Vec<String>,
 }
 
 /// Spawn configuration in jig.toml
@@ -249,8 +267,28 @@ pub struct SpawnConfig {
     pub auto: bool,
 }
 
+/// Agent configuration in jig.toml
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Agent type (e.g., "claude-code", "cursor")
+    #[serde(rename = "type", default = "default_agent_type")]
+    pub agent_type: String,
+}
+
+fn default_agent_type() -> String {
+    "claude".to_string()
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            agent_type: default_agent_type(),
+        }
+    }
+}
+
 impl JigToml {
-    /// Read jig.toml from a repository (falls back to wt.toml for compatibility)
+    /// Read jig.toml from a repository (falls back to jig.toml for compatibility)
     pub fn load(repo_root: &Path) -> Result<Option<Self>> {
         // Try jig.toml first
         let toml_path = repo_root.join("jig.toml");
@@ -260,8 +298,8 @@ impl JigToml {
             return Ok(Some(config));
         }
 
-        // Fall back to wt.toml for backward compatibility
-        let legacy_path = repo_root.join("wt.toml");
+        // Fall back to jig.toml for backward compatibility
+        let legacy_path = repo_root.join("jig.toml");
         if legacy_path.exists() {
             let content = fs::read_to_string(&legacy_path)?;
             let config: JigToml = toml::from_str(&content)?;
@@ -271,15 +309,25 @@ impl JigToml {
         Ok(None)
     }
 
-    /// Check if jig.toml (or wt.toml) exists
+    /// Check if jig.toml (or jig.toml) exists
     pub fn exists(repo_root: &Path) -> bool {
-        repo_root.join("jig.toml").exists() || repo_root.join("wt.toml").exists()
+        repo_root.join("jig.toml").exists() || repo_root.join("jig.toml").exists()
     }
 }
 
 /// Get the base branch for the current repository (convenience function)
+/// Priority: jig.toml > repo-specific global config > global default > hardcoded fallback
 pub fn get_base_branch() -> Result<String> {
     let repo_path = crate::git::get_base_repo()?;
+
+    // Check jig.toml first
+    if let Some(jig_toml) = JigToml::load(&repo_path)? {
+        if let Some(base) = jig_toml.worktree.base {
+            return Ok(base);
+        }
+    }
+
+    // Fall back to global config
     let config = Config::load()?;
     Ok(config.get_base_branch(&repo_path))
 }
@@ -291,11 +339,25 @@ pub fn read_jig_toml() -> Result<Option<JigToml>> {
 }
 
 /// Run on-create hook if configured for current repo (convenience function)
+/// Priority: jig.toml > global config
 pub fn run_on_create_hook_for_repo(worktree_path: &Path) -> Result<()> {
     let repo_path = crate::git::get_base_repo()?;
-    let config = Config::load()?;
 
-    if let Some(hook) = config.get_on_create_hook(&repo_path) {
+    // Check jig.toml first
+    let hook = if let Some(jig_toml) = JigToml::load(&repo_path)? {
+        jig_toml.worktree.on_create
+    } else {
+        None
+    };
+
+    // Fall back to global config
+    let hook = hook.or_else(|| {
+        Config::load()
+            .ok()
+            .and_then(|c| c.get_on_create_hook(&repo_path))
+    });
+
+    if let Some(hook) = hook {
         let success = run_on_create_hook(&hook, worktree_path)?;
         if !success {
             tracing::warn!("on-create hook returned non-zero exit code");
@@ -305,22 +367,46 @@ pub fn run_on_create_hook_for_repo(worktree_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Configuration display for `wt config` command
+/// Configuration display for `jig config` command
 pub struct ConfigDisplay {
     pub effective_base: String,
+    pub toml_base: Option<String>,
     pub repo_base: Option<String>,
     pub global_base: Option<String>,
-    pub on_create_hook: Option<String>,
+    pub effective_on_create: Option<String>,
+    pub toml_on_create: Option<String>,
+    pub global_on_create: Option<String>,
 }
 
 impl ConfigDisplay {
     pub fn load(repo_path: &Path) -> Result<Self> {
         let config = Config::load()?;
+        let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
+
+        // Get effective base branch (jig.toml > repo config > global > default)
+        let effective_base = jig_toml
+            .worktree
+            .base
+            .clone()
+            .or_else(|| config.get_repo_base_branch(repo_path))
+            .or_else(|| config.get_global_base_branch())
+            .unwrap_or_else(|| DEFAULT_BASE_BRANCH.to_string());
+
+        // Get effective on-create hook (jig.toml > global config)
+        let effective_on_create = jig_toml
+            .worktree
+            .on_create
+            .clone()
+            .or_else(|| config.get_on_create_hook(repo_path));
+
         Ok(Self {
-            effective_base: config.get_base_branch(repo_path),
+            effective_base,
+            toml_base: jig_toml.worktree.base,
             repo_base: config.get_repo_base_branch(repo_path),
             global_base: config.get_global_base_branch(),
-            on_create_hook: config.get_on_create_hook(repo_path),
+            effective_on_create,
+            toml_on_create: jig_toml.worktree.on_create,
+            global_on_create: config.get_on_create_hook(repo_path),
         })
     }
 
@@ -399,8 +485,18 @@ pub fn unset_on_create_hook() -> Result<()> {
 }
 
 /// Get on-create hook for current repo
+/// Priority: jig.toml > global config
 pub fn get_on_create_hook() -> Result<Option<String>> {
     let repo_path = crate::git::get_base_repo()?;
+
+    // Check jig.toml first
+    if let Some(jig_toml) = JigToml::load(&repo_path)? {
+        if jig_toml.worktree.on_create.is_some() {
+            return Ok(jig_toml.worktree.on_create);
+        }
+    }
+
+    // Fall back to global config
     let config = Config::load()?;
     Ok(config.get_on_create_hook(&repo_path))
 }
@@ -409,4 +505,32 @@ pub fn get_on_create_hook() -> Result<Option<String>> {
 pub fn has_jig_toml() -> Result<bool> {
     let repo_root = crate::git::get_base_repo()?;
     Ok(JigToml::exists(&repo_root))
+}
+
+/// Get list of files to copy to new worktrees
+pub fn get_copy_files() -> Result<Vec<String>> {
+    let repo_root = crate::git::get_base_repo()?;
+    if let Some(jig_toml) = JigToml::load(&repo_root)? {
+        Ok(jig_toml.worktree.copy)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Copy configured files from source to destination
+pub fn copy_worktree_files(src_root: &Path, dst_root: &Path, files: &[String]) -> Result<()> {
+    for file in files {
+        let src = src_root.join(file);
+        let dst = dst_root.join(file);
+
+        if src.exists() {
+            // Create parent directories if needed
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(&src, &dst)?;
+            tracing::info!("Copied {} to worktree", file);
+        }
+    }
+    Ok(())
 }
