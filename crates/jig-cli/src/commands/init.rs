@@ -19,7 +19,12 @@ const DOCS_PROJECT_LAYOUT: &str = include_str!("../../../../templates/docs/PROJE
 
 // Issues templates
 const ISSUES_README: &str = include_str!("../../../../templates/issues/README.md");
-const ISSUES_TEMPLATE: &str = include_str!("../../../../templates/issues/_template.md");
+const ISSUES_TEMPLATE_STANDALONE: &str =
+    include_str!("../../../../templates/issues/_templates/standalone.md");
+const ISSUES_TEMPLATE_EPIC: &str =
+    include_str!("../../../../templates/issues/_templates/epic-index.md");
+const ISSUES_TEMPLATE_TICKET: &str =
+    include_str!("../../../../templates/issues/_templates/ticket.md");
 
 // Skills
 const SKILL_CHECK: &str = include_str!("../../../../templates/skills/check/SKILL.md");
@@ -128,8 +133,16 @@ pub fn run(agent: &str, force: bool, backup: bool, audit: bool) -> Result<()> {
         None
     };
 
-    // Create generic directories (docs, issues)
-    let generic_dirs = ["docs", "issues"];
+    // Create generic directories
+    let generic_dirs = [
+        "docs",
+        "issues",
+        "issues/_templates",
+        "issues/epics",
+        "issues/features",
+        "issues/bugs",
+        "issues/chores",
+    ];
     for dir in generic_dirs {
         let path = repo.join(dir);
         if !path.exists() {
@@ -206,8 +219,22 @@ type = "{}"
     )?;
     write_file(
         &repo,
-        "issues/_template.md",
-        ISSUES_TEMPLATE,
+        "issues/_templates/standalone.md",
+        ISSUES_TEMPLATE_STANDALONE,
+        force,
+        backup_dir_opt,
+    )?;
+    write_file(
+        &repo,
+        "issues/_templates/epic-index.md",
+        ISSUES_TEMPLATE_EPIC,
+        force,
+        backup_dir_opt,
+    )?;
+    write_file(
+        &repo,
+        "issues/_templates/ticket.md",
+        ISSUES_TEMPLATE_TICKET,
         force,
         backup_dir_opt,
     )?;

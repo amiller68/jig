@@ -5,6 +5,9 @@ _wt
 .claude-task
 .claude-spawn-prompt
 
+# jig init --backup
+.backup/
+
 
 # Added by cargo
 
