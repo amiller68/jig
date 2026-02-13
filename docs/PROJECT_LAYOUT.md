@@ -31,9 +31,6 @@ jig/
 │   │           ├── list.rs
 │   │           ├── spawn.rs
 │   │           └── ...
-│   │
-│   └── jig-tui/            # Terminal UI (stub, not implemented)
-│       └── src/
 │
 ├── templates/              # Templates for jig init
 │   ├── PROJECT.md          # -> CLAUDE.md
@@ -77,7 +74,7 @@ jig/
 ## Configuration
 
 - `~/.config/jig/config` — Global user configuration (base branch, hooks)
-- `jig.toml` or `wt.toml` — Per-repository configuration
+- `jig.toml` or `jig.toml` — Per-repository configuration
 - `.claude/settings.json` — Claude Code settings (when initialized with jig)
 
 ## Tests

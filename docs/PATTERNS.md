@@ -87,7 +87,7 @@ println!("cd '{}'", canonical.display());
 #[test]
 fn test_create_worktree() {
     let repo = TestRepo::new();
-    repo.wt()
+    repo.jig()
         .args(["create", "test1"])
         .assert()
         .success()

@@ -18,8 +18,7 @@ cargo run -- <args>      # Run CLI (e.g., cargo run -- list)
 ```
 crates/
 ├── jig-core/      # Core library (worktree, config, worker, git)
-├── jig-cli/       # CLI binary (wt command)
-└── jig-tui/       # Terminal UI (stub)
+└── jig-cli/       # CLI binary
 
 templates/         # Templates for jig init
 tests/             # Integration tests

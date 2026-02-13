@@ -1,4 +1,4 @@
-//! Which command - show path to wt executable
+//! Which command - show path to jig executable
 
 use anyhow::Result;
 

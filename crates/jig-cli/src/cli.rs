@@ -159,9 +159,6 @@ pub enum Commands {
     /// Show terminal and dependency status
     Health,
 
-    /// Launch the terminal UI
-    Tui,
-
     /// Show detailed worker status
     Status {
         /// Worker name

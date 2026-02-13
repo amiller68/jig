@@ -66,7 +66,6 @@ fn run() -> Result<()> {
         Some(Commands::Version) => commands::version(),
         Some(Commands::Which) => commands::which(),
         Some(Commands::Health) => commands::health(),
-        Some(Commands::Tui) => commands::tui(),
         Some(Commands::Status { name }) => commands::status(name.as_deref()),
         Some(Commands::ShellInit { shell }) => commands::shell_init(&shell),
         Some(Commands::ShellSetup { dry_run }) => commands::shell_setup(dry_run),
@@ -103,9 +102,6 @@ fn print_help() {
         "merge".cyan()
     );
     eprintln!("  {}        Kill a running tmux window", "kill".cyan());
-    eprintln!();
-    eprintln!("{}", "TUI:".bold());
-    eprintln!("  {}         Launch the terminal UI", "tui".cyan());
     eprintln!();
     eprintln!("{}", "UTILITY:".bold());
     eprintln!("  {}        Initialize repository for jig", "init".cyan());

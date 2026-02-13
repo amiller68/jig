@@ -31,10 +31,6 @@ clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 colored = "2"
 
-# TUI
-ratatui = "0.26"
-crossterm = "0.27"
-
 # Async
 tokio = { version = "1", features = ["full"] }
 
@@ -54,4 +50,3 @@ predicates = "3"
 # Internal crates
 jig-core = { path = "crates/jig-core" }
 jig-cli = { path = "crates/jig-cli" }
-jig-tui = { path = "crates/jig-tui" }

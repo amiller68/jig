@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 const DEFAULT_BASE_BRANCH: &str = "origin/main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 
-/// Repository configuration (stored in wt.toml and state file)
+/// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoConfig {
     /// Default base branch for new worktrees
@@ -272,7 +272,7 @@ impl Default for AgentConfig {
 }
 
 impl JigToml {
-    /// Read jig.toml from a repository (falls back to wt.toml for compatibility)
+    /// Read jig.toml from a repository (falls back to jig.toml for compatibility)
     pub fn load(repo_root: &Path) -> Result<Option<Self>> {
         // Try jig.toml first
         let toml_path = repo_root.join("jig.toml");
@@ -282,8 +282,8 @@ impl JigToml {
             return Ok(Some(config));
         }
 
-        // Fall back to wt.toml for backward compatibility
-        let legacy_path = repo_root.join("wt.toml");
+        // Fall back to jig.toml for backward compatibility
+        let legacy_path = repo_root.join("jig.toml");
         if legacy_path.exists() {
             let content = fs::read_to_string(&legacy_path)?;
             let config: JigToml = toml::from_str(&content)?;
@@ -293,9 +293,9 @@ impl JigToml {
         Ok(None)
     }
 
-    /// Check if jig.toml (or wt.toml) exists
+    /// Check if jig.toml (or jig.toml) exists
     pub fn exists(repo_root: &Path) -> bool {
-        repo_root.join("jig.toml").exists() || repo_root.join("wt.toml").exists()
+        repo_root.join("jig.toml").exists() || repo_root.join("jig.toml").exists()
     }
 }
 
@@ -327,7 +327,7 @@ pub fn run_on_create_hook_for_repo(worktree_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Configuration display for `wt config` command
+/// Configuration display for `jig config` command
 pub struct ConfigDisplay {
     pub effective_base: String,
     pub repo_base: Option<String>,
