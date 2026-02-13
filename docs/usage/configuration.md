@@ -1,8 +1,33 @@
 # Configuration and Hooks
 
-Configure base branches and on-create hooks per-repo or globally.
+Configure base branches, on-create hooks, and file copying per-repo or globally.
 
-## Base Branch
+## jig.toml (Recommended)
+
+The recommended way to configure jig is via `jig.toml` in your repo root. This file is committed and shared with your team:
+
+```toml
+[worktree]
+base = "origin/main"           # Base branch for new worktrees
+on_create = "npm install"      # Command to run after worktree creation
+copy = [".env", ".env.local"]  # Gitignored files to copy to new worktrees
+
+[spawn]
+auto = true                    # Auto-start Claude with full permissions
+
+[agent]
+type = "claude"                # Agent framework (claude, cursor)
+```
+
+**Priority:** jig.toml settings override global config.
+
+---
+
+## Global Config
+
+You can also configure settings globally via `jig config`. This is stored in `~/.config/jig/config`.
+
+### Base Branch
 
 By default, new branches are created from `origin/main`. Override this per-repo or globally:
 
@@ -94,3 +119,14 @@ jig config on-create 'uv sync'               # Python UV project
 jig config on-create 'make install'          # Makefile-based project
 jig config on-create 'bundle install'        # Ruby project
 ```
+
+## Copying Gitignored Files
+
+Some files like `.env` are gitignored but needed in worktrees. Configure jig.toml to copy them automatically:
+
+```toml
+[worktree]
+copy = [".env", ".env.local", ".secrets"]
+```
+
+Files are copied from the repo root to the new worktree after creation, before the on_create hook runs. Missing files are silently skipped.
