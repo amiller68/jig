@@ -95,4 +95,4 @@ jig/
 
 - `target/debug/` — Debug builds
 - `target/release/` — Release builds
-- Binary names: `wt` (CLI), `jig-tui` (TUI)
+- Binary names: `jig` (CLI), `jig-tui` (TUI)

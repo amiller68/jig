@@ -46,7 +46,7 @@ Track work items in `issues/`. See `issues/README.md` for the convention.
 - Use `thiserror` for typed errors in jig-core, `anyhow::Result` at CLI level
 - Integration tests required for new CLI commands
 - Status messages go to stderr, machine-readable output to stdout
-- CLI binary is named `wt` (not `jig`)
+- CLI binary is named `jig`
 
 ## Do Not
 
