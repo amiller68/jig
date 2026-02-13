@@ -6,6 +6,7 @@ use colored::Colorize;
 use jig_core::{config, git, Error};
 
 pub fn run(name: &str, branch: Option<&str>, open: bool, no_hooks: bool) -> Result<()> {
+    let repo_root = git::get_base_repo()?;
     let worktrees_dir = git::get_worktrees_dir()?;
     let worktree_path = worktrees_dir.join(name);
 
@@ -35,6 +36,17 @@ pub fn run(name: &str, branch: Option<&str>, open: bool, no_hooks: bool) -> Resu
         name.cyan(),
         branch.cyan()
     );
+
+    // Copy configured files (e.g., .env)
+    let copy_files = config::get_copy_files()?;
+    if !copy_files.is_empty() {
+        config::copy_worktree_files(&repo_root, &worktree_path, &copy_files)?;
+        for file in &copy_files {
+            if repo_root.join(file).exists() {
+                eprintln!("  {} Copied {}", "→".dimmed(), file);
+            }
+        }
+    }
 
     // Run on-create hook unless --no-hooks
     if !no_hooks {

@@ -170,8 +170,9 @@ pub fn run(agent: &str, force: bool, backup: bool, audit: bool) -> Result<()> {
     let jig_toml_content = format!(
         r#"# Worktree configuration
 [worktree]
-# base = "origin/main"    # Base branch for new worktrees
+# base = "origin/main"       # Base branch for new worktrees
 # on_create = "npm install"  # Command to run after worktree creation
+# copy = [".env"]            # Gitignored files to copy to new worktrees
 
 # Spawn configuration
 [spawn]

@@ -255,6 +255,9 @@ pub struct WorktreeConfig {
     /// Shell command to run after worktree creation
     #[serde(default)]
     pub on_create: Option<String>,
+    /// Gitignored files to copy to new worktrees (e.g., [".env", ".env.local"])
+    #[serde(default)]
+    pub copy: Vec<String>,
 }
 
 /// Spawn configuration in jig.toml
@@ -502,4 +505,32 @@ pub fn get_on_create_hook() -> Result<Option<String>> {
 pub fn has_jig_toml() -> Result<bool> {
     let repo_root = crate::git::get_base_repo()?;
     Ok(JigToml::exists(&repo_root))
+}
+
+/// Get list of files to copy to new worktrees
+pub fn get_copy_files() -> Result<Vec<String>> {
+    let repo_root = crate::git::get_base_repo()?;
+    if let Some(jig_toml) = JigToml::load(&repo_root)? {
+        Ok(jig_toml.worktree.copy)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Copy configured files from source to destination
+pub fn copy_worktree_files(src_root: &Path, dst_root: &Path, files: &[String]) -> Result<()> {
+    for file in files {
+        let src = src_root.join(file);
+        let dst = dst_root.join(file);
+
+        if src.exists() {
+            // Create parent directories if needed
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(&src, &dst)?;
+            tracing::info!("Copied {} to worktree", file);
+        }
+    }
+    Ok(())
 }
