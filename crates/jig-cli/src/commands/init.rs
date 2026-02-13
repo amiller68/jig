@@ -1,18 +1,14 @@
 //! Init command - initialize repository for jig
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
-use jig_core::{config, git, Error};
+use jig_core::{adapter, config, git, Error};
 
 // Embed templates at compile time from the templates/ directory
-const JIG_TOML_CONTENT: &str = r#"[spawn]
-auto = true
-"#;
-
-const CLAUDE_MD_TEMPLATE: &str = include_str!("../../../../templates/CLAUDE.md");
+const PROJECT_MD_TEMPLATE: &str = include_str!("../../../../templates/CLAUDE.md");
 
 // Docs templates
 const DOCS_INDEX: &str = include_str!("../../../../templates/docs/index.md");
@@ -31,6 +27,10 @@ const SKILL_DRAFT: &str = include_str!("../../../../templates/skills/draft/SKILL
 const SKILL_ISSUES: &str = include_str!("../../../../templates/skills/issues/SKILL.md");
 const SKILL_REVIEW: &str = include_str!("../../../../templates/skills/review/SKILL.md");
 const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/spawn/SKILL.md");
+
+// Agent-specific templates
+const CLAUDE_SETTINGS_JSON: &str =
+    include_str!("../../../../templates/adapters/claude-code/settings.json");
 
 const AUDIT_PROMPT: &str = r#"
 Audit this codebase and populate the skeleton documentation files with project-specific content.
@@ -78,88 +78,29 @@ Audit this codebase and populate the skeleton documentation files with project-s
 Remove HTML comment placeholders as you fill in actual content. Commit when done.
 "#;
 
-const SETTINGS_JSON: &str = r#"{
-  "$schema": "https://claude.ai/schemas/claude-settings.json",
-  "permissions": {
-    "allow": [
-      "Bash(git status)",
-      "Bash(git log:*)",
-      "Bash(git diff:*)",
-      "Bash(git branch:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(git pull:*)",
-      "Bash(git checkout:*)",
-      "Bash(git switch:*)",
-      "Bash(git fetch:*)",
-      "Bash(git stash:*)",
-      "Bash(gh pr view:*)",
-      "Bash(gh pr list:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr checkout:*)",
-      "Bash(gh issue:*)",
-      "Bash(gh repo view:*)",
-      "Bash(cargo *)",
-      "Bash(npm *)",
-      "Bash(pnpm *)",
-      "Bash(yarn *)",
-      "Bash(bun *)",
-      "Bash(make *)",
-      "Bash(go *)",
-      "Bash(python *)",
-      "Bash(python3 *)",
-      "Bash(pytest *)",
-      "Bash(uv *)",
-      "Bash(pip *)",
-      "Bash(bundle *)",
-      "Bash(rake *)",
-      "Bash(jig *)",
-      "Bash(tmux *)",
-      "Bash(ls *)",
-      "Bash(pwd)",
-      "Bash(which *)",
-      "Bash(cat *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(wc *)",
-      "Bash(find *)",
-      "Bash(grep *)",
-      "Bash(./test.sh *)"
-    ],
-    "ask": [
-      "Bash(git merge:*)",
-      "Bash(git rebase:*)",
-      "Bash(git reset:*)",
-      "Bash(gh pr merge:*)"
-    ],
-    "deny": [
-      "Bash(rm -rf /)",
-      "Bash(rm -rf ~)",
-      "Bash(rm -rf .)",
-      "Bash(sudo *)",
-      "Bash(git push --force *)",
-      "Bash(git push -f *)",
-      "Bash(git reset --hard *)",
-      "Bash(cat .env*)",
-      "Bash(cat */.env*)",
-      "Bash(cat *.pem)",
-      "Bash(cat *.key)",
-      "Bash(cat *credentials*)"
-    ]
-  }
-}
-"#;
-
-pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
+pub fn run(agent: &str, force: bool, backup: bool, audit: bool) -> Result<()> {
     let repo = git::get_base_repo()?;
+
+    // Validate agent argument
+    let adapter = adapter::get_adapter(agent).ok_or_else(|| {
+        anyhow!(
+            "Unknown agent: '{}'. Supported agents: {}",
+            agent,
+            adapter::supported_agents().join(", ")
+        )
+    })?;
 
     // Check if already initialized
     if config::has_jig_toml()? && !force {
         return Err(Error::AlreadyInitialized.into());
     }
 
-    eprintln!("{} Initializing jig in {}", "→".cyan(), repo.display());
+    eprintln!(
+        "{} Initializing jig for {} in {}",
+        "→".cyan(),
+        adapter.name,
+        repo.display()
+    );
 
     // Create backup directory if backup is enabled
     let backup_dir = repo.join(".backup");
@@ -168,17 +109,15 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
         eprintln!("  {} Created .backup/", "✓".green());
     }
 
-    // Create directories
-    let dirs = [
-        "docs",
-        "issues",
-        ".claude/skills/check",
-        ".claude/skills/draft",
-        ".claude/skills/issues",
-        ".claude/skills/review",
-        ".claude/skills/spawn",
-    ];
-    for dir in dirs {
+    let backup_dir_opt = if backup {
+        Some(backup_dir.as_path())
+    } else {
+        None
+    };
+
+    // Create generic directories (docs, issues)
+    let generic_dirs = ["docs", "issues"];
+    for dir in generic_dirs {
         let path = repo.join(dir);
         if !path.exists() {
             fs::create_dir_all(&path)?;
@@ -186,53 +125,145 @@ pub fn run(force: bool, backup: bool, audit: bool) -> Result<()> {
         }
     }
 
-    let backup_dir_opt = if backup {
-        Some(backup_dir.as_path())
-    } else {
-        None
-    };
+    // Create adapter-specific skill directories
+    let skill_names = ["check", "draft", "issues", "review", "spawn"];
+    for skill in skill_names {
+        let dir = repo.join(adapter.skills_dir).join(skill);
+        if !dir.exists() {
+            fs::create_dir_all(&dir)?;
+            eprintln!(
+                "  {} Created {}/{}/",
+                "✓".green(),
+                adapter.skills_dir,
+                skill
+            );
+        }
+    }
 
-    // Write jig.toml
-    write_file(&repo, "jig.toml", JIG_TOML_CONTENT, force, backup_dir_opt)?;
+    // Write jig.toml with agent type
+    let jig_toml_content = format!(
+        r#"[spawn]
+auto = true
 
-    // Write CLAUDE.md
-    write_file(&repo, "CLAUDE.md", CLAUDE_MD_TEMPLATE, force, backup_dir_opt)?;
+[agent]
+type = "{}"
+"#,
+        agent
+    );
+    write_file(&repo, "jig.toml", &jig_toml_content, force, backup_dir_opt)?;
 
-    // Write docs files
+    // Write generic docs files
     write_file(&repo, "docs/index.md", DOCS_INDEX, force, backup_dir_opt)?;
-    write_file(&repo, "docs/PATTERNS.md", DOCS_PATTERNS, force, backup_dir_opt)?;
-    write_file(&repo, "docs/CONTRIBUTING.md", DOCS_CONTRIBUTING, force, backup_dir_opt)?;
-    write_file(&repo, "docs/SUCCESS_CRITERIA.md", DOCS_SUCCESS_CRITERIA, force, backup_dir_opt)?;
-    write_file(&repo, "docs/PROJECT_LAYOUT.md", DOCS_PROJECT_LAYOUT, force, backup_dir_opt)?;
+    write_file(
+        &repo,
+        "docs/PATTERNS.md",
+        DOCS_PATTERNS,
+        force,
+        backup_dir_opt,
+    )?;
+    write_file(
+        &repo,
+        "docs/CONTRIBUTING.md",
+        DOCS_CONTRIBUTING,
+        force,
+        backup_dir_opt,
+    )?;
+    write_file(
+        &repo,
+        "docs/SUCCESS_CRITERIA.md",
+        DOCS_SUCCESS_CRITERIA,
+        force,
+        backup_dir_opt,
+    )?;
+    write_file(
+        &repo,
+        "docs/PROJECT_LAYOUT.md",
+        DOCS_PROJECT_LAYOUT,
+        force,
+        backup_dir_opt,
+    )?;
 
     // Write issues files
-    write_file(&repo, "issues/README.md", ISSUES_README, force, backup_dir_opt)?;
-    write_file(&repo, "issues/_template.md", ISSUES_TEMPLATE, force, backup_dir_opt)?;
+    write_file(
+        &repo,
+        "issues/README.md",
+        ISSUES_README,
+        force,
+        backup_dir_opt,
+    )?;
+    write_file(
+        &repo,
+        "issues/_template.md",
+        ISSUES_TEMPLATE,
+        force,
+        backup_dir_opt,
+    )?;
 
-    // Write .claude/settings.json
-    write_file(&repo, ".claude/settings.json", SETTINGS_JSON, force, backup_dir_opt)?;
+    // Write adapter-specific project file (CLAUDE.md, .cursorrules, etc.)
+    write_file(
+        &repo,
+        adapter.project_file,
+        PROJECT_MD_TEMPLATE,
+        force,
+        backup_dir_opt,
+    )?;
 
-    // Write skills
-    write_file(&repo, ".claude/skills/check/SKILL.md", SKILL_CHECK, force, backup_dir_opt)?;
-    write_file(&repo, ".claude/skills/draft/SKILL.md", SKILL_DRAFT, force, backup_dir_opt)?;
-    write_file(&repo, ".claude/skills/issues/SKILL.md", SKILL_ISSUES, force, backup_dir_opt)?;
-    write_file(&repo, ".claude/skills/review/SKILL.md", SKILL_REVIEW, force, backup_dir_opt)?;
-    write_file(&repo, ".claude/skills/spawn/SKILL.md", SKILL_SPAWN, force, backup_dir_opt)?;
+    // Write adapter-specific settings file if applicable
+    if let Some(settings_path) = adapter.settings_file {
+        let settings_content = get_settings_content(adapter);
+        write_file(
+            &repo,
+            settings_path,
+            settings_content,
+            force,
+            backup_dir_opt,
+        )?;
+    }
+
+    // Write skills using adapter's skill file name
+    let skills = [
+        ("check", SKILL_CHECK),
+        ("draft", SKILL_DRAFT),
+        ("issues", SKILL_ISSUES),
+        ("review", SKILL_REVIEW),
+        ("spawn", SKILL_SPAWN),
+    ];
+    for (skill_name, content) in skills {
+        let path = format!(
+            "{}/{}/{}",
+            adapter.skills_dir, skill_name, adapter.skill_file
+        );
+        write_file(&repo, &path, content, force, backup_dir_opt)?;
+    }
 
     eprintln!();
     eprintln!("{} Initialization complete", "✓".green().bold());
 
     if audit {
-        eprintln!();
-        eprintln!(
-            "{} Run this to audit and populate documentation:",
-            "→".cyan()
-        );
-        eprintln!();
-        eprintln!("  claude \"{}\"", AUDIT_PROMPT.trim());
+        print_audit_prompt(adapter);
     }
 
     Ok(())
+}
+
+/// Get settings file content for an adapter
+fn get_settings_content(adapter: &adapter::AgentAdapter) -> &'static str {
+    match adapter.name {
+        "claude-code" => CLAUDE_SETTINGS_JSON,
+        // Future adapters can have their own settings
+        _ => "",
+    }
+}
+
+/// Print the audit prompt for an adapter
+fn print_audit_prompt(adapter: &adapter::AgentAdapter) {
+    eprintln!();
+    eprintln!(
+        "{} Run this to audit and populate documentation:",
+        "→".cyan()
+    );
+    eprintln!();
+    eprintln!("  {} \"{}\"", adapter.command, AUDIT_PROMPT.trim());
 }
 
 fn write_file(

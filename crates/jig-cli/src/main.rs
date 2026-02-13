@@ -57,10 +57,11 @@ fn run() -> Result<()> {
         Some(Commands::Merge { name }) => commands::merge(&name),
         Some(Commands::Kill { name }) => commands::kill(&name),
         Some(Commands::Init {
+            agent,
             force,
             backup,
             audit,
-        }) => commands::init(force, backup, audit),
+        }) => commands::init(&agent, force, backup, audit),
         Some(Commands::Update { force }) => commands::update(force),
         Some(Commands::Version) => commands::version(),
         Some(Commands::Which) => commands::which(),

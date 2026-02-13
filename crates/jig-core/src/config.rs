@@ -240,6 +240,8 @@ pub fn run_on_create_hook(hook: &str, dir: &Path) -> Result<bool> {
 pub struct JigToml {
     #[serde(default)]
     pub spawn: SpawnConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 /// Spawn configuration in jig.toml
@@ -247,6 +249,26 @@ pub struct JigToml {
 pub struct SpawnConfig {
     #[serde(default)]
     pub auto: bool,
+}
+
+/// Agent configuration in jig.toml
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Agent type (e.g., "claude-code", "cursor")
+    #[serde(rename = "type", default = "default_agent_type")]
+    pub agent_type: String,
+}
+
+fn default_agent_type() -> String {
+    "claude".to_string()
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            agent_type: default_agent_type(),
+        }
+    }
 }
 
 impl JigToml {
