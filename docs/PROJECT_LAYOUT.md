@@ -32,11 +32,8 @@ jig/
 │   │           ├── spawn.rs
 │   │           └── ...
 │   │
-│   └── jig-tui/            # Terminal UI
+│   └── jig-tui/            # Terminal UI (stub, not implemented)
 │       └── src/
-│           ├── main.rs
-│           ├── app.rs      # Application state
-│           └── ui.rs       # Rendering
 │
 ├── templates/              # Templates for jig init
 │   ├── PROJECT.md          # -> CLAUDE.md
@@ -74,9 +71,6 @@ jig/
   - Dispatches to command handlers
   - Handles errors and exit codes
 
-- **TUI**: `crates/jig-tui/src/main.rs`
-  - Launches ratatui-based terminal UI
-
 - **Library**: `crates/jig-core/src/lib.rs`
   - Exports public types and functions
 
@@ -95,4 +89,4 @@ jig/
 
 - `target/debug/` — Debug builds
 - `target/release/` — Release builds
-- Binary names: `jig` (CLI), `jig-tui` (TUI)
+- Binary name: `jig`
