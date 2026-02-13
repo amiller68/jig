@@ -64,7 +64,7 @@ impl TestRepo {
             .expect("Failed to fetch");
 
         // Set global config to use "main" as base branch (since origin/main doesn't exist in test repos)
-        let config_file = config_dir.path().join("wt").join("config");
+        let config_file = config_dir.path().join("jig").join("config");
         fs::create_dir_all(config_file.parent().unwrap()).unwrap();
         fs::write(&config_file, "_default=main\n").expect("Failed to write config");
 
