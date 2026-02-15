@@ -1,0 +1,58 @@
+# [Title]
+
+**Status:** Planned
+**Priority:** High
+
+## Objective
+
+Curerntly the output of `jig ps` displays as the following:
+```
+jax-fs   main !1   v1.91.0
+> jig ps
+NAME             STATUS       BRANCH               COMMITS  DIRTY
+bucket-publish-cli running      bucket-publish-cli          1 -
+cli-binary-release running      cli-binary-release          2 ●
+desktop-fuse-build-separation no-window    desktop-fuse-build-separation        3 ●
+desktop-fuse-build-separation no-window    desktop-fuse-build-separation        3 ●
+cli-binary-release running      cli-binary-release          2 ●
+share-removal    running      share-removal               1 -
+importbao-size-rejections no-window    importbao-size-rejections        0 -
+desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
+daemon-local-cache no-window    daemon-local-cache          0 -
+desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
+daemon-local-cache no-window    daemon-local-cache          0 -
+importbao-size-rejections no-window    importbao-size-rejections        0 -
+fuse-missing-operations no-window    fuse-missing-operations        0 -
+cli-binary-release running      cli-binary-release          2 ●
+desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
+bucket-publish-cli running      bucket-publish-cli          1 -
+share-removal    running      share-removal               1 -
+native-file-dialog no-window    native-file-dialog          0 -
+desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
+cli-binary-release running      cli-binary-release          2 ●
+bucket-publish-cli running      bucket-publish-cli          1 -
+share-removal    running      share-removal               1 -
+native-file-dialog no-window    native-file-dialog          0 -
+fuse-missing-operations no-window    fuse-missing-operations        0 -
+```
+
+this looks ugly and is hard to read.
+
+we should use a top notch formatting library in order to display a nice table view.
+
+we should have a general pattern of using pretty formatting by default for commands,
+ and then having a --json flag that all view-related commands flag
+
+## Implementation
+
+1. Research a proper terminal formatter to use throughout the project for issues like this
+2. Write up new documentation on when and how to use it within `docs/ui/STDOUT-FORMATTING.md`. Describe using the formatter of choice as
+ well as the new json flag
+3. Implement proper table view for `jig ps` and json retun
+4. Just do it for this command
+
+## Acceptance Criteria
+
+- [ ] `jig ps` displays a satisfactory table view
+- [ ] table view is disabled with --json flag
+- [ ] examples of outputs included in the PR description
