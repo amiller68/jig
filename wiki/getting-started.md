@@ -15,7 +15,17 @@ nav_order: 5
 ## Installation
 
 ```bash
-cargo install jig-cli
+curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash
+```
+
+Then add shell integration to your profile:
+
+```bash
+# For bash (~/.bashrc)
+eval "$(jig shell-init bash)"
+
+# For zsh (~/.zshrc)
+eval "$(jig shell-init zsh)"
 ```
 
 Or build from source:

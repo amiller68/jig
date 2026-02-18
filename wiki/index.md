@@ -32,9 +32,12 @@ jig is not a vibe coding silver bullet. It won't make bad prompts good or replac
 
 ```bash
 # Install
-cargo install jig-cli
+curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash
 
-# Initialize a repo
+# Add shell integration (bash or zsh)
+eval "$(jig shell-init zsh)"
+
+# Initialize jig in your repo
 jig init
 
 # Create a worktree and spawn an agent
