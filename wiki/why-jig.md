@@ -21,7 +21,7 @@ If you want an integrated IDE experience, use Cursor or Windsurf. If you want a 
 
 You can! jig is mostly conveniences:
 
-- Automatic `.worktrees/` directory (gitignored)
+- Automatic `.jig/` directory for tracking worktrees (gitignored)
 - Copying gitignored files (like `.env`) into new worktrees
 - tmux integration for spawning and managing agent sessions
 - Scaffolding for documentation and issue tracking
@@ -34,46 +34,4 @@ I like working in my terminal. jig is opinionated about the *general form* of ho
 
 Use whatever editor you want. Use whatever ACA you want. jig manages the orchestration layer.
 
-## Why Rust?
-
-| Shell scripts | Rust binary |
-|---------------|-------------|
-| Requires jq, specific bash version | Single binary, zero runtime deps |
-| Silent failures, string errors | Proper types, clear messages |
-| `curl \| bash` distribution | `cargo install`, binary download |
-| Painful to extend | Straightforward |
-
-## Hot tips for agent-friendly repos
-
-From experience, these patterns help agents succeed:
-
-### Dependency injection
-
-Inject dependencies everywhere. It makes code:
-- Testable (agents can verify their work)
-- Documentable (clear interfaces)
-- Extendable (agents understand how to add functionality)
-
-### Runtime configuration
-
-Make configuration injectable and discoverable. Agents can then understand and modify behavior without hunting through hardcoded values.
-
-### Local development tools
-
-Use local tools when possible. Write tooling for:
-- Dynamic port allocation
-- Service discovery
-- Environment setup
-
-This helps agents spin up isolated environments per worktree without conflicts.
-
-### Document the patterns
-
-If agents can find your patterns documented, they'll follow them. If they can't, they'll invent their own—possibly inconsistent with your codebase.
-
-Invest time in:
-- `PATTERNS.md` with coding conventions
-- `CONTRIBUTING.md` with workflow
-- `CLAUDE.md` with quick reference
-
-The compounding returns across agent sessions are worth it.
+See [Tips](/tips) for patterns that help agents succeed.
