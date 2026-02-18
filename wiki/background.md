@@ -77,28 +77,45 @@ The third paradigm is what jig enables. You become:
 - A **theoretician** on code composability, designing patterns agents can follow
 - A **manager** of a team composed primarily of ACAs
 
-## Why worktrees?
+## The jig way
 
-Worktrees used to be for messy experiments or risky refactors—isolating mess from your main environment.
+jig is opinionated about how teams should work with agents at scale.
 
-Now they're invaluable for containing the messiness of coding agents.
+### Engineers take on product responsibilities
 
-Worktrees let you:
+Engineers spend more time:
 
-- **Isolate agent work** — Each agent operates in its own directory and branch
-- **Replicate environments** — Sandboxes where agents iterate without conflicts
-- **Parallelize work** — Multiple agents on different tasks simultaneously
+- Defining issues and writing detailed tickets
+- Scoping work into parallelizable units
+- Thinking through requirements before spawning agents
+- Reviewing and approving agent-generated code
 
-This is the prime innovation: using worktrees to parallelize work across agents.
+The role shifts from "person who writes code" to "person who defines what code should be written and ensures it's correct."
 
-## The engineer's identity crisis
+### Context engineering is a first-class concern
 
-Is this the end of software engineering? Honestly, it's more worth my time to iterate on product than implementation details.
+Documentation and context maintenance are emphasized to:
 
-That said: balancing quality, modularity, and extensibility are skills needed to iterate quickly. It's worth taking a day to generify an interface you'll extend later. This makes code:
+- Keep code quality consistent across agent sessions
+- Provide contextual shortcuts that reduce agent exploration time
+- Encode patterns and conventions agents can follow
+- Make onboarding (for humans and agents) frictionless
 
-- Easier to maintain
-- Easier to document
-- Easier for agents to extend
+Well-maintained `CLAUDE.md`, `PATTERNS.md`, and issue templates pay compounding dividends.
 
-The future isn't agents replacing engineers. It's engineers who leverage agents replacing those who don't.
+### Teams spend more time on
+
+- Thinking clearly about technical requirements and best approaches
+- Defining shared patterns, documentation, and objectives
+- Responding to users, designing new features
+- Reviewing AI-generated code
+- Breaking down large initiatives into well-scoped tickets
+
+### Teams spend less time on
+
+- Writing code directly
+- Debugging low-level issues
+- Context-switching between implementation details
+- Waiting for single-threaded agent sessions
+
+The goal: multiply your judgment and taste across parallel agent sessions, shipping more while maintaining quality.
