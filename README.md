@@ -1,6 +1,8 @@
 # jig
 
-Git worktree manager for running parallel Claude Code sessions.
+**Multiply yourself across parallel agent sessions.**
+
+Git worktree manager for orchestrating Agentic Coding Assistants in parallel. Scale your skills across multiple AI coding sessions—spend your time deciding *what* to build, not the minutiae of *how*.
 
 ## Features
 
@@ -124,6 +126,14 @@ rm -rf ~/.config/jig
 **For `jig spawn` (optional):**
 - `tmux` - Terminal multiplexer
 - `claude` CLI
+
+## Documentation
+
+Full documentation at **[amiller68.github.io/jig](https://amiller68.github.io/jig)**
+
+- [Background](https://amiller68.github.io/jig/background) — Why parallel agents, and what jig means for engineers
+- [Core Concepts](https://amiller68.github.io/jig/concepts) — Worktrees, documentation, issues, and quality
+- [Workflow](https://amiller68.github.io/jig/workflow) — The jig development loop
 
 ## License
 

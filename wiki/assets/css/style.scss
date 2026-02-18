@@ -1,0 +1,96 @@
+---
+---
+
+@import "minima";
+
+// jig brand colors
+$jig-primary: #7C3AED;    // violet-600
+$jig-accent: #A78BFA;     // violet-400
+$jig-dark: #1e1e2e;
+$jig-darker: #11111b;
+
+// Override link colors
+a {
+  color: $jig-accent;
+
+  &:visited {
+    color: darken($jig-accent, 10%);
+  }
+
+  &:hover {
+    color: lighten($jig-accent, 10%);
+  }
+}
+
+// Style code blocks
+code {
+  background-color: $jig-darker;
+  border-radius: 4px;
+}
+
+pre {
+  background-color: $jig-darker;
+  border: 1px solid #313244;
+  border-radius: 8px;
+}
+
+// Accent the site title
+.site-title {
+  font-weight: 700;
+  letter-spacing: -0.5px;
+
+  &:hover {
+    color: $jig-accent;
+  }
+}
+
+// Tagline styling
+.tagline {
+  font-size: 1.1rem;
+  color: #a6adc8;
+  margin-top: -0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+// Better heading hierarchy
+h1 {
+  color: #cdd6f4;
+  border-bottom: 2px solid $jig-primary;
+  padding-bottom: 0.3rem;
+}
+
+h2 {
+  color: #bac2de;
+  margin-top: 2rem;
+}
+
+// Table styling
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+
+  th {
+    background-color: $jig-darker;
+    color: $jig-accent;
+    text-align: left;
+    padding: 0.75rem;
+    border: 1px solid #313244;
+  }
+
+  td {
+    padding: 0.75rem;
+    border: 1px solid #313244;
+  }
+
+  tr:nth-child(even) {
+    background-color: rgba(30, 30, 46, 0.5);
+  }
+}
+
+// ASCII diagram styling
+pre code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}

@@ -1,5 +1,6 @@
 title: jig
-description: Git worktree manager for parallel Claude Code sessions
+tagline: Multiply yourself across parallel agent sessions
+description: Git worktree manager for orchestrating agentic coding assistants in parallel.
 baseurl: /jig
 url: https://amiller68.github.io
 
@@ -8,6 +9,25 @@ theme: minima
 markdown: kramdown
 highlighter: rouge
 
+header_pages:
+  - index.md
+  - background.md
+  - concepts.md
+  - workflow.md
+  - getting-started.md
+
+minima:
+  skin: dark
+
+author:
+  name: jig
+
 exclude:
   - Gemfile
   - Gemfile.lock
+
+# Branding
+brand:
+  primary_color: "#7C3AED"    # violet-600
+  accent_color: "#A78BFA"     # violet-400
+  tagline: "Multiply yourself."
