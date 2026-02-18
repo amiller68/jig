@@ -1,8 +1,14 @@
 # jig
 
+[![CI](https://github.com/amiller68/jig/actions/workflows/test.yml/badge.svg)](https://github.com/amiller68/jig/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-jig.krondor.org-violet)](https://jig.krondor.org)
+
 **Multiply yourself across parallel agent sessions.**
 
 Git worktree manager for orchestrating Agentic Coding Assistants in parallel. Scale your skills across multiple AI coding sessions—spend your time deciding *what* to build, not the minutiae of *how*.
+
+**[Read the wiki](https://jig.krondor.org)** for background, concepts, and workflow guides.
 
 ## Features
 
@@ -126,14 +132,6 @@ rm -rf ~/.config/jig
 **For `jig spawn` (optional):**
 - `tmux` - Terminal multiplexer
 - `claude` CLI
-
-## Documentation
-
-Full documentation at **[jig.krondor.org](https://jig.krondor.org)**
-
-- [Background](https://jig.krondor.org/background) — Why parallel agents, and what jig means for engineers
-- [Core Concepts](https://jig.krondor.org/concepts) — Worktrees, documentation, issues, and quality
-- [Workflow](https://jig.krondor.org/workflow) — The jig development loop
 
 ## License
 
