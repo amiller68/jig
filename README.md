@@ -129,11 +129,11 @@ rm -rf ~/.config/jig
 
 ## Documentation
 
-Full documentation at **[amiller68.github.io/jig](https://amiller68.github.io/jig)**
+Full documentation at **[jig.krondor.org](https://jig.krondor.org)**
 
-- [Background](https://amiller68.github.io/jig/background) — Why parallel agents, and what jig means for engineers
-- [Core Concepts](https://amiller68.github.io/jig/concepts) — Worktrees, documentation, issues, and quality
-- [Workflow](https://amiller68.github.io/jig/workflow) — The jig development loop
+- [Background](https://jig.krondor.org/background) — Why parallel agents, and what jig means for engineers
+- [Core Concepts](https://jig.krondor.org/concepts) — Worktrees, documentation, issues, and quality
+- [Workflow](https://jig.krondor.org/workflow) — The jig development loop
 
 ## License
 

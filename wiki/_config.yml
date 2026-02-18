@@ -1,8 +1,8 @@
 title: jig
 tagline: Multiply yourself across parallel agent sessions
 description: Git worktree manager for orchestrating agentic coding assistants in parallel.
-baseurl: /jig
-url: https://amiller68.github.io
+baseurl: ""
+url: https://jig.krondor.org
 
 theme: minima
 

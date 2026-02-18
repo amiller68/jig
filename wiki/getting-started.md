@@ -108,6 +108,6 @@ jig remove hello-world    # Clean up
 
 ## Next steps
 
-- Read [Core Concepts](/jig/concepts) to understand the jig philosophy
-- Check out [Workflow](/jig/workflow) for the full development loop
-- Explore [Background](/jig/background) for the "why" behind jig
+- Read [Core Concepts](/concepts) to understand the jig philosophy
+- Check out [Workflow](/workflow) for the full development loop
+- Explore [Background](/background) for the "why" behind jig

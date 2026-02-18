@@ -50,10 +50,10 @@ jig merge feature-auth
 
 ## Learn more
 
-- [Background](/jig/background) — Why parallel agents, and what jig means for engineers
-- [Core Concepts](/jig/concepts) — Worktrees, documentation, issues, and quality
-- [Workflow](/jig/workflow) — The jig development loop
-- [Getting Started](/jig/getting-started) — Installation and first steps
+- [Background](/background) — Why parallel agents, and what jig means for engineers
+- [Core Concepts](/concepts) — Worktrees, documentation, issues, and quality
+- [Workflow](/workflow) — The jig development loop
+- [Getting Started](/getting-started) — Installation and first steps
 
 ---
 
