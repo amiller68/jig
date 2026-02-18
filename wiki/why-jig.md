@@ -34,4 +34,4 @@ I like working in my terminal. jig is opinionated about the *general form* of ho
 
 Use whatever editor you want. Use whatever ACA you want. jig manages the orchestration layer.
 
-See [Tips](/tips) for patterns that help agents succeed.
+See [Tips & FAQ](/tips-faq) for patterns that help agents succeed.
