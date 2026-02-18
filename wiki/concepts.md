@@ -6,7 +6,7 @@ nav_order: 3
 
 # Core Concepts
 
-jig is built around four pillars: **worktrees**, **documentation**, **issues**, and **quality**.
+jig is built around five pillars: **worktrees**, **documentation**, **issues**, **quality**, and **skills**.
 
 ## Worktrees
 
@@ -143,3 +143,54 @@ Check for:
 - No security issues
 
 Then merge or send back with feedback.
+
+## Skills
+
+jig ships with safe defaults for getting a project up and running, but is extensible through bespoke skills.
+
+### What are skills?
+
+Skills are prompt templates that agents can invoke. They live in `.claude/skills/` and encode workflows, integrations, and conventions specific to your team.
+
+```
+.claude/skills/
+├── issues/      # How to work with issues
+├── review/      # Code review workflow
+├── draft/       # PR drafting conventions
+├── check/       # Run project checks
+└── your-skill/  # Whatever you need
+```
+
+### Extending jig
+
+Don't want file-based issue tracking? Rewrite the issues skill to integrate with an MCP server of your choice:
+
+```markdown
+# issues skill (Linear integration)
+
+Use the Linear MCP server to find and manage issues.
+
+## Finding issues
+- Use `mcp__linear__list_issues` to find ready issues
+- Filter by assignee "me" for your queue
+
+## Updating status
+- Move to "In Progress" when starting
+- Move to "In Review" when done
+```
+
+The same applies to any workflow. jig's defaults are starting points—adapt them to how your team works.
+
+### Built-in skills
+
+jig scaffolds these skills by default:
+
+| Skill | Purpose |
+|-------|---------|
+| `issues` | Find, create, and manage work items |
+| `review` | Review branch changes against conventions |
+| `draft` | Create PRs with consistent formatting |
+| `check` | Run build, test, lint, format checks |
+| `spawn` | Spawn parallel workers for tasks |
+
+Each can be customized or replaced entirely.
