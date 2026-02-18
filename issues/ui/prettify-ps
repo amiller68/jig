@@ -1,6 +1,6 @@
 # Prettify `jig ps` — Introduce the Op Pattern and Formatting Boundary
 
-**Status:** Planned
+**Status:** Done
 **Priority:** High
 
 ## Objective
@@ -142,9 +142,9 @@ Create `docs/ui/STDOUT-FORMATTING.md` documenting:
 
 ## Acceptance Criteria
 
-- [ ] `jig ps` displays a properly aligned table that adapts to terminal width
-- [ ] Formatting logic is fully separated from command logic via the Op pattern
-- [ ] `Op` trait defined and used by `Ps` command
-- [ ] No `--json` flag (typed outputs support adding it later if needed)
-- [ ] `docs/ui/STDOUT-FORMATTING.md` documents the pattern and conventions
+- [x] `jig ps` displays a properly aligned table that adapts to terminal width
+- [x] Formatting logic is fully separated from command logic via the Op pattern
+- [x] `Op` trait defined and used by `Ps` command
+- [x] No `--json` flag (typed outputs support adding it later if needed)
+- [x] `docs/ui/STDOUT-FORMATTING.md` documents the pattern and conventions
 - [ ] Examples of output included in the PR description
