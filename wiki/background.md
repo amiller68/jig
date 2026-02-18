@@ -61,22 +61,6 @@ Humans guide work via well-scoped tickets and documentation. Agents execute with
 
 **jig solves for the second path.**
 
-## The third paradigm
-
-Three ways to work with ACAs:
-
-1. **No agents** — Senior engineer working alone. Fast and accurate, but doesn't scale.
-
-2. **Passive tab monkey** — Waiting for one agent to finish, hitting accept, waiting again. Most of your time is spent *waiting*.
-
-3. **Parallel orchestration** — Running multiple agents across isolated worktrees. You shuttle rote coding to agents while supervising and steering. Downtime is amortized across parallel sessions.
-
-The third paradigm is what jig enables. You become:
-
-- A **product owner** defining objectives and breaking down work
-- A **theoretician** on code composability, designing patterns agents can follow
-- A **manager** of a team composed primarily of ACAs
-
 ## The jig way
 
 jig is opinionated about how teams should work with agents at scale.

@@ -13,7 +13,6 @@ header_pages:
   - index.md
   - background.md
   - concepts.md
-  - workflow.md
   - getting-started.md
 
 minima:
