@@ -13,7 +13,7 @@ Git worktree manager for orchestrating Agentic Coding Assistants in parallel. Sc
 ## Features
 
 - **Simple commands** - Create, list, open, and remove worktrees with short commands
-- **Auto-isolation** - Worktrees stored in `.worktrees/` (automatically git-ignored)
+- **Auto-isolation** - Worktrees stored in `.jig/` (automatically git-ignored)
 - **Configurable base branch** - Set per-repo or global default base branch
 - **On-create hooks** - Run setup commands automatically after worktree creation
 - **Shell integration** - Tab completion for commands and worktree names
@@ -45,7 +45,7 @@ eval "$(jig shell-init zsh)"
 | `jig create <name> --no-hooks` | Create without running on-create hook |
 | `jig open <name>` | cd into an existing worktree |
 | `jig open --all` | Open all worktrees in new terminal tabs |
-| `jig list` | List worktrees in `.worktrees/` |
+| `jig list` | List worktrees in `.jig/` |
 | `jig list --all` | List all git worktrees |
 | `jig remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
 | `jig exit [--force]` | Exit current worktree (removes it, returns to base) |

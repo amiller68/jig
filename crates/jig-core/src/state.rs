@@ -49,11 +49,83 @@ impl OrchestratorState {
 
     /// Get the state file path for a repository
     pub fn state_file_path(repo_root: &Path) -> PathBuf {
+        repo_root.join(".jig").join(".state").join("state.json")
+    }
+
+    /// Get the legacy state file path (for migration)
+    fn legacy_state_file_path(repo_root: &Path) -> PathBuf {
         repo_root.join(".worktrees").join(".jig-state.json")
+    }
+
+    /// Migrate from .worktrees/ to .jig/ layout
+    fn migrate_if_needed(repo_root: &Path) -> Result<()> {
+        let legacy_state = Self::legacy_state_file_path(repo_root);
+        let new_state = Self::state_file_path(repo_root);
+
+        // Only migrate if legacy exists and new doesn't
+        if !legacy_state.exists() || new_state.exists() {
+            return Ok(());
+        }
+
+        let old_dir = repo_root.join(".worktrees");
+        let new_dir = repo_root.join(".jig");
+
+        // Create new .jig/.state/ directory
+        if let Some(parent) = new_state.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Move state file
+        std::fs::copy(&legacy_state, &new_state)?;
+        std::fs::remove_file(&legacy_state)?;
+
+        // Move worktree directories (everything in .worktrees/ except hidden files)
+        if old_dir.exists() {
+            for entry in std::fs::read_dir(&old_dir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Skip hidden files (like .jig-state.json which we already moved)
+                if name_str.starts_with('.') {
+                    continue;
+                }
+                let src = entry.path();
+                let dst = new_dir.join(&name);
+                if src.is_dir() && !dst.exists() {
+                    std::fs::rename(&src, &dst)?;
+                }
+            }
+
+            // Remove old directory if empty
+            if std::fs::read_dir(&old_dir)?.next().is_none() {
+                let _ = std::fs::remove_dir(&old_dir);
+            }
+        }
+
+        // Update worktree_path in the migrated state
+        let content = std::fs::read_to_string(&new_state)?;
+        if let Ok(mut state) = serde_json::from_str::<OrchestratorState>(&content) {
+            for worker in state.workers.values_mut() {
+                let old_prefix = old_dir.to_string_lossy().to_string();
+                let new_prefix = new_dir.to_string_lossy().to_string();
+                let path_str = worker.worktree_path.to_string_lossy().to_string();
+                if path_str.starts_with(&old_prefix) {
+                    worker.worktree_path =
+                        PathBuf::from(path_str.replacen(&old_prefix, &new_prefix, 1));
+                }
+            }
+            let content = serde_json::to_string_pretty(&state)?;
+            std::fs::write(&new_state, content)?;
+        }
+
+        Ok(())
     }
 
     /// Load state from disk
     pub fn load(repo_root: &Path) -> Result<Option<Self>> {
+        // Migrate from legacy layout if needed
+        Self::migrate_if_needed(repo_root)?;
+
         let state_file = Self::state_file_path(repo_root);
 
         if !state_file.exists() {
@@ -62,8 +134,6 @@ impl OrchestratorState {
 
         let content = std::fs::read_to_string(&state_file)?;
         let state: Self = serde_json::from_str(&content)?;
-
-        // TODO: Handle migrations if version differs
 
         Ok(Some(state))
     }
@@ -158,7 +228,7 @@ mod tests {
 
         let worker = Worker::new(
             "test-worker".to_string(),
-            PathBuf::from("/home/user/project/.worktrees/test-worker"),
+            PathBuf::from("/home/user/project/.jig/test-worker"),
             "test-worker".to_string(),
             "main".to_string(),
             "jig-project".to_string(),

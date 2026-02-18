@@ -54,7 +54,7 @@ impl Op for List {
             // Don't output to stdout for --all mode
             Ok(ListOutput(vec![]))
         } else {
-            // Show only .worktrees/
+            // Show only .jig/
             let worktrees = git::list_worktrees()?;
 
             if worktrees.is_empty() {

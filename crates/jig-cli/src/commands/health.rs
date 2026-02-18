@@ -80,14 +80,15 @@ impl Op for Health {
             let branch = config.get_base_branch(root);
             eprintln!("  {} Base branch: {}", "✓".green(), branch);
 
-            // .worktrees directory
-            let worktrees_dir = root.join(".worktrees");
+            // Jig worktrees directory
+            let worktrees_dir = root.join(jig_core::config::JIG_DIR);
             if worktrees_dir.is_dir() {
-                eprintln!("  {} .worktrees directory", "✓".green());
+                eprintln!("  {} {} directory", "✓".green(), jig_core::config::JIG_DIR);
             } else {
                 eprintln!(
-                    "  {} .worktrees directory {}",
+                    "  {} {} directory {}",
                     "✗".red(),
+                    jig_core::config::JIG_DIR,
                     "(not found)".dimmed()
                 );
                 all_passed = false;

@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::git;
 use crate::session;
 use crate::state::OrchestratorState;
-use crate::worker::{TaskContext, Worker, WorkerStatus};
+use crate::worker::{TaskContext, Worker};
 
 /// Task status for ps command
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +121,9 @@ pub fn list_tasks() -> Result<Vec<TaskInfo>> {
     let base_branch = get_base_branch()?;
     let worktrees_dir = git::get_worktrees_dir()?;
 
+    // Clean up stale workers before listing
+    cleanup_stale()?;
+
     // Try to load state
     let state = OrchestratorState::load(&repo_root)?;
 
@@ -221,10 +224,11 @@ pub fn kill(name: &str) -> Result<()> {
     // Kill tmux window
     session::kill_window(&session_name, name)?;
 
-    // Update state if it exists
+    // Remove worker from state entirely
     if let Some(mut state) = OrchestratorState::load(&repo_root)? {
-        if let Some(worker) = state.get_worker_by_name_mut(name) {
-            worker.status = WorkerStatus::Archived;
+        let id = state.get_worker_by_name(name).map(|w| w.id);
+        if let Some(id) = id {
+            state.remove_worker(&id);
             state.save()?;
         }
     }
@@ -239,13 +243,41 @@ pub fn kill_window(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Unregister a worker from state
+/// Unregister a worker from state (removes entirely)
 pub fn unregister(name: &str) -> Result<()> {
     let repo_root = git::get_base_repo()?;
 
     if let Some(mut state) = OrchestratorState::load(&repo_root)? {
-        if let Some(worker) = state.get_worker_by_name_mut(name) {
-            worker.set_status(WorkerStatus::Archived);
+        let id = state.get_worker_by_name(name).map(|w| w.id);
+        if let Some(id) = id {
+            state.remove_worker(&id);
+            state.save()?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Remove stale workers (whose tmux windows no longer exist) from state
+pub fn cleanup_stale() -> Result<()> {
+    let repo_root = git::get_base_repo()?;
+    let session_name = get_session_name()?;
+
+    if let Some(mut state) = OrchestratorState::load(&repo_root)? {
+        let stale_ids: Vec<_> = state
+            .workers
+            .values()
+            .filter(|w| {
+                let status = get_worker_status(&session_name, &w.name);
+                matches!(status, TaskStatus::NoWindow | TaskStatus::NoSession)
+            })
+            .map(|w| w.id)
+            .collect();
+
+        if !stale_ids.is_empty() {
+            for id in &stale_ids {
+                state.remove_worker(id);
+            }
             state.save()?;
         }
     }

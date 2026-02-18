@@ -76,7 +76,7 @@ impl TestRepo {
     }
 
     fn worktrees_path(&self) -> PathBuf {
-        self.dir.path().join(".worktrees")
+        self.dir.path().join(".jig")
     }
 
     fn jig(&self) -> Command {

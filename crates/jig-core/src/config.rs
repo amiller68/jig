@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 
 const DEFAULT_BASE_BRANCH: &str = "origin/main";
-const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
+const DEFAULT_WORKTREE_DIR: &str = ".jig";
 
 /// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
