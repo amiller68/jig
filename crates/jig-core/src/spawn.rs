@@ -121,11 +121,8 @@ pub fn list_tasks() -> Result<Vec<TaskInfo>> {
     let base_branch = get_base_branch()?;
     let worktrees_dir = git::get_worktrees_dir()?;
 
-    // Clean up stale workers before listing
-    cleanup_stale()?;
-
-    // Try to load state
-    let state = OrchestratorState::load(&repo_root)?;
+    // Clean up stale workers and get the (already loaded) state
+    let state = cleanup_stale_workers(&repo_root, &session_name)?;
 
     let mut tasks = Vec::new();
 
@@ -258,29 +255,41 @@ pub fn unregister(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Remove stale workers (whose tmux windows no longer exist) from state.
+/// Returns the cleaned state if one existed.
+fn cleanup_stale_workers(
+    repo_root: &std::path::Path,
+    session_name: &str,
+) -> Result<Option<OrchestratorState>> {
+    let mut state = match OrchestratorState::load(repo_root)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    let stale_ids: Vec<_> = state
+        .workers
+        .values()
+        .filter(|w| {
+            let status = get_worker_status(session_name, &w.name);
+            matches!(status, TaskStatus::NoWindow | TaskStatus::NoSession)
+        })
+        .map(|w| w.id)
+        .collect();
+
+    if !stale_ids.is_empty() {
+        for id in &stale_ids {
+            state.remove_worker(id);
+        }
+        state.save()?;
+    }
+
+    Ok(Some(state))
+}
+
 /// Remove stale workers (whose tmux windows no longer exist) from state
 pub fn cleanup_stale() -> Result<()> {
     let repo_root = git::get_base_repo()?;
     let session_name = get_session_name()?;
-
-    if let Some(mut state) = OrchestratorState::load(&repo_root)? {
-        let stale_ids: Vec<_> = state
-            .workers
-            .values()
-            .filter(|w| {
-                let status = get_worker_status(&session_name, &w.name);
-                matches!(status, TaskStatus::NoWindow | TaskStatus::NoSession)
-            })
-            .map(|w| w.id)
-            .collect();
-
-        if !stale_ids.is_empty() {
-            for id in &stale_ids {
-                state.remove_worker(id);
-            }
-            state.save()?;
-        }
-    }
-
+    cleanup_stale_workers(&repo_root, &session_name)?;
     Ok(())
 }

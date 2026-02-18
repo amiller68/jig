@@ -171,19 +171,9 @@ impl OrchestratorState {
         self.workers.get(id)
     }
 
-    /// Get a mutable worker by ID
-    pub fn get_worker_mut(&mut self, id: &WorkerId) -> Option<&mut Worker> {
-        self.workers.get_mut(id)
-    }
-
     /// Get a worker by name
     pub fn get_worker_by_name(&self, name: &str) -> Option<&Worker> {
         self.workers.values().find(|w| w.name == name)
-    }
-
-    /// Get a mutable worker by name
-    pub fn get_worker_by_name_mut(&mut self, name: &str) -> Option<&mut Worker> {
-        self.workers.values_mut().find(|w| w.name == name)
     }
 
     /// Remove a worker
