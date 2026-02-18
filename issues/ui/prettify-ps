@@ -1,58 +1,150 @@
-# [Title]
+# Prettify `jig ps` — Introduce the Op Pattern and Formatting Boundary
 
 **Status:** Planned
 **Priority:** High
 
 ## Objective
 
-Curerntly the output of `jig ps` displays as the following:
+`jig ps` output is ugly and hard to read — columns misalign on long names, there's no terminal-width awareness, and formatting logic is mixed into the command handler. Fix this by introducing a clean architecture: **ops return typed data, formatting is a separate concern at the boundary.**
+
+This is the first command to adopt the pattern. It sets the precedent for all future CLI output.
+
+### Current output
+
 ```
-jax-fs   main !1   v1.91.0
-> jig ps
 NAME             STATUS       BRANCH               COMMITS  DIRTY
 bucket-publish-cli running      bucket-publish-cli          1 -
 cli-binary-release running      cli-binary-release          2 ●
 desktop-fuse-build-separation no-window    desktop-fuse-build-separation        3 ●
-desktop-fuse-build-separation no-window    desktop-fuse-build-separation        3 ●
-cli-binary-release running      cli-binary-release          2 ●
-share-removal    running      share-removal               1 -
-importbao-size-rejections no-window    importbao-size-rejections        0 -
-desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
-daemon-local-cache no-window    daemon-local-cache          0 -
-desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
-daemon-local-cache no-window    daemon-local-cache          0 -
-importbao-size-rejections no-window    importbao-size-rejections        0 -
-fuse-missing-operations no-window    fuse-missing-operations        0 -
-cli-binary-release running      cli-binary-release          2 ●
-desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
-bucket-publish-cli running      bucket-publish-cli          1 -
-share-removal    running      share-removal               1 -
-native-file-dialog no-window    native-file-dialog          0 -
-desktop-sidecar-daemon running      desktop-sidecar-daemon        0 -
-cli-binary-release running      cli-binary-release          2 ●
-bucket-publish-cli running      bucket-publish-cli          1 -
-share-removal    running      share-removal               1 -
-native-file-dialog no-window    native-file-dialog          0 -
-fuse-missing-operations no-window    fuse-missing-operations        0 -
 ```
 
-this looks ugly and is hard to read.
+Columns break with long names. No terminal-width adaptation. Formatting lives inline in the command handler.
 
-we should use a top notch formatting library in order to display a nice table view.
+## Architecture: The Op Pattern
 
-we should have a general pattern of using pretty formatting by default for commands,
- and then having a --json flag that all view-related commands flag
+Every CLI command becomes a struct that implements the `Op` trait:
+
+```rust
+pub trait Op {
+    type Error: std::error::Error + Send + Sync + 'static;
+    type Output: std::fmt::Display;
+
+    fn execute(&self) -> Result<Self::Output, Self::Error>;
+}
+```
+
+An op does its work and returns typed data or a typed error. It never prints, never colors, never touches the terminal.
+
+### Anatomy of an Op
+
+```rust
+// 1. The command struct — clap parses args into this
+#[derive(Args, Debug, Clone)]
+pub struct Ps;
+
+// 2. The error enum — one variant per failure mode
+#[derive(Debug, thiserror::Error)]
+pub enum PsError {
+    #[error("failed to list tasks: {0}")]
+    ListTasks(#[from] anyhow::Error),
+}
+
+// 3. The output struct — typed data, no formatting
+pub struct PsOutput {
+    pub tasks: Vec<TaskInfo>,
+}
+
+// 4. The Op impl — does work, returns data
+impl Op for Ps {
+    type Error = PsError;
+    type Output = PsOutput;
+
+    fn execute(&self) -> Result<Self::Output, Self::Error> {
+        let tasks = spawn::list_tasks()?;
+        Ok(PsOutput { tasks })
+    }
+}
+```
+
+### The Formatting Boundary
+
+All presentation lives in `Display` impls on the output types. `main.rs` is deliberately thin:
+
+```rust
+match args.command.execute() {
+    Ok(output) => {
+        println!("{output}");
+        std::process::exit(0);
+    }
+    Err(e) => {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+```
+
+### Where Each Concern Lives
+
+```
+main.rs (boundary)      Op::execute (logic)      Display impl (presentation)
+  - parse args            - spawn::list_tasks()    - colors (colored crate)
+  - println!("{output}")  - returns PsOutput        - table layout (comfy-table)
+  - error formatting      - never prints            - terminal-width-aware columns
+  - exit codes
+```
+
+**Ops never:** print, use color, check terminal width.
+**Display impls own:** all color/styling, table layout, human-readable formatting.
+**The boundary owns:** arg parsing, calling execute, printing, exit codes.
+
+## No `--json` Flag
+
+The CLI is a human interface. For machine consumption, the typed output structs make it trivial to add `#[derive(Serialize)]` later if needed. But start without it — no Serialize bounds, no format dispatch, no color suppression logic.
 
 ## Implementation
 
-1. Research a proper terminal formatter to use throughout the project for issues like this
-2. Write up new documentation on when and how to use it within `docs/ui/STDOUT-FORMATTING.md`. Describe using the formatter of choice as
- well as the new json flag
-3. Implement proper table view for `jig ps` and json retun
-4. Just do it for this command
+### 1. Add dependencies
+
+Add `comfy-table` to `jig-cli` for terminal-aware table rendering. It auto-detects terminal width and adjusts column sizes.
+
+### 2. Define the `Op` trait
+
+Create `crates/jig-cli/src/op.rs` with the `Op` trait. Keep it minimal — no async needed since jig commands are synchronous.
+
+### 3. Migrate `jig ps` to the Op pattern
+
+**`crates/jig-cli/src/commands/ps.rs`:**
+- Define `PsOutput` struct holding `Vec<TaskInfo>`
+- Implement `Display` for `PsOutput` using `comfy-table::Table`
+- Implement `Op` for `Ps` — just calls `spawn::list_tasks()` and wraps the result
+- Color-code status (green=running, yellow=exited, red=no-session/no-window)
+- Dirty indicator: yellow dot or dimmed dash
+
+**`crates/jig-cli/src/main.rs`:**
+- Update the `Ps` dispatch to use `Op::execute()` and print via `Display`
+
+### 4. Write formatting documentation
+
+Create `docs/ui/STDOUT-FORMATTING.md` documenting:
+- The Op pattern and why it exists
+- How to add a new command (struct + error + output + Display + Op impl)
+- `comfy-table` usage for tables
+- Color conventions (status colors, dimmed labels, bold headers)
+- Rule: ops never print, Display owns all presentation
+
+## Files
+
+- `crates/jig-cli/Cargo.toml` — Add `comfy-table` dependency
+- `crates/jig-cli/src/op.rs` — New: `Op` trait definition
+- `crates/jig-cli/src/commands/ps.rs` — Rewrite to Op pattern with typed output and Display impl
+- `crates/jig-cli/src/main.rs` — Update Ps dispatch
+- `docs/ui/STDOUT-FORMATTING.md` — New: formatting conventions doc
 
 ## Acceptance Criteria
 
-- [ ] `jig ps` displays a satisfactory table view
-- [ ] table view is disabled with --json flag
-- [ ] examples of outputs included in the PR description
+- [ ] `jig ps` displays a properly aligned table that adapts to terminal width
+- [ ] Formatting logic is fully separated from command logic via the Op pattern
+- [ ] `Op` trait defined and used by `Ps` command
+- [ ] No `--json` flag (typed outputs support adding it later if needed)
+- [ ] `docs/ui/STDOUT-FORMATTING.md` documents the pattern and conventions
+- [ ] Examples of output included in the PR description
