@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::{copy_worktree_files, run_on_create_hook};
+use crate::config::{self, copy_worktree_files, run_on_create_hook};
 use crate::error::{Error, Result};
 use crate::git;
 
@@ -121,8 +121,8 @@ impl Worktree {
         let mut parent = self.path.parent();
 
         while let Some(p) = parent {
-            // Stop if we've reached .jig directory
-            if p.file_name().map(|n| n == ".jig").unwrap_or(false) {
+            // Stop if we've reached the jig directory
+            if p.file_name().map(|n| n == config::JIG_DIR).unwrap_or(false) {
                 break;
             }
 

@@ -2,7 +2,7 @@
 //!
 //! State that survives TUI/CLI restarts.
 
-use crate::config::RepoConfig;
+use crate::config::{self, RepoConfig};
 use crate::error::Result;
 use crate::worker::{Worker, WorkerId};
 use serde::{Deserialize, Serialize};
@@ -49,12 +49,17 @@ impl OrchestratorState {
 
     /// Get the state file path for a repository
     pub fn state_file_path(repo_root: &Path) -> PathBuf {
-        repo_root.join(".jig").join(".state").join("state.json")
+        repo_root
+            .join(config::JIG_DIR)
+            .join(config::STATE_DIR)
+            .join(config::STATE_FILE)
     }
 
     /// Get the legacy state file path (for migration)
     fn legacy_state_file_path(repo_root: &Path) -> PathBuf {
-        repo_root.join(".worktrees").join(".jig-state.json")
+        repo_root
+            .join(config::LEGACY_DIR)
+            .join(config::LEGACY_STATE_FILE)
     }
 
     /// Migrate from .worktrees/ to .jig/ layout
@@ -67,8 +72,8 @@ impl OrchestratorState {
             return Ok(());
         }
 
-        let old_dir = repo_root.join(".worktrees");
-        let new_dir = repo_root.join(".jig");
+        let old_dir = repo_root.join(config::LEGACY_DIR);
+        let new_dir = repo_root.join(config::JIG_DIR);
 
         // Create new .jig/.state/ directory
         if let Some(parent) = new_state.parent() {
@@ -216,8 +221,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo_root = tmp.path();
 
-        // Set up legacy layout: .worktrees/.jig-state.json
-        let old_dir = repo_root.join(".worktrees");
+        // Set up legacy layout
+        let old_dir = repo_root.join(config::LEGACY_DIR);
         std::fs::create_dir_all(&old_dir).unwrap();
 
         let mut state = OrchestratorState::new(repo_root.to_path_buf(), RepoConfig::default());
@@ -231,7 +236,7 @@ mod tests {
         state.add_worker(worker);
 
         // Write state to legacy location
-        let legacy_path = repo_root.join(".worktrees").join(".jig-state.json");
+        let legacy_path = OrchestratorState::legacy_state_file_path(repo_root);
         let content = serde_json::to_string_pretty(&state).unwrap();
         std::fs::write(&legacy_path, &content).unwrap();
 
@@ -242,30 +247,32 @@ mod tests {
         let loaded = OrchestratorState::load(repo_root).unwrap().unwrap();
 
         // Verify new state file exists
-        let new_state_path = repo_root.join(".jig").join(".state").join("state.json");
+        let new_state_path = OrchestratorState::state_file_path(repo_root);
         assert!(new_state_path.exists(), "new state file should exist");
 
         // Verify legacy state file is gone
         assert!(!legacy_path.exists(), "legacy state file should be removed");
 
         // Verify worktree directory moved
+        let new_dir = repo_root.join(config::JIG_DIR);
         assert!(
-            repo_root.join(".jig").join("test-worker").exists(),
-            "worktree should be in .jig/"
+            new_dir.join("test-worker").exists(),
+            "worktree should be in new dir"
         );
         assert!(
             !old_dir.join("test-worker").exists(),
-            "worktree should not be in .worktrees/"
+            "worktree should not be in legacy dir"
         );
 
         // Verify worker path was updated in state
         let worker = loaded.get_worker_by_name("test-worker").unwrap();
+        let expected_fragment = format!("{}/test-worker", config::JIG_DIR);
         assert!(
             worker
                 .worktree_path
                 .to_string_lossy()
-                .contains(".jig/test-worker"),
-            "worker path should reference .jig/, got: {}",
+                .contains(&expected_fragment),
+            "worker path should reference new dir, got: {}",
             worker.worktree_path.display()
         );
     }
@@ -275,9 +282,12 @@ mod tests {
         let mut state =
             OrchestratorState::new(PathBuf::from("/home/user/project"), RepoConfig::default());
 
+        let worktree_path = PathBuf::from("/home/user/project")
+            .join(config::JIG_DIR)
+            .join("test-worker");
         let worker = Worker::new(
             "test-worker".to_string(),
-            PathBuf::from("/home/user/project/.jig/test-worker"),
+            worktree_path,
             "test-worker".to_string(),
             "main".to_string(),
             "jig-project".to_string(),

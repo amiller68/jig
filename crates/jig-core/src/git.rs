@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::config::JIG_DIR;
 use crate::error::{Error, Result};
 use crate::worker::DiffStats;
 
@@ -59,7 +60,7 @@ pub fn get_base_repo() -> Result<PathBuf> {
 /// Get the worktrees directory (.jig in the base repo)
 pub fn get_worktrees_dir() -> Result<PathBuf> {
     let base = get_base_repo()?;
-    Ok(base.join(".jig"))
+    Ok(base.join(JIG_DIR))
 }
 
 /// Ensure worktrees are excluded from git (convenience wrapper)
@@ -515,22 +516,23 @@ pub fn get_worktree_branch(path: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Ensure .jig is in git exclude
+/// Ensure jig directory is in git exclude
 pub fn ensure_worktrees_excluded(git_common_dir: &Path) -> Result<()> {
     let exclude_file = git_common_dir.join("info").join("exclude");
+    let exclude_entry = format!("{}/", JIG_DIR);
 
     if !exclude_file.exists() {
         std::fs::create_dir_all(exclude_file.parent().unwrap())?;
-        std::fs::write(&exclude_file, ".jig/\n")?;
+        std::fs::write(&exclude_file, format!("{}\n", exclude_entry))?;
         return Ok(());
     }
 
     let content = std::fs::read_to_string(&exclude_file)?;
-    if !content.contains(".jig") {
+    if !content.contains(JIG_DIR) {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&exclude_file)?;
-        writeln!(file, ".jig/")?;
+        writeln!(file, "{}", exclude_entry)?;
     }
 
     Ok(())

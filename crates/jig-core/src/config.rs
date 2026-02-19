@@ -11,7 +11,17 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 
 const DEFAULT_BASE_BRANCH: &str = "origin/main";
-const DEFAULT_WORKTREE_DIR: &str = ".jig";
+
+/// Directory name for jig-managed worktrees (relative to repo root)
+pub const JIG_DIR: &str = ".jig";
+/// Subdirectory within JIG_DIR for internal state files
+pub const STATE_DIR: &str = ".state";
+/// State file name
+pub const STATE_FILE: &str = "state.json";
+/// Legacy directory name (for migration from older versions)
+pub const LEGACY_DIR: &str = ".worktrees";
+/// Legacy state file name (for migration from older versions)
+pub const LEGACY_STATE_FILE: &str = ".jig-state.json";
 
 /// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +40,7 @@ impl Default for RepoConfig {
     fn default() -> Self {
         Self {
             base_branch: DEFAULT_BASE_BRANCH.to_string(),
-            worktree_dir: DEFAULT_WORKTREE_DIR.to_string(),
+            worktree_dir: JIG_DIR.to_string(),
             on_create_hook: None,
             auto_review: true,
         }
