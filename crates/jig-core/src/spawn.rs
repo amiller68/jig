@@ -285,11 +285,3 @@ fn cleanup_stale_workers(
 
     Ok(Some(state))
 }
-
-/// Remove stale workers (whose tmux windows no longer exist) from state
-pub fn cleanup_stale() -> Result<()> {
-    let repo_root = git::get_base_repo()?;
-    let session_name = get_session_name()?;
-    cleanup_stale_workers(&repo_root, &session_name)?;
-    Ok(())
-}

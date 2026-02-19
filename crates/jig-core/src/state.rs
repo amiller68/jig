@@ -212,6 +212,65 @@ mod tests {
     }
 
     #[test]
+    fn test_migrate_from_legacy_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path();
+
+        // Set up legacy layout: .worktrees/.jig-state.json
+        let old_dir = repo_root.join(".worktrees");
+        std::fs::create_dir_all(&old_dir).unwrap();
+
+        let mut state = OrchestratorState::new(repo_root.to_path_buf(), RepoConfig::default());
+        let worker = Worker::new(
+            "test-worker".to_string(),
+            old_dir.join("test-worker"),
+            "test-worker".to_string(),
+            "main".to_string(),
+            "jig-project".to_string(),
+        );
+        state.add_worker(worker);
+
+        // Write state to legacy location
+        let legacy_path = repo_root.join(".worktrees").join(".jig-state.json");
+        let content = serde_json::to_string_pretty(&state).unwrap();
+        std::fs::write(&legacy_path, &content).unwrap();
+
+        // Create a fake worktree directory in old location
+        std::fs::create_dir_all(old_dir.join("test-worker")).unwrap();
+
+        // Now load (should trigger migration)
+        let loaded = OrchestratorState::load(repo_root).unwrap().unwrap();
+
+        // Verify new state file exists
+        let new_state_path = repo_root.join(".jig").join(".state").join("state.json");
+        assert!(new_state_path.exists(), "new state file should exist");
+
+        // Verify legacy state file is gone
+        assert!(!legacy_path.exists(), "legacy state file should be removed");
+
+        // Verify worktree directory moved
+        assert!(
+            repo_root.join(".jig").join("test-worker").exists(),
+            "worktree should be in .jig/"
+        );
+        assert!(
+            !old_dir.join("test-worker").exists(),
+            "worktree should not be in .worktrees/"
+        );
+
+        // Verify worker path was updated in state
+        let worker = loaded.get_worker_by_name("test-worker").unwrap();
+        assert!(
+            worker
+                .worktree_path
+                .to_string_lossy()
+                .contains(".jig/test-worker"),
+            "worker path should reference .jig/, got: {}",
+            worker.worktree_path.display()
+        );
+    }
+
+    #[test]
     fn test_add_worker() {
         let mut state =
             OrchestratorState::new(PathBuf::from("/home/user/project"), RepoConfig::default());

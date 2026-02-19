@@ -1,6 +1,6 @@
 # Restructure jig state directory layout and clean up stale workers
 
-**Status:** Planned
+**Status:** In Review
 **Priority:** Urgent
 
 ## Objective
