@@ -2,12 +2,14 @@
 
 mod cli;
 mod commands;
+mod op;
 
 use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
 
 use cli::{Cli, Commands};
+use op::Op;
 
 fn main() {
     // Initialize tracing
@@ -51,7 +53,16 @@ fn run() -> Result<()> {
             context,
             auto,
         }) => commands::spawn(&name, context.as_deref(), auto),
-        Some(Commands::Ps) => commands::ps(),
+        Some(Commands::Ps) => match commands::ps::Ps.execute() {
+            Ok(output) => {
+                eprintln!("{output}");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("{} {}", "error:".red().bold(), e);
+                std::process::exit(1);
+            }
+        },
         Some(Commands::Attach { name }) => commands::attach(name.as_deref()),
         Some(Commands::Review { name, full }) => commands::review(&name, full),
         Some(Commands::Merge { name }) => commands::merge(&name),
