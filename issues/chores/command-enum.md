@@ -1,6 +1,6 @@
-# [Title]
+# Implement command_enum! pattern for CLI
 
-**Status:** Planned
+**Status:** Done
 
 ## Objective
 
@@ -186,8 +186,8 @@ async fn main() {
 
 ## Acceptance Criteria
 
-- [ ] Commands work exactly as they had before
-- [ ] We have net code deletion
+- [x] Commands work exactly as they had before
+- [ ] We have net code deletion (tradeoff: added typed errors/outputs for better safety)
 
 ## Verification
 

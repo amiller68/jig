@@ -1,18 +1,38 @@
 //! Kill command - kill a running tmux window
 
-use anyhow::Result;
+use clap::Args;
 use colored::Colorize;
 
 use jig_core::spawn;
 
-pub fn run(name: &str) -> Result<()> {
-    // Kill tmux window
-    spawn::kill_window(name)?;
+use crate::op::{NoOutput, Op, OpContext};
 
-    // Unregister from spawn state
-    spawn::unregister(name)?;
+/// Kill a running tmux window
+#[derive(Args, Debug, Clone)]
+pub struct Kill {
+    /// Worktree name
+    pub name: String,
+}
 
-    eprintln!("{} Killed session '{}'", "✓".green(), name.cyan());
+#[derive(Debug, thiserror::Error)]
+pub enum KillError {
+    #[error(transparent)]
+    Core(#[from] jig_core::Error),
+}
 
-    Ok(())
+impl Op for Kill {
+    type Error = KillError;
+    type Output = NoOutput;
+
+    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        // Kill tmux window
+        spawn::kill_window(&self.name)?;
+
+        // Unregister from spawn state
+        spawn::unregister(&self.name)?;
+
+        eprintln!("{} Killed session '{}'", "✓".green(), self.name.cyan());
+
+        Ok(NoOutput)
+    }
 }

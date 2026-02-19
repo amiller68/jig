@@ -4,11 +4,29 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use anyhow::{bail, Context, Result};
+use clap::Args;
 use colored::Colorize;
+
+use crate::op::{NoOutput, Op, OpContext};
 
 const GITHUB_REPO: &str = "amiller68/jig";
 const INSTALL_SCRIPT_URL: &str = "https://raw.githubusercontent.com/amiller68/jig/main/install.sh";
+
+/// Update jig to latest version
+#[derive(Args, Debug, Clone)]
+pub struct Update {
+    /// Force update, discarding local changes
+    #[arg(long, short)]
+    pub force: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UpdateError {
+    #[error("{0}")]
+    Failed(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 /// Installation method detection
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,9 +52,112 @@ impl InstallMethod {
     }
 }
 
+impl Op for Update {
+    type Error = UpdateError;
+    type Output = NoOutput;
+
+    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let install_method = detect_installation()?;
+        let current_version = env!("CARGO_PKG_VERSION");
+
+        // Print header
+        eprintln!("{}", "Update".bold());
+        eprintln!("  Current version: {}", current_version.to_string().cyan());
+        eprintln!("  Installation: {}", install_method.description().dimmed());
+        eprintln!();
+
+        // Check for latest version
+        eprintln!("{} Checking for updates...", "→".cyan());
+        let latest_version = get_latest_version()?;
+        eprintln!("  Latest version: {}", latest_version.cyan());
+        eprintln!();
+
+        // Compare versions
+        let needs_update = is_newer_version(current_version, &latest_version);
+
+        if !needs_update && !self.force {
+            eprintln!("{} Already up to date!", "✓".green());
+            return Ok(NoOutput);
+        }
+
+        if needs_update {
+            eprintln!(
+                "{} New version available: {} → {}",
+                "→".cyan(),
+                current_version.dimmed(),
+                latest_version.green()
+            );
+        } else {
+            eprintln!("{} Forcing update...", "→".cyan());
+        }
+
+        match install_method {
+            InstallMethod::Script(_) => {
+                // Auto-update for script installations
+                run_install_script()?;
+            }
+            InstallMethod::Cargo(_) | InstallMethod::Source(_) => {
+                // Prompt for dev builds
+                eprintln!();
+                eprintln!("You're running a development build.");
+
+                if prompt_confirm("Install latest release to ~/.local/bin?", true)? {
+                    run_install_script()?;
+
+                    // Check for old cargo bin if this was a cargo install
+                    if matches!(install_method, InstallMethod::Cargo(_)) {
+                        // Don't remove the current binary - that would be confusing
+                        // The user might still want to keep their dev setup
+                    } else {
+                        // For source builds, check if there's an old cargo bin to clean up
+                        check_and_remove_old_cargo_bin()?;
+                    }
+                } else {
+                    eprintln!();
+                    eprintln!("To update manually, run:");
+                    eprintln!(
+                        "  {} cargo install --git https://github.com/{}",
+                        "→".dimmed(),
+                        GITHUB_REPO
+                    );
+                    return Ok(NoOutput);
+                }
+            }
+            InstallMethod::Unknown(ref path) => {
+                // Show manual instructions for unknown installations
+                eprintln!();
+                eprintln!(
+                    "Unknown installation method: {}",
+                    path.display().to_string().dimmed()
+                );
+                eprintln!();
+                eprintln!("To install via script (recommended):");
+                eprintln!(
+                    "  {} curl -fsSL {} | bash",
+                    "→".dimmed(),
+                    INSTALL_SCRIPT_URL
+                );
+                eprintln!();
+                eprintln!("Or rebuild from source:");
+                eprintln!(
+                    "  {} cargo install --git https://github.com/{}",
+                    "→".dimmed(),
+                    GITHUB_REPO
+                );
+                return Ok(NoOutput);
+            }
+        }
+
+        eprintln!();
+        eprintln!("{} Updated successfully!", "✓".green());
+
+        Ok(NoOutput)
+    }
+}
+
 /// Detect how jig was installed
-fn detect_installation() -> Result<InstallMethod> {
-    let exe_path = std::env::current_exe().context("Failed to get executable path")?;
+fn detect_installation() -> Result<InstallMethod, UpdateError> {
+    let exe_path = std::env::current_exe()?;
     let path_str = exe_path.to_string_lossy();
 
     if path_str.contains("/.local/bin/") {
@@ -51,7 +172,7 @@ fn detect_installation() -> Result<InstallMethod> {
 }
 
 /// Fetch the latest version from GitHub releases
-fn get_latest_version() -> Result<String> {
+fn get_latest_version() -> Result<String, UpdateError> {
     let output = Command::new("curl")
         .args([
             "-fsSL",
@@ -60,12 +181,14 @@ fn get_latest_version() -> Result<String> {
                 GITHUB_REPO
             ),
         ])
-        .output()
-        .context("Failed to run curl")?;
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to fetch latest version: {}", stderr);
+        return Err(UpdateError::Failed(format!(
+            "Failed to fetch latest version: {}",
+            stderr
+        )));
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
@@ -85,11 +208,13 @@ fn get_latest_version() -> Result<String> {
         }
     }
 
-    bail!("Could not parse version from GitHub response")
+    Err(UpdateError::Failed(
+        "Could not parse version from GitHub response".to_string(),
+    ))
 }
 
 /// Prompt user for yes/no confirmation
-fn prompt_confirm(message: &str, default_yes: bool) -> Result<bool> {
+fn prompt_confirm(message: &str, default_yes: bool) -> Result<bool, UpdateError> {
     let suffix = if default_yes { "[Y/n]" } else { "[y/N]" };
     eprint!("{} {} ", message, suffix);
     io::stderr().flush()?;
@@ -107,7 +232,7 @@ fn prompt_confirm(message: &str, default_yes: bool) -> Result<bool> {
 }
 
 /// Run the install script
-fn run_install_script() -> Result<()> {
+fn run_install_script() -> Result<(), UpdateError> {
     eprintln!();
     eprintln!("{} Installing via install script...", "→".cyan());
     eprintln!();
@@ -117,18 +242,17 @@ fn run_install_script() -> Result<()> {
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status()
-        .context("Failed to run install script")?;
+        .status()?;
 
     if !status.success() {
-        bail!("Install script failed");
+        return Err(UpdateError::Failed("Install script failed".to_string()));
     }
 
     Ok(())
 }
 
 /// Check if cargo bin jig exists and prompt for removal
-fn check_and_remove_old_cargo_bin() -> Result<()> {
+fn check_and_remove_old_cargo_bin() -> Result<(), UpdateError> {
     let home = std::env::var("HOME").unwrap_or_default();
     let cargo_bin = PathBuf::from(&home).join(".cargo/bin/jig");
 
@@ -140,7 +264,7 @@ fn check_and_remove_old_cargo_bin() -> Result<()> {
         );
 
         if prompt_confirm("Remove it?", true)? {
-            std::fs::remove_file(&cargo_bin).context("Failed to remove old binary")?;
+            std::fs::remove_file(&cargo_bin)?;
             eprintln!("{} Removed {}", "✓".green(), cargo_bin.display());
         }
     }
@@ -167,102 +291,4 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
     let latest = parse_version(latest);
 
     latest > current
-}
-
-pub fn run(force: bool) -> Result<()> {
-    let install_method = detect_installation()?;
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    // Print header
-    eprintln!("{}", "Update".bold());
-    eprintln!("  Current version: {}", current_version.to_string().cyan());
-    eprintln!("  Installation: {}", install_method.description().dimmed());
-    eprintln!();
-
-    // Check for latest version
-    eprintln!("{} Checking for updates...", "→".cyan());
-    let latest_version = get_latest_version()?;
-    eprintln!("  Latest version: {}", latest_version.cyan());
-    eprintln!();
-
-    // Compare versions
-    let needs_update = is_newer_version(current_version, &latest_version);
-
-    if !needs_update && !force {
-        eprintln!("{} Already up to date!", "✓".green());
-        return Ok(());
-    }
-
-    if needs_update {
-        eprintln!(
-            "{} New version available: {} → {}",
-            "→".cyan(),
-            current_version.dimmed(),
-            latest_version.green()
-        );
-    } else {
-        eprintln!("{} Forcing update...", "→".cyan());
-    }
-
-    match install_method {
-        InstallMethod::Script(_) => {
-            // Auto-update for script installations
-            run_install_script()?;
-        }
-        InstallMethod::Cargo(_) | InstallMethod::Source(_) => {
-            // Prompt for dev builds
-            eprintln!();
-            eprintln!("You're running a development build.");
-
-            if prompt_confirm("Install latest release to ~/.local/bin?", true)? {
-                run_install_script()?;
-
-                // Check for old cargo bin if this was a cargo install
-                if matches!(install_method, InstallMethod::Cargo(_)) {
-                    // Don't remove the current binary - that would be confusing
-                    // The user might still want to keep their dev setup
-                } else {
-                    // For source builds, check if there's an old cargo bin to clean up
-                    check_and_remove_old_cargo_bin()?;
-                }
-            } else {
-                eprintln!();
-                eprintln!("To update manually, run:");
-                eprintln!(
-                    "  {} cargo install --git https://github.com/{}",
-                    "→".dimmed(),
-                    GITHUB_REPO
-                );
-                return Ok(());
-            }
-        }
-        InstallMethod::Unknown(ref path) => {
-            // Show manual instructions for unknown installations
-            eprintln!();
-            eprintln!(
-                "Unknown installation method: {}",
-                path.display().to_string().dimmed()
-            );
-            eprintln!();
-            eprintln!("To install via script (recommended):");
-            eprintln!(
-                "  {} curl -fsSL {} | bash",
-                "→".dimmed(),
-                INSTALL_SCRIPT_URL
-            );
-            eprintln!();
-            eprintln!("Or rebuild from source:");
-            eprintln!(
-                "  {} cargo install --git https://github.com/{}",
-                "→".dimmed(),
-                GITHUB_REPO
-            );
-            return Ok(());
-        }
-    }
-
-    eprintln!();
-    eprintln!("{} Updated successfully!", "✓".green());
-
-    Ok(())
 }

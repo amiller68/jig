@@ -2,14 +2,15 @@
 
 use std::fmt;
 
-use colored::Colorize;
+use clap::Args;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
 use jig_core::spawn::{self, TaskInfo, TaskStatus};
 
-use crate::op::Op;
+use crate::op::{Op, OpContext};
 
-/// Show status of spawned sessions.
+/// Show status of spawned sessions
+#[derive(Args, Debug, Clone)]
 pub struct Ps;
 
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +19,7 @@ pub enum PsError {
     ListTasks(#[from] jig_core::Error),
 }
 
+#[derive(Debug)]
 pub struct PsOutput {
     pub tasks: Vec<TaskInfo>,
 }
@@ -26,7 +28,7 @@ impl Op for Ps {
     type Error = PsError;
     type Output = PsOutput;
 
-    fn execute(&self) -> Result<Self::Output, Self::Error> {
+    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
         let tasks = spawn::list_tasks()?;
         Ok(PsOutput { tasks })
     }
@@ -57,18 +59,14 @@ impl fmt::Display for PsOutput {
                 TaskStatus::NoSession | TaskStatus::NoWindow => (task.status.as_str(), Color::Red),
             };
 
-            let dirty_indicator = if task.is_dirty {
-                "●".yellow().to_string()
-            } else {
-                "-".dimmed().to_string()
-            };
+            let dirty_indicator = if task.is_dirty { "●" } else { "-" };
 
             table.add_row(vec![
                 Cell::new(&task.name).fg(Color::Cyan),
                 Cell::new(status_text).fg(status_color),
                 Cell::new(&task.branch),
                 Cell::new(task.commits_ahead).set_alignment(CellAlignment::Right),
-                Cell::new(&dirty_indicator).set_alignment(CellAlignment::Center),
+                Cell::new(dirty_indicator).set_alignment(CellAlignment::Center),
             ]);
         }
 
