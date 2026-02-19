@@ -56,7 +56,7 @@ fn run() -> Result<()> {
         Some(Commands::Ps) => match commands::ps::Ps.execute() {
             Ok(output) => {
                 eprintln!("{output}");
-                return Ok(());
+                Ok(())
             }
             Err(e) => {
                 eprintln!("{} {}", "error:".red().bold(), e);
