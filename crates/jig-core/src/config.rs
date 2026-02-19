@@ -18,10 +18,6 @@ pub const JIG_DIR: &str = ".jig";
 pub const STATE_DIR: &str = ".state";
 /// State file name
 pub const STATE_FILE: &str = "state.json";
-/// Legacy directory name (for migration from older versions)
-pub const LEGACY_DIR: &str = ".worktrees";
-/// Legacy state file name (for migration from older versions)
-pub const LEGACY_STATE_FILE: &str = ".jig-state.json";
 
 /// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]

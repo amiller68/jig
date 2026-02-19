@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use std::process::Command as StdCommand;
 use tempfile::TempDir;
 
+/// Jig worktree directory name - must match jig_core::config::JIG_DIR
+const JIG_DIR: &str = ".jig";
+
 struct TestRepo {
     dir: TempDir,
     config_dir: TempDir,
@@ -76,7 +79,7 @@ impl TestRepo {
     }
 
     fn worktrees_path(&self) -> PathBuf {
-        self.dir.path().join(".jig")
+        self.dir.path().join(JIG_DIR)
     }
 
     fn jig(&self) -> Command {

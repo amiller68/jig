@@ -55,11 +55,11 @@ impl OrchestratorState {
             .join(config::STATE_FILE)
     }
 
-    /// Get the legacy state file path (for migration)
+    /// Get the legacy state file path (for migration from pre-0.5 layout).
+    /// Before 0.5, state lived at `<repo>/.worktrees/.jig-state.json`.
+    /// These values are frozen historical paths and must not change.
     fn legacy_state_file_path(repo_root: &Path) -> PathBuf {
-        repo_root
-            .join(config::LEGACY_DIR)
-            .join(config::LEGACY_STATE_FILE)
+        repo_root.join(".worktrees").join(".jig-state.json")
     }
 
     /// Migrate from .worktrees/ to .jig/ layout
@@ -72,7 +72,8 @@ impl OrchestratorState {
             return Ok(());
         }
 
-        let old_dir = repo_root.join(config::LEGACY_DIR);
+        // Pre-0.5 worktree directory (frozen historical path)
+        let old_dir = repo_root.join(".worktrees");
         let new_dir = repo_root.join(config::JIG_DIR);
 
         // Create new .jig/.state/ directory
@@ -221,8 +222,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo_root = tmp.path();
 
-        // Set up legacy layout
-        let old_dir = repo_root.join(config::LEGACY_DIR);
+        // Set up pre-0.5 legacy layout
+        let old_dir = repo_root.join(".worktrees");
         std::fs::create_dir_all(&old_dir).unwrap();
 
         let mut state = OrchestratorState::new(repo_root.to_path_buf(), RepoConfig::default());

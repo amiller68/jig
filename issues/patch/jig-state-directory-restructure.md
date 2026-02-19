@@ -1,6 +1,6 @@
 # Restructure jig state directory layout and clean up stale workers
 
-**Status:** In Review
+**Status:** Done
 **Priority:** Urgent
 
 ## Objective
@@ -111,3 +111,12 @@ cat .jig/.state/state.json  # should not contain test-worker-2
 - Hidden dirs (.state) skipped in worktree listing
 - Updated all references in code, docs, and tests
 - PR: #22
+
+### 2026-02-19 - Addressed PR review comments
+- Centralized path constants in config.rs (JIG_DIR, STATE_DIR, STATE_FILE)
+- Replaced all hardcoded path strings with constants across git.rs, state.rs, health.rs, worktree.rs
+- Legacy migration paths kept hardcoded with comments explaining they are frozen historical values
+- Added JIG_DIR const in integration_tests.rs (can't import from jig_core at workspace level)
+- Created tests/test_helpers.sh with shared JIG_DIR variable for shell tests
+- Updated all shell tests to source test_helpers.sh and use $JIG_DIR
+- Removed dead LEGACY_DIR and LEGACY_STATE_FILE constants from config.rs
