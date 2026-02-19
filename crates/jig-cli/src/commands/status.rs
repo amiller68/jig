@@ -1,34 +1,59 @@
 //! Show detailed worker status
 
-use anyhow::Result;
+use clap::Args;
 use colored::Colorize;
+
 use jig_core::{git, OrchestratorState, WorkerStatus};
 
-pub fn run(name: Option<&str>) -> Result<()> {
-    let repo_root = git::repo_root()?;
-    let state = match OrchestratorState::load(&repo_root)? {
-        Some(state) => state,
-        None => {
-            eprintln!(
-                "{}",
-                "No state file found. No workers have been spawned.".dimmed()
-            );
-            return Ok(());
-        }
-    };
+use crate::op::{NoOutput, Op, OpContext};
 
-    match name {
-        Some(worker_name) => show_worker_status(&state, worker_name),
-        None => show_all_workers(&state),
+/// Show detailed worker status
+#[derive(Args, Debug, Clone)]
+pub struct Status {
+    /// Worker name
+    pub name: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StatusError {
+    #[error(transparent)]
+    Core(#[from] jig_core::Error),
+    #[error("Worker '{0}' not found")]
+    WorkerNotFound(String),
+}
+
+impl Op for Status {
+    type Error = StatusError;
+    type Output = NoOutput;
+
+    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo_root = git::repo_root()?;
+        let state = match OrchestratorState::load(&repo_root)? {
+            Some(state) => state,
+            None => {
+                eprintln!(
+                    "{}",
+                    "No state file found. No workers have been spawned.".dimmed()
+                );
+                return Ok(NoOutput);
+            }
+        };
+
+        match &self.name {
+            Some(worker_name) => show_worker_status(&state, worker_name)?,
+            None => show_all_workers(&state),
+        }
+
+        Ok(NoOutput)
     }
 }
 
-fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<()> {
+fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<(), StatusError> {
     let worker = state
         .workers
         .values()
         .find(|w| w.name == name)
-        .ok_or_else(|| anyhow::anyhow!("Worker '{}' not found", name))?;
+        .ok_or_else(|| StatusError::WorkerNotFound(name.to_string()))?;
 
     eprintln!("{}", format!("Worker: {}", worker.name).bold());
     eprintln!();
@@ -82,10 +107,10 @@ fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn show_all_workers(state: &OrchestratorState) -> Result<()> {
+fn show_all_workers(state: &OrchestratorState) {
     if state.workers.is_empty() {
         eprintln!("{}", "No active workers".dimmed());
-        return Ok(());
+        return;
     }
 
     eprintln!("{}", "Workers".bold());
@@ -98,8 +123,6 @@ fn show_all_workers(state: &OrchestratorState) -> Result<()> {
             eprintln!("    {}", task.description.dimmed());
         }
     }
-
-    Ok(())
 }
 
 fn format_status(status: &WorkerStatus) -> String {

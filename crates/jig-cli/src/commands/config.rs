@@ -1,30 +1,97 @@
 //! Config command
 
-use anyhow::Result;
+use clap::{Args, Subcommand};
 use colored::Colorize;
 
-use crate::cli::ConfigCommands;
 use jig_core::config::{self, ConfigDisplay};
+use jig_core::Error as CoreError;
 
-pub fn run(subcommand: Option<ConfigCommands>, list: bool) -> Result<()> {
-    if list {
-        return show_list();
+use crate::op::{Op, OpContext};
+
+/// Manage configuration
+#[derive(Args, Debug, Clone)]
+pub struct Config {
+    #[command(subcommand)]
+    pub subcommand: Option<ConfigCommands>,
+
+    /// List all configuration
+    #[arg(long)]
+    pub list: bool,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigCommands {
+    /// Get or set base branch
+    Base {
+        /// Branch name to set
+        branch: Option<String>,
+
+        /// Use global default
+        #[arg(long, short)]
+        global: bool,
+
+        /// Remove the setting
+        #[arg(long)]
+        unset: bool,
+    },
+
+    /// Get or set on-create hook
+    OnCreate {
+        /// Command to run
+        command: Option<String>,
+
+        /// Remove the hook
+        #[arg(long)]
+        unset: bool,
+    },
+
+    /// Show current configuration (default)
+    Show,
+}
+
+/// Output for config commands (may output to stdout for get operations)
+#[derive(Debug)]
+pub struct ConfigOutput(Option<String>);
+
+impl std::fmt::Display for ConfigOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(ref value) = self.0 {
+            write!(f, "{}", value)?;
+        }
+        Ok(())
     }
+}
 
-    match subcommand {
-        None | Some(ConfigCommands::Show) => show_config(),
-        Some(ConfigCommands::Base {
-            branch,
-            global,
-            unset,
-        }) => handle_base(branch.as_deref(), global, unset),
-        Some(ConfigCommands::OnCreate { command, unset }) => {
-            handle_on_create(command.as_deref(), unset)
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error(transparent)]
+    Core(#[from] CoreError),
+}
+
+impl Op for Config {
+    type Error = ConfigError;
+    type Output = ConfigOutput;
+
+    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        if self.list {
+            return show_list();
+        }
+
+        match &self.subcommand {
+            None | Some(ConfigCommands::Show) => show_config(),
+            Some(ConfigCommands::Base {
+                branch,
+                global,
+                unset,
+            }) => handle_base(branch.as_deref(), *global, *unset),
+            Some(ConfigCommands::OnCreate { command, unset }) => {
+                handle_on_create(command.as_deref(), *unset)
+            }
         }
     }
 }
 
-fn show_config() -> Result<()> {
+fn show_config() -> Result<ConfigOutput, ConfigError> {
     let display = ConfigDisplay::load_auto()?;
 
     eprintln!("{}", "Configuration".bold());
@@ -55,25 +122,29 @@ fn show_config() -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(ConfigOutput(None))
 }
 
-fn show_list() -> Result<()> {
+fn show_list() -> Result<ConfigOutput, ConfigError> {
     let entries = config::list_all_config()?;
 
     if entries.is_empty() {
         eprintln!("No configuration set");
-        return Ok(());
+        return Ok(ConfigOutput(None));
     }
 
     for (category, key, value) in entries {
         eprintln!("{} {} = {}", category.dimmed(), key.cyan(), value);
     }
 
-    Ok(())
+    Ok(ConfigOutput(None))
 }
 
-fn handle_base(branch: Option<&str>, global: bool, unset: bool) -> Result<()> {
+fn handle_base(
+    branch: Option<&str>,
+    global: bool,
+    unset: bool,
+) -> Result<ConfigOutput, ConfigError> {
     if unset {
         if global {
             config::unset_global_base_branch()?;
@@ -82,7 +153,7 @@ fn handle_base(branch: Option<&str>, global: bool, unset: bool) -> Result<()> {
             config::unset_repo_base_branch()?;
             eprintln!("{} Unset repo base branch", "✓".green());
         }
-        return Ok(());
+        return Ok(ConfigOutput(None));
     }
 
     match branch {
@@ -94,43 +165,50 @@ fn handle_base(branch: Option<&str>, global: bool, unset: bool) -> Result<()> {
                 config::set_repo_base_branch(b)?;
                 eprintln!("{} Set repo base branch to '{}'", "✓".green(), b.cyan());
             }
+            Ok(ConfigOutput(None))
         }
         None => {
             // Get/show current value
             if global {
                 match config::get_global_base_branch()? {
-                    Some(b) => println!("{}", b),
-                    None => eprintln!("No global default set"),
+                    Some(b) => Ok(ConfigOutput(Some(b))),
+                    None => {
+                        eprintln!("No global default set");
+                        Ok(ConfigOutput(None))
+                    }
                 }
             } else {
                 match config::get_repo_base_branch()? {
-                    Some(b) => println!("{}", b),
-                    None => eprintln!("No config set for this repo"),
+                    Some(b) => Ok(ConfigOutput(Some(b))),
+                    None => {
+                        eprintln!("No config set for this repo");
+                        Ok(ConfigOutput(None))
+                    }
                 }
             }
         }
     }
-
-    Ok(())
 }
 
-fn handle_on_create(command: Option<&str>, unset: bool) -> Result<()> {
+fn handle_on_create(command: Option<&str>, unset: bool) -> Result<ConfigOutput, ConfigError> {
     if unset {
         config::unset_on_create_hook()?;
         eprintln!("{} Unset on-create hook", "✓".green());
-        return Ok(());
+        return Ok(ConfigOutput(None));
     }
 
     match command {
         Some(cmd) => {
             config::set_on_create_hook(cmd)?;
             eprintln!("{} Set on-create hook to '{}'", "✓".green(), cmd.cyan());
+            Ok(ConfigOutput(None))
         }
         None => match config::get_on_create_hook()? {
-            Some(cmd) => println!("{}", cmd),
-            None => eprintln!("No on-create hook set"),
+            Some(cmd) => Ok(ConfigOutput(Some(cmd))),
+            None => {
+                eprintln!("No on-create hook set");
+                Ok(ConfigOutput(None))
+            }
         },
     }
-
-    Ok(())
 }

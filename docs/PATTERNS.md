@@ -9,8 +9,9 @@ Document your team's coding patterns and conventions here. This helps AI agents 
   - Return `Result<T>` using the crate's custom `Result` type alias
   - Errors should have clear, user-facing messages
 
-- **jig-cli**: Use `anyhow::Result` at the command level
-  - Core errors propagate up via `?`
+- **jig-cli**: Use the `Op` trait with typed errors per command
+  - Each command has its own error enum wrapping core errors
+  - Infallible commands use `std::convert::Infallible`
   - Main function catches errors and prints to stderr with color
   - Exit with code 1 on any error
 
@@ -22,10 +23,23 @@ pub enum Error {
     WorktreeNotFound(String),
 }
 
-// In jig-cli (anyhow for flexibility)
-pub fn run(name: &str) -> anyhow::Result<()> {
-    let worktree = Worktree::open(&worktrees_dir, name)?;
-    // ...
+// In jig-cli (Op trait with typed output and errors)
+#[derive(Args, Debug, Clone)]
+pub struct Create { /* args */ }
+
+#[derive(Debug, thiserror::Error)]
+pub enum CreateError {
+    #[error(transparent)]
+    Core(#[from] jig_core::Error),
+}
+
+impl Op for Create {
+    type Error = CreateError;
+    type Output = CreateOutput;
+
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        // ...
+    }
 }
 ```
 
@@ -43,6 +57,9 @@ pub fn run(name: &str) -> anyhow::Result<()> {
   - `worker.rs` — Worker state and lifecycle
 
 - **Commands**: One file per CLI command in `crates/jig-cli/src/commands/`
+  - Each command implements the `Op` trait from `crates/jig-cli/src/op.rs`
+  - Commands are registered via `command_enum!` macro in `cli.rs`
+  - Doc comments on Args struct become CLI help text (no duplication)
 
 ## Naming Conventions
 

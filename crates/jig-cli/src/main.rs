@@ -1,15 +1,16 @@
 //! jig CLI - Git worktree manager for parallel Claude Code sessions
 
-mod cli;
-mod commands;
+#[macro_use]
 mod op;
 
-use anyhow::Result;
+mod cli;
+mod commands;
+
 use clap::Parser;
 use colored::Colorize;
 
-use cli::{Cli, Commands};
-use op::Op;
+use cli::Cli;
+use op::{Op, OpContext};
 
 fn main() {
     // Initialize tracing
@@ -26,7 +27,7 @@ fn main() {
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -34,52 +35,15 @@ fn run() -> Result<()> {
             print_help();
             Ok(())
         }
-        Some(Commands::Create { name, branch }) => {
-            commands::create(&name, branch.as_deref(), cli.open, cli.no_hooks)
+        Some(command) => {
+            let ctx = OpContext::new(cli.open, cli.no_hooks);
+            let output = command.execute(&ctx)?;
+            let output_str = output.to_string();
+            if !output_str.is_empty() {
+                println!("{}", output_str);
+            }
+            Ok(())
         }
-        Some(Commands::List { all }) => commands::list(all),
-        Some(Commands::Open { name, all }) => {
-            if all {
-                commands::open(None, true)
-            } else {
-                commands::open(name.as_deref(), false)
-            }
-        }
-        Some(Commands::Remove { pattern, force }) => commands::remove(&pattern, force),
-        Some(Commands::Exit { force }) => commands::exit(force),
-        Some(Commands::Config { subcommand, list }) => commands::config(subcommand, list),
-        Some(Commands::Spawn {
-            name,
-            context,
-            auto,
-        }) => commands::spawn(&name, context.as_deref(), auto),
-        Some(Commands::Ps) => match commands::ps::Ps.execute() {
-            Ok(output) => {
-                eprintln!("{output}");
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("{} {}", "error:".red().bold(), e);
-                std::process::exit(1);
-            }
-        },
-        Some(Commands::Attach { name }) => commands::attach(name.as_deref()),
-        Some(Commands::Review { name, full }) => commands::review(&name, full),
-        Some(Commands::Merge { name }) => commands::merge(&name),
-        Some(Commands::Kill { name }) => commands::kill(&name),
-        Some(Commands::Init {
-            agent,
-            force,
-            backup,
-            audit,
-        }) => commands::init(&agent, force, backup, audit),
-        Some(Commands::Update { force }) => commands::update(force),
-        Some(Commands::Version) => commands::version(),
-        Some(Commands::Which) => commands::which(),
-        Some(Commands::Health) => commands::health(),
-        Some(Commands::Status { name }) => commands::status(name.as_deref()),
-        Some(Commands::ShellInit { shell }) => commands::shell_init(&shell),
-        Some(Commands::ShellSetup { dry_run }) => commands::shell_setup(dry_run),
     }
 }
 

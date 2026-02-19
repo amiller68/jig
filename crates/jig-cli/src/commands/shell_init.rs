@@ -1,6 +1,8 @@
 //! Shell initialization command - prints shell integration code
 
-use anyhow::Result;
+use clap::Args;
+
+use crate::op::{Op, OpContext};
 
 const BASH_INIT: &str = r#"
 # jig shell integration for bash
@@ -251,18 +253,41 @@ complete -c jig -n '__jig_using_command shell-setup' -l dry-run -d 'Dry run'
 complete -c jig -n '__jig_using_command config' -a 'base on-create show' -d 'Config cmd'
 "#;
 
-pub fn run(shell: &str) -> Result<()> {
-    let init_code = match shell.to_lowercase().as_str() {
-        "bash" => BASH_INIT,
-        "zsh" => ZSH_INIT,
-        "fish" => FISH_INIT,
-        _ => {
-            eprintln!("Unsupported shell: {}", shell);
-            eprintln!("Supported shells: bash, zsh, fish");
-            std::process::exit(1);
-        }
-    };
+/// Print shell integration code
+#[derive(Args, Debug, Clone)]
+pub struct ShellInit {
+    /// Shell type (bash, zsh, fish)
+    pub shell: String,
+}
 
-    println!("{}", init_code.trim());
-    Ok(())
+/// Output containing shell init code
+#[derive(Debug)]
+pub struct ShellInitOutput(String);
+
+impl std::fmt::Display for ShellInitOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ShellInitError {
+    #[error("Unsupported shell: {0}. Supported shells: bash, zsh, fish")]
+    UnsupportedShell(String),
+}
+
+impl Op for ShellInit {
+    type Error = ShellInitError;
+    type Output = ShellInitOutput;
+
+    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let init_code = match self.shell.to_lowercase().as_str() {
+            "bash" => BASH_INIT,
+            "zsh" => ZSH_INIT,
+            "fish" => FISH_INIT,
+            _ => return Err(ShellInitError::UnsupportedShell(self.shell.clone())),
+        };
+
+        Ok(ShellInitOutput(init_code.trim().to_string()))
+    }
 }
