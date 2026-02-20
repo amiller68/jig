@@ -1,6 +1,6 @@
 # Tmux Detection
 
-**Status:** Planned  
+**Status:** In Review
 **Priority:** High  
 **Category:** Features  
 **Epic:** issues/epics/worker-heartbeat/index.md  
@@ -154,14 +154,14 @@ regex = "1.10"
 
 ## Acceptance Criteria
 
-- [ ] `WorkerDetector` with configurable patterns
-- [ ] `is_at_prompt()` detects shell prompts
-- [ ] `is_stuck()` detects interactive prompts
-- [ ] `detect_state()` returns Working/Idle/Stuck
-- [ ] `capture_pane()` scrapes tmux output
-- [ ] `check_worker()` combines capture + detection
-- [ ] Patterns loaded from `jig.toml` config
-- [ ] Default patterns work for Claude Code
+- [x] `WorkerDetector` with configurable patterns
+- [x] `is_at_prompt()` detects shell prompts
+- [x] `is_stuck()` detects interactive prompts
+- [x] `detect_state()` returns Working/Idle/Stuck
+- [x] `capture_pane()` scrapes tmux output
+- [x] `check_worker()` combines capture + detection
+- [x] Patterns loaded from `jig.toml` config
+- [x] Default patterns work for Claude Code
 
 ## Testing
 

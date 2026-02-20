@@ -241,6 +241,45 @@ pub fn run_on_create_hook(hook: &str, dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Health check configuration in jig.toml
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthConfig {
+    /// Regex patterns matching shell prompts (worker is idle)
+    #[serde(default = "HealthConfig::default_prompt_patterns")]
+    pub prompt_patterns: Vec<String>,
+    /// Regex patterns matching interactive prompts (worker is stuck)
+    #[serde(default = "HealthConfig::default_stuck_patterns")]
+    pub stuck_patterns: Vec<String>,
+}
+
+impl HealthConfig {
+    fn default_prompt_patterns() -> Vec<String> {
+        vec![
+            r"❯\s*$".to_string(),
+            r"\$\s*$".to_string(),
+            r"#\s*$".to_string(),
+        ]
+    }
+
+    fn default_stuck_patterns() -> Vec<String> {
+        vec![
+            r"Would you like to proceed".to_string(),
+            r"ctrl-g to edit".to_string(),
+            r"❯.*\d+\.\s+Yes.*\d+\.\s+Yes".to_string(),
+        ]
+    }
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            prompt_patterns: Self::default_prompt_patterns(),
+            stuck_patterns: Self::default_stuck_patterns(),
+        }
+    }
+}
+
 /// JigToml configuration from jig.toml
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JigToml {
@@ -250,6 +289,8 @@ pub struct JigToml {
     pub spawn: SpawnConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+    #[serde(default)]
+    pub health: HealthConfig,
 }
 
 /// Worktree configuration in jig.toml

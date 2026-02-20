@@ -44,6 +44,12 @@ pub enum Error {
     #[error("Tmux session not found: {0}")]
     TmuxSessionNotFound(String),
 
+    #[error("Tmux command failed: {0}")]
+    TmuxCommand(String),
+
+    #[error("Regex error: {0}")]
+    Regex(#[from] regex::Error),
+
     #[error("Git error: {0}")]
     Git(String),
 
