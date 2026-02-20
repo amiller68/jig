@@ -76,7 +76,7 @@ Branch names with slashes create nested directories:
 
 ```bash
 jig create feature/auth/oauth -o
-# Creates .worktrees/feature/auth/oauth/
+# Creates .jig/feature/auth/oauth/
 ```
 
 ## Remove with Glob Patterns
@@ -89,11 +89,13 @@ jig remove 'feature/*'        # Remove all under feature/
 
 ## How It Works
 
-Worktrees are stored in `.worktrees/` inside your repo:
+Worktrees are stored in `.jig/` inside your repo:
 
 ```
 my-repo/
-├── .worktrees/           # Auto-added to .git/info/exclude
+├── .jig/                 # Auto-added to .git/info/exclude
+│   ├── .state/           # Internal state files
+│   │   └── state.json
 │   ├── feature-a/
 │   ├── feature-b/
 │   └── feature/

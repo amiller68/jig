@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::config::JIG_DIR;
 use crate::error::{Error, Result};
 use crate::worker::DiffStats;
 
@@ -56,10 +57,10 @@ pub fn get_base_repo() -> Result<PathBuf> {
     Ok(git_common.parent().unwrap_or(&git_common).to_path_buf())
 }
 
-/// Get the worktrees directory (.worktrees in the base repo)
+/// Get the worktrees directory (.jig in the base repo)
 pub fn get_worktrees_dir() -> Result<PathBuf> {
     let base = get_base_repo()?;
-    Ok(base.join(".worktrees"))
+    Ok(base.join(JIG_DIR))
 }
 
 /// Ensure worktrees are excluded from git (convenience wrapper)
@@ -112,7 +113,7 @@ pub fn get_current_worktree_name(worktrees_dir: &Path) -> Result<Option<String>>
     Ok(None)
 }
 
-/// List worktree names in the current repo's .worktrees directory
+/// List worktree names in the current repo's .jig directory
 pub fn list_worktrees() -> Result<Vec<String>> {
     let worktrees_dir = get_worktrees_dir()?;
     list_worktree_names(&worktrees_dir)
@@ -145,6 +146,13 @@ fn find_worktrees_recursive(
         let path = entry.path();
 
         if path.is_dir() {
+            // Skip hidden directories (e.g. .state)
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with('.') {
+                    continue;
+                }
+            }
+
             // Check if this is a worktree (has .git file)
             if path.join(".git").is_file() {
                 let name = path
@@ -508,22 +516,23 @@ pub fn get_worktree_branch(path: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Ensure .worktrees is in git exclude
+/// Ensure jig directory is in git exclude
 pub fn ensure_worktrees_excluded(git_common_dir: &Path) -> Result<()> {
     let exclude_file = git_common_dir.join("info").join("exclude");
+    let exclude_entry = format!("{}/", JIG_DIR);
 
     if !exclude_file.exists() {
         std::fs::create_dir_all(exclude_file.parent().unwrap())?;
-        std::fs::write(&exclude_file, ".worktrees/\n")?;
+        std::fs::write(&exclude_file, format!("{}\n", exclude_entry))?;
         return Ok(());
     }
 
     let content = std::fs::read_to_string(&exclude_file)?;
-    if !content.contains(".worktrees") {
+    if !content.contains(JIG_DIR) {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&exclude_file)?;
-        writeln!(file, ".worktrees/")?;
+        writeln!(file, "{}", exclude_entry)?;
     }
 
     Ok(())

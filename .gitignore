@@ -5,6 +5,9 @@ _wt
 .claude-task
 .claude-spawn-prompt
 
+# jig state
+.jig/.state/
+
 # jig init --backup
 .backup/
 

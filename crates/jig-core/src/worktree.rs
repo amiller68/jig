@@ -4,14 +4,14 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::{copy_worktree_files, run_on_create_hook};
+use crate::config::{self, copy_worktree_files, run_on_create_hook};
 use crate::error::{Error, Result};
 use crate::git;
 
 /// Represents a git worktree
 #[derive(Debug, Clone)]
 pub struct Worktree {
-    /// Name of the worktree (relative path from .worktrees/)
+    /// Name of the worktree (relative path from .jig/)
     pub name: String,
     /// Full path to the worktree
     pub path: PathBuf,
@@ -39,7 +39,7 @@ impl Worktree {
             return Err(Error::WorktreeExists(name.to_string()));
         }
 
-        // Ensure .worktrees is gitignored
+        // Ensure .jig is gitignored
         git::ensure_worktrees_excluded(git_common_dir)?;
 
         // Create parent directories if needed (for nested paths like feature/auth/login)
@@ -121,8 +121,8 @@ impl Worktree {
         let mut parent = self.path.parent();
 
         while let Some(p) = parent {
-            // Stop if we've reached .worktrees directory
-            if p.file_name().map(|n| n == ".worktrees").unwrap_or(false) {
+            // Stop if we've reached the jig directory
+            if p.file_name().map(|n| n == config::JIG_DIR).unwrap_or(false) {
                 break;
             }
 

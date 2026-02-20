@@ -53,7 +53,7 @@ The `jig` shell function wraps the underlying binary. When you use `open` or the
 
 ```bash
 # What happens internally:
-jig open my-feature  # outputs: cd "/path/to/.worktrees/my-feature"
+jig open my-feature  # outputs: cd "/path/to/.jig/my-feature"
 eval "cd ..."           # shell function evals it
 ```
 

@@ -62,7 +62,7 @@ impl Op for Create {
         let branch = self.branch.as_deref().unwrap_or(&self.name);
         let base_branch = config::get_base_branch()?;
 
-        // Ensure .worktrees is gitignored
+        // Ensure .jig is gitignored
         git::ensure_worktrees_excluded_auto()?;
 
         // Create parent directories if needed (for nested paths like feature/auth/login)
