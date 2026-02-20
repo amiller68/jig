@@ -82,6 +82,31 @@ Change the `**Status:**` field:
 - `Planned` → `In Progress` → `Complete`
 - Or `Blocked` if waiting on something
 
+### Check dependencies
+
+Issues can depend on other issues via path:
+
+```markdown
+**Depends-On:** issues/epics/git-hooks/0-wrapper-pattern.md
+```
+
+Check if dependencies are satisfied:
+```bash
+# Read the dependency file and check its status
+grep "Status:" issues/epics/git-hooks/0-wrapper-pattern.md
+```
+
+Dependencies must be `Complete` before starting dependent issue.
+
+### Epic tickets
+
+Epic tickets in `issues/epics/name/N-ticket.md` are ordered:
+- `0-*.md` must complete before `1-*.md`
+- `1-*.md` must complete before `2-*.md`
+- Numbering implies dependency order
+
+Epic `index.md` tracks overall progress and ticket status.
+
 ## Convention
 
 See `issues/README.md` for full documentation.
