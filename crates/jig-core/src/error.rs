@@ -44,6 +44,9 @@ pub enum Error {
     #[error("Tmux session not found: {0}")]
     TmuxSessionNotFound(String),
 
+    #[error("Unsupported hook: {0}")]
+    UnsupportedHook(String),
+
     #[error("Git error: {0}")]
     Git(String),
 
