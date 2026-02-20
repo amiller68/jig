@@ -21,11 +21,25 @@ This should be built into jig with proper error handling and caching.
 
 ## Acceptance Criteria
 
+### Repo Registry Integration
+- [ ] GitHub org/repo auto-detected from git remote
+- [ ] Store GitHub config in repo's `jig.toml`:
+  ```toml
+  [github]
+  owner = "amiller68"
+  repo = "jig"
+  requireConventionalCommits = true
+  autoCleanupMerged = true
+  ```
+- [ ] Support per-repo GitHub settings
+- [ ] Operate on all registered repos or specific `--repo <path>`
+
 ### Core GitHub Client
 - [ ] GitHub API client in jig-core (use `octocrab` or similar)
 - [ ] Auth via `gh` CLI token or `GITHUB_TOKEN` env var
 - [ ] Caching layer to avoid rate limits
 - [ ] Graceful degradation when GitHub unavailable
+- [ ] Auto-detect GitHub remote from repo
 
 ### PR Status Checks
 - [ ] `jig pr status <worker>` - show PR status for worker's branch
@@ -64,46 +78,63 @@ This should be built into jig with proper error handling and caching.
 
 ## Implementation Notes
 
+**Phase 0: Repo Registry (prerequisite)**
+1. GitHub owner/repo auto-detected from git remote
+2. Store in `jig.toml` `[github]` section
+3. Fallback to global token in `~/.config/jig/config`
+
 **Phase 1: Core API**
 1. Add `octocrab` or `github-rs` dependency
-2. Auth and basic PR fetching
-3. `jig pr status` command
+2. Auth and basic PR fetching (use repo's GitHub config)
+3. `jig pr status` command (works on current repo or --repo)
+4. Support `--all` flag to iterate registered repos
 
 **Phase 2: Health Checks**
 1. Integrate with heartbeat system (#TBD)
-2. PR status checks on each heartbeat
-3. Auto-nudge for conflicts, CI, reviews
+2. PR status checks on each heartbeat (all registered repos)
+3. Auto-nudge for conflicts, CI, reviews (per-repo settings)
 
 **Phase 3: Lifecycle**
-1. Auto-cleanup merged PRs
+1. Auto-cleanup merged PRs (per-repo `autoCleanupMerged` setting)
 2. Handle closed PRs gracefully
 3. Alert on PR state changes
 
 **Phase 4: Advanced**
 1. Pre-commit hooks for commit validation
 2. Real-time webhooks (optional)
-3. Multi-repo support
+3. Batch operations across all registered repos
 
 ## Commands
 
 ```bash
-# Check PR status
-jig pr status <worker>
+# Check PR status (current repo or --repo)
+jig pr status <worker> [--repo <path>]
 
 # List open PRs for repo
-jig pr list
+jig pr list [--repo <path>]
+
+# List PRs across all registered repos
+jig pr list --all
 
 # Cleanup merged PRs
-jig pr cleanup --merged
+jig pr cleanup --merged [--repo <path>]
+jig pr cleanup --merged --all  # all registered repos
 
 # Force-sync PR state
-jig pr sync
+jig pr sync [--repo <path>]
+jig pr sync --all  # all registered repos
 ```
 
 ## Configuration
 
+**Per-repo settings in `jig.toml`:**
+
 ```toml
 [github]
+# GitHub owner/repo (auto-detected from git remote if not specified)
+owner = "amiller68"
+repo = "jig"
+
 # Auth token (fallback to gh CLI or GITHUB_TOKEN)
 token = "ghp_..."
 
@@ -126,6 +157,10 @@ requireScope = false
 # Allowed scopes (empty = any)
 scopes = []
 ```
+
+**Global fallback in `~/.config/jig/config`:**
+- `github.token=ghp_...` - auth token used across all repos
+- Per-repo settings in `jig.toml` override global defaults
 
 ## Related Issues
 

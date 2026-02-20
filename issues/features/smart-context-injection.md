@@ -28,8 +28,11 @@ These prompts are currently hardcoded in the bash script. They should be:
 ### Context Templates
 - [ ] Define template system for worker context
 - [ ] Variables available: `{worker_name}`, `{issue_path}`, `{pr_number}`, `{repo}`, `{branch}`, etc.
-- [ ] Store templates in `~/.config/jig/templates/`
-- [ ] Defaults shipped with jig, user can override
+- [ ] Template lookup order:
+  1. Repo-specific: `<repo>/.jig/templates/` (per-repo customization)
+  2. Global user: `~/.config/jig/templates/` (user defaults)
+  3. Built-in: shipped with jig (fallback)
+- [ ] Repo can override specific templates while using built-in defaults for others
 
 ### Spawn Context
 - [ ] Template: `spawn-new-issue.md`
@@ -66,9 +69,16 @@ These prompts are currently hardcoded in the bash script. They should be:
 - [ ] Truncate long outputs (e.g., max 50 lines of logs)
 
 ### Configuration
-- [ ] `jig config get templates.spawn` - show current template
-- [ ] `jig config set templates.spawn "path/to/custom.md"` - override
-- [ ] `jig config reset templates` - restore defaults
+- [ ] Templates configured in `jig.toml`:
+  ```toml
+  [templates]
+  # Override specific templates (relative to repo root or absolute)
+  spawn = ".jig/templates/spawn.md"
+  nudgeCI = ".jig/templates/nudge-ci.md"
+  # ... or leave unset to use built-in defaults
+  ```
+- [ ] `jig config get templates.spawn` - show effective template path
+- [ ] `jig config reset templates` - remove overrides, restore built-in defaults
 
 ## Template Examples
 
@@ -120,11 +130,13 @@ If the rebase is too complex, ask for human help.
 
 ## Implementation Notes
 
-1. Add `templates/` directory to jig's config dir
-2. Ship default templates with jig
-3. Template engine: handlebars or tera
-4. Inject templates into worker spawn/nudge commands
-5. Update heartbeat system to use templates
+1. Ship default templates with jig binary (embedded)
+2. Template engine: handlebars or tera
+3. Template lookup: repo `.jig/templates/` → global `~/.config/jig/templates/` → built-in
+4. Config in `jig.toml` `[templates]` section to override paths
+5. Inject templates into worker spawn/nudge commands
+6. Update heartbeat system to use templates
+7. Support per-repo template customization for different workflows
 
 ## Related Issues
 

@@ -23,17 +23,29 @@ This could be improved with:
 
 ## Acceptance Criteria
 
+### Repo Registry Integration
+- [ ] Discover issues in all registered repos or specific `--repo <path>`
+- [ ] Issue directory configured in `jig.toml`:
+  ```toml
+  [issues]
+  directory = "issues"  # default
+  autoSpawnPriorities = ["Urgent", "High"]
+  maxConcurrentWorkers = 5  # 0 = unlimited
+  ```
+- [ ] Support `--all` to show issues across all registered repos
+
 ### Issue Discovery
-- [ ] `jig issues list` - show all planned issues
+- [ ] `jig issues list` - show all planned issues (current repo)
+- [ ] `jig issues list --all` - show issues across all registered repos
 - [ ] `jig issues list --priority high` - filter by priority
 - [ ] `jig issues list --category features` - filter by category
-- [ ] Display: name, title, priority, category, description excerpt
+- [ ] Display: repo, name, title, priority, category, description excerpt
 
 ### Priority-Based Auto-Spawn
-- [ ] Configurable auto-spawn priorities
+- [ ] Configurable auto-spawn priorities per-repo (in `jig.toml`)
 - [ ] Default: spawn `High` and `Urgent` on `jig health`
-- [ ] Option: `jig config set autoSpawn.priorities ["Urgent", "High"]`
-- [ ] Respect max concurrent workers (e.g., max 5 at once)
+- [ ] Respect per-repo max concurrent workers
+- [ ] Global setting: `~/.config/jig/config` for default max workers
 
 ### Batch Spawning
 - [ ] `jig issues spawn --batch` - spawn multiple issues interactively
@@ -65,30 +77,34 @@ This could be improved with:
 ## Commands
 
 ```bash
-# List all planned issues
+# List all planned issues (current repo)
 jig issues list
 
+# List issues across all registered repos
+jig issues list --all
+
 # Filter by priority
-jig issues list --priority high
+jig issues list --priority high [--repo <path>]
 
 # Filter by category/subdirectory
-jig issues list --category features
+jig issues list --category features [--repo <path>]
 
 # Show next issue in queue
-jig issues next
+jig issues next [--repo <path>]
 
 # Spawn next issue
-jig issues spawn-next
+jig issues spawn-next [--repo <path>]
 
 # Spawn specific issue
-jig issues spawn features/github-integration
+jig issues spawn features/github-integration [--repo <path>]
 
-# Batch spawn (interactive)
-jig issues spawn --batch
+# Batch spawn (interactive, current repo or --all)
+jig issues spawn --batch [--repo <path>]
+jig issues spawn --batch --all  # across all registered repos
 
 # Create new issue from template
-jig issues create --template feature
-jig issues create --template bug
+jig issues create --template feature [--repo <path>]
+jig issues create --template bug [--repo <path>]
 ```
 
 ## Issue Frontmatter Schema
@@ -108,6 +124,8 @@ jig issues create --template bug
 
 ## Configuration
 
+**Per-repo settings in `jig.toml`:**
+
 ```toml
 [issues]
 # Auto-spawn priorities (list)
@@ -116,31 +134,38 @@ autoSpawnPriorities = ["Urgent", "High"]
 # Max concurrent workers (0 = unlimited)
 maxConcurrentWorkers = 5
 
-# Issue directory
+# Issue directory (relative to repo root)
 directory = "issues"
 
 # Require issue file for all workers
 requireIssueFile = true
 
-# Template directory
+# Template directory (relative to repo root)
 templateDirectory = "issues/_templates"
 ```
+
+**Global defaults in `~/.config/jig/config`:**
+- `issues.maxConcurrentWorkers=5` - default max across all repos
+- Per-repo settings override global defaults
 
 ## Implementation Notes
 
 1. Add issue parsing utilities to jig-core
 2. Parse frontmatter (YAML or key-value)
-3. Issue discovery: recursive scan of `issues/` directory
-4. Priority queue: sort by priority + age
-5. Dependency graph: check `Depends-On` field
-6. Interactive batch spawn: use `inquire` crate
+3. Issue discovery: recursive scan of configured `issues/` directory per repo
+4. Support multi-repo operations (`--all` flag iterates registered repos)
+5. Priority queue: sort by priority + age (per-repo or global)
+6. Dependency graph: check `Depends-On` field (can reference issues in other repos)
+7. Interactive batch spawn: use `inquire` crate
+8. Repo-specific settings from `jig.toml`, fallback to global config
 
 ## Example Output
 
+**Single repo:**
 ```
 $ jig issues list
 
-PLANNED ISSUES:
+PLANNED ISSUES (jig):
 ┌─────────────────────────────────────┬──────────┬──────────┬─────────────────────────────────┐
 │ Issue                               │ Priority │ Category │ Description                     │
 ├─────────────────────────────────────┼──────────┼──────────┼─────────────────────────────────┤
@@ -152,6 +177,23 @@ PLANNED ISSUES:
 
 Run 'jig issues spawn-next' to spawn the next high-priority issue.
 Run 'jig issues spawn --batch' to spawn multiple issues.
+```
+
+**Multi-repo:**
+```
+$ jig issues list --all
+
+PLANNED ISSUES ACROSS ALL REPOS:
+┌──────────┬─────────────────────────────────────┬──────────┬──────────┬─────────────────────────────────┐
+│ Repo     │ Issue                               │ Priority │ Category │ Description                     │
+├──────────┼─────────────────────────────────────┼──────────┼──────────┼─────────────────────────────────┤
+│ jig      │ features/github-integration         │ High     │ Features │ Native GitHub API integration   │
+│ jig      │ features/worker-heartbeat           │ High     │ Features │ Built-in health checks          │
+│ jax-fs   │ features/streaming-encryption       │ High     │ Features │ Streaming encrypted updates     │
+│ jig      │ improvements/activity-metrics       │ Medium   │ Improve  │ Track worker activity           │
+└──────────┴─────────────────────────────────────┴──────────┴──────────┴─────────────────────────────────┘
+
+Run 'jig issues spawn-next --all' to spawn across all repos.
 ```
 
 ## Related Issues
