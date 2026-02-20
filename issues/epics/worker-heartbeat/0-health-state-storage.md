@@ -1,6 +1,6 @@
 # Health State Storage
 
-**Status:** Planned  
+**Status:** In Progress  
 **Priority:** High  
 **Category:** Features  
 **Epic:** issues/epics/worker-heartbeat/index.md
