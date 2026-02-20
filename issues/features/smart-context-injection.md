@@ -2,154 +2,536 @@
 
 **Status:** Planned  
 **Priority:** Medium  
-**Category:** Features
+**Category:** Features  
+**Depends-On:** issues/features/worker-heartbeat-system.md, issues/features/github-integration.md
 
 ## Objective
 
-Standardize and improve the context/prompts that workers receive when spawned, resumed, or nudged. Make the instructions clear, actionable, and consistent.
+Standardize and templatize the context/prompts that workers receive when spawned, resumed, or nudged. Replace hardcoded prompt strings with a flexible template system that supports repo-specific customization and variable injection.
 
-## Background
+## Architecture
 
-The issue-grinder has evolved sophisticated prompts for different scenarios:
-- New worker spawn (issue context)
-- Resume after exit (with/without uncommitted changes)
-- Nudge for CI failures (with error logs)
-- Nudge for review comments (with inline comments)
-- Nudge for conflicts (with rebase instructions)
-- Nudge for idle/stuck workers (status check)
+### Template Engine: Handlebars
 
-These prompts are currently hardcoded in the bash script. They should be:
-1. Templated and configurable
-2. Part of jig's core logic
-3. Contextual based on worker state
+**Why Handlebars:**
+- Simple, well-tested syntax (`{{variable}}`)
+- Conditionals and loops built-in
+- Native Rust implementation (handlebars-rust)
+- User-friendly for non-programmers
+
+### Template Hierarchy
+
+**Lookup order:**
+1. **Repo-specific:** `<repo>/.jig/templates/<name>.hbs`
+2. **Global user:** `~/.config/jig/templates/<name>.hbs`
+3. **Built-in:** Embedded in jig binary (fallback)
+
+**Example:** For `spawn-new-issue.hbs`, jig checks:
+```
+./jig/templates/spawn-new-issue.hbs   # repo override
+~/.config/jig/templates/spawn-new-issue.hbs  # user default
+[built-in]  # shipped with jig
+```
+
+### Template Variables
+
+**Common variables (all templates):**
+```rust
+struct CommonContext {
+    worker_name: String,      // e.g., "features/auth"
+    issue_path: String,       // e.g., "issues/features/auth.md"
+    repo: String,             // e.g., "jig"
+    branch: String,           // e.g., "features/auth"
+    base_branch: String,      // e.g., "origin/main"
+    timestamp: String,        // ISO 8601
+}
+```
+
+**Spawn-specific:**
+```rust
+struct SpawnContext {
+    common: CommonContext,
+    issue_content: String,    // Full issue markdown
+    issue_title: String,      // First heading
+    issue_priority: String,   // "High", "Medium", etc.
+    issue_category: String,   // "Features", "Bugs", etc.
+}
+```
+
+**Resume-specific:**
+```rust
+struct ResumeContext {
+    common: CommonContext,
+    has_changes: bool,        // Uncommitted changes exist
+    commit_count: u32,        // Commits on branch
+    status: String,           // "exited", "no-window"
+    changed_files: Vec<String>, // List of modified files
+}
+```
+
+**Nudge-specific:**
+```rust
+struct NudgeContext {
+    common: CommonContext,
+    nudge_type: String,       // "idle", "ci_failure", "conflict", etc.
+    nudge_count: u32,         // How many times nudged
+    max_nudges: u32,          // Escalation threshold
+    
+    // Type-specific fields (optional)
+    ci_failures: Option<Vec<String>>,
+    error_logs: Option<String>,
+    review_comments: Option<Vec<Comment>>,
+    conflict_files: Option<Vec<String>>,
+    bad_commits: Option<Vec<Commit>>,
+}
+```
+
+## Configuration
+
+**Per-repo in `jig.toml`:**
+
+```toml
+[templates]
+# Override specific templates (relative to repo root or absolute)
+spawn = ".jig/templates/spawn.hbs"
+resumeClean = ".jig/templates/resume-clean.hbs"
+resumeDirty = ".jig/templates/resume-dirty.hbs"
+nudgeIdle = ".jig/templates/nudge-idle.hbs"
+nudgeStuck = ".jig/templates/nudge-stuck.hbs"
+nudgeCI = ".jig/templates/nudge-ci.hbs"
+nudgeConflict = ".jig/templates/nudge-conflict.hbs"
+nudgeReview = ".jig/templates/nudge-review.hbs"
+nudgeCommits = ".jig/templates/nudge-commits.hbs"
+
+# Template variables (injected into all templates)
+[templates.vars]
+teamSlack = "#dev-team"
+docsUrl = "https://docs.example.com/workflow"
+supportEmail = "dev@example.com"
+```
+
+**Template access to custom vars:**
+```handlebars
+Need help? Reach out in {{team_slack}} or email {{support_email}}.
+```
+
+## Built-in Templates
+
+### spawn-new-issue.hbs
+
+```handlebars
+{{issue_content}}
+
+---
+## Workflow Instructions
+
+When you start work, update the issue status:
+  sed -i 's/Status: Planned/Status: In Progress/' {{issue_path}}
+  echo -e "\n## Progress Log\n\n### $(date +%Y-%m-%d) - Started\n- Beginning implementation" >> {{issue_path}}
+  git add {{issue_path}} && git commit -m 'chore: mark {{worker_name}} in progress' && git push {{base_branch}}
+
+As you work, document key decisions in the issue:
+  echo "- [your decision or finding]" >> {{issue_path}}
+  git add {{issue_path}} && git commit -m 'docs: update {{worker_name}} progress' && git push {{base_branch}}
+
+When finished, you MUST:
+1. Update issue with summary and set to In Review:
+   echo -e "\n### $(date +%Y-%m-%d) - Ready for Review\n- Implementation complete\n- [summarize changes]" >> {{issue_path}}
+   sed -i 's/Status: In Progress/Status: In Review/' {{issue_path}}
+   git add {{issue_path}} && git commit -m 'chore: mark {{worker_name}} in review' && git push {{base_branch}}
+
+2. Commit using CONVENTIONAL COMMITS (required for releases):
+   - feat: new feature (minor bump)
+   - fix: bug fix (patch bump)
+   - docs/refactor/test/chore: other changes
+   - Breaking changes: feat!: or fix!:
+   Example: feat(auth): add OAuth2 support
+
+3. Push your branch:
+   git push -u {{base_branch}} {{branch}}
+
+4. Create PR with issue reference:
+   gh pr create --title "{{issue_title}}" --body "Addresses: {{issue_path}}\n\n[description]"
+
+5. Update issue with PR number:
+   echo "- PR: #<number>" >> {{issue_path}} && git add {{issue_path}} && git commit -m 'docs: add PR link' && git push {{base_branch}}
+
+6. Call /review to request a review of your work
+
+If you hit merge conflicts:
+  git fetch origin && git rebase {{base_branch}}
+```
+
+### resume-dirty.hbs
+
+```handlebars
+RESUME: You were working on {{worker_name}} but stopped without creating a PR.
+
+Branch: {{branch}}
+Status: {{status}}
+Uncommitted changes:
+{{#each changed_files}}
+  • {{this}}
+{{/each}}
+
+STEPS:
+1. Review your changes carefully
+
+2. Update issue with summary:
+   echo -e "\n### $(date +%Y-%m-%d) - Ready for Review\n- [what you did]" >> {{issue_path}}
+   sed -i 's/Status: In Progress/Status: In Review/' {{issue_path}}
+   git add {{issue_path}} && git commit -m 'chore: mark {{worker_name}} in review' && git push {{base_branch}}
+
+3. Commit using CONVENTIONAL COMMITS:
+   Example: feat(auth): add login endpoint
+
+4. Push: git push -u {{base_branch}} {{branch}}
+
+5. Create PR:
+   gh pr create --title "..." --body "Addresses: {{issue_path}}\n\n..."
+
+6. Update issue with PR number and push to {{base_branch}}
+
+7. Call /review
+
+If you hit conflicts: git fetch origin && git rebase {{base_branch}}
+```
+
+### nudge-idle.hbs
+
+```handlebars
+STATUS CHECK: You've been idle for a while ({{nudge_count}}/{{max_nudges}} nudges).
+
+{{#if has_changes}}
+You have uncommitted changes but no PR yet. What's blocking you?
+
+1. If ready: commit (conventional format), push, create PR, update issue, call /review
+2. If stuck: explain what you need help with
+3. If complete but confused: review the workflow above and finish the PR
+{{else}}
+No commits yet, no PR. What's the current state?
+
+1. Still working? Give a brief status update and continue
+2. Stuck on something? Explain what's blocking you
+3. Done but forgot to create PR? Commit your work, push, create PR, call /review
+{{/if}}
+
+{{#if (eq nudge_count max_nudges)}}
+⚠️  This is your final nudge. If you need human help, call /review now.
+{{/if}}
+```
+
+### nudge-ci.hbs
+
+```handlebars
+CI is failing on PR #{{pr_number}} (nudge {{nudge_count}}/{{max_nudges}}).
+
+Fix these issues:
+{{#each ci_failures}}
+  • {{this}}
+{{/each}}
+
+{{#if error_logs}}
+Error log (last 50 lines):
+```
+{{error_logs}}
+```
+{{/if}}
+
+STEPS:
+1. Fix the failing checks
+2. Commit using conventional commits: fix(ci): fix linting errors
+3. Push to your branch: git push
+4. Verify CI passes on GitHub
+5. Call /review when green
+
+{{#if (gte nudge_count 2)}}
+⚠️  CI has been failing for a while. If you're stuck, call /review and ask for help.
+{{/if}}
+```
+
+### nudge-conflict.hbs
+
+```handlebars
+PR #{{pr_number}} has merge conflicts with {{base_branch}} (nudge {{nudge_count}}/{{max_nudges}}).
+
+Resolve them:
+
+1. Fetch latest {{base_branch}}:
+   git fetch origin
+
+2. Rebase on {{base_branch}}:
+   git rebase {{base_branch}}
+
+3. Git will stop at each conflict. For each:
+   • Edit the conflicted files
+   • Remove conflict markers (<<<<<<, ======, >>>>>>)
+   • Test that the code still works
+   • Stage the resolved file: git add <file>
+
+4. Continue the rebase:
+   git rebase --continue
+
+5. Repeat steps 3-4 until all conflicts are resolved
+
+6. Force push (safe, you're on your branch):
+   git push --force-with-lease
+
+7. Verify the PR is mergeable on GitHub
+
+8. Call /review when conflicts are resolved
+
+{{#if (gte nudge_count 2)}}
+⚠️  Conflicts are complex? Call /review and ask for human help with the rebase.
+{{/if}}
+```
+
+### nudge-review.hbs
+
+```handlebars
+PR #{{pr_number}} has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
+
+Address all feedback:
+
+{{#if inline_comments}}
+Inline comments:
+{{#each inline_comments}}
+  • {{path}}:{{line}}: {{body}}
+{{/each}}
+{{/if}}
+
+{{#if general_comments}}
+General review feedback:
+{{#each general_comments}}
+> {{this}}
+{{/each}}
+{{/if}}
+
+STEPS:
+1. Address each comment thoroughly
+2. Make the requested changes
+3. Commit with conventional format: fix: address review feedback
+4. Push: git push
+5. Reply to each comment on GitHub explaining what you changed
+6. Call /review to notify reviewers
+
+{{#if (gte nudge_count 2)}}
+⚠️  Don't ignore review feedback. If you disagree with a comment, discuss it on GitHub before proceeding.
+{{/if}}
+```
+
+### nudge-commits.hbs
+
+```handlebars
+PR #{{pr_number}} has commits that don't follow conventional commit format (nudge {{nudge_count}}/{{max_nudges}}).
+
+Bad commits:
+{{#each bad_commits}}
+  • {{hash}}: {{message}}
+{{/each}}
+
+Fix with interactive rebase:
+
+1. Start rebase:
+   git rebase -i {{base_branch}}
+
+2. For each bad commit, change 'pick' to 'reword'
+
+3. Update the commit message to:
+   <type>(<scope>): <description>
+
+   Types: feat|fix|docs|style|refactor|perf|test|chore|ci
+   Example: feat(auth): add OAuth2 support
+   Breaking changes: feat!: remove legacy API
+
+4. Save and close the editor
+
+5. Git will open an editor for each commit you marked 'reword'
+   Update the message and save
+
+6. Force push:
+   git push --force-with-lease
+
+7. Call /review
+
+{{#if (gte nudge_count 2)}}
+⚠️  Conventional commits are required for automated releases. Please fix them.
+{{/if}}
+```
+
+## Template Development Workflow
+
+### Creating Custom Templates
+
+**1. Copy built-in to user config:**
+```bash
+mkdir -p ~/.config/jig/templates
+jig template export spawn-new-issue > ~/.config/jig/templates/spawn-new-issue.hbs
+```
+
+**2. Edit template:**
+```bash
+$EDITOR ~/.config/jig/templates/spawn-new-issue.hbs
+```
+
+**3. Test template:**
+```bash
+jig template test spawn-new-issue --worker features/test
+```
+
+**4. Deploy to repo (optional):**
+```bash
+mkdir -p .jig/templates
+cp ~/.config/jig/templates/spawn-new-issue.hbs .jig/templates/
+git add .jig/templates/ && git commit -m "chore: add custom spawn template"
+```
+
+### Repo-Specific Customization
+
+**Example: Add team-specific workflow to spawn template**
+
+`.jig/templates/spawn-new-issue.hbs`:
+```handlebars
+{{issue_content}}
+
+---
+## Our Team's Workflow
+
+1. Update Jira ticket: PROJ-{{issue_number}}
+2. Post in #engineering when PR is ready
+3. Assign to team lead for review
+4. [rest of standard workflow...]
+```
+
+**Configure in `jig.toml`:**
+```toml
+[templates]
+spawn = ".jig/templates/spawn-new-issue.hbs"
+
+[templates.vars]
+issueNumber = "1234"  # Could be auto-detected from issue frontmatter
+teamChannel = "#engineering"
+```
+
+## Commands
+
+```bash
+# List available templates
+jig template list
+
+# Show current template (with hierarchy)
+jig template show spawn-new-issue
+
+# Export built-in template to stdout
+jig template export spawn-new-issue
+
+# Test template rendering with sample data
+jig template test spawn-new-issue --worker features/test
+
+# Validate template syntax
+jig template validate .jig/templates/spawn-new-issue.hbs
+
+# Reset to built-in (delete user/repo overrides)
+jig template reset spawn-new-issue
+jig template reset --all
+```
+
+## Implementation Phases
+
+### Phase 1: Core Template System
+1. Add `handlebars` dependency
+2. Embed built-in templates in binary (include_str!)
+3. Template loader with hierarchy (repo > user > built-in)
+4. Variable injection structs
+
+### Phase 2: Integration
+1. Update spawn command to use templates
+2. Update health system to use templates for nudges
+3. Update GitHub integration to use templates
+4. Pass context structs to template renderer
+
+### Phase 3: CLI Tools
+1. `jig template list/show/export`
+2. `jig template test` with mock data
+3. `jig template validate`
+4. Template syntax error reporting
+
+### Phase 4: Advanced Features
+1. Custom variables from `jig.toml`
+2. Helpers for common operations (truncate, format dates, etc.)
+3. Conditional sections (if/unless/each)
+4. Template includes/partials
 
 ## Acceptance Criteria
 
-### Context Templates
-- [ ] Define template system for worker context
-- [ ] Variables available: `{worker_name}`, `{issue_path}`, `{pr_number}`, `{repo}`, `{branch}`, etc.
-- [ ] Template lookup order:
-  1. Repo-specific: `<repo>/.jig/templates/` (per-repo customization)
-  2. Global user: `~/.config/jig/templates/` (user defaults)
-  3. Built-in: shipped with jig (fallback)
-- [ ] Repo can override specific templates while using built-in defaults for others
+### Core
+- [ ] Handlebars template engine integrated
+- [ ] Built-in templates embedded in binary
+- [ ] Template lookup: repo > user > built-in
+- [ ] All context variables documented
 
-### Spawn Context
-- [ ] Template: `spawn-new-issue.md`
-- [ ] Includes:
-  - Full issue content
-  - Workflow reminders (update issue, conventional commits, create PR, call /review)
-  - Rebase instructions if conflicts occur
-- [ ] Auto-inject on `jig spawn`
+### Templates
+- [ ] spawn-new-issue.hbs
+- [ ] resume-clean.hbs
+- [ ] resume-dirty.hbs
+- [ ] nudge-idle.hbs
+- [ ] nudge-stuck.hbs
+- [ ] nudge-ci.hbs
+- [ ] nudge-conflict.hbs
+- [ ] nudge-review.hbs
+- [ ] nudge-commits.hbs
 
-### Resume Context
-- [ ] Template: `resume-exited.md`
-- [ ] Variables: `{has_changes}`, `{commit_count}`, `{status}`
-- [ ] Different messages for:
-  - Clean worktree (no changes)
-  - Uncommitted changes (remind to commit)
-  - Already has commits (remind to create PR)
-
-### Nudge Context
-- [ ] Template: `nudge-idle.md` - idle worker at prompt
-- [ ] Template: `nudge-stuck.md` - stuck at interactive prompt
-- [ ] Template: `nudge-ci-failure.md` - CI failures (includes error logs)
-- [ ] Template: `nudge-conflict.md` - merge conflicts (rebase instructions)
-- [ ] Template: `nudge-review.md` - unresolved review comments (includes comments)
-- [ ] Template: `nudge-bad-commits.md` - non-conventional commits (rebase instructions)
-
-### Smart Variable Injection
-- [ ] Detect worker state automatically
-- [ ] Inject relevant variables:
-  - `{ci_failures}` - list of failing checks
-  - `{error_logs}` - truncated error output
-  - `{review_comments}` - inline and general comments
-  - `{conflict_files}` - list of files with conflicts
-  - `{bad_commits}` - list of non-conventional commits
-- [ ] Truncate long outputs (e.g., max 50 lines of logs)
+### Integration
+- [ ] `jig spawn` uses spawn template
+- [ ] `jig health` uses resume templates
+- [ ] `jig health` uses nudge templates
+- [ ] GitHub integration uses CI/conflict/review templates
+- [ ] Context variables populated from worker/PR/issue state
 
 ### Configuration
-- [ ] Templates configured in `jig.toml`:
-  ```toml
-  [templates]
-  # Override specific templates (relative to repo root or absolute)
-  spawn = ".jig/templates/spawn.md"
-  nudgeCI = ".jig/templates/nudge-ci.md"
-  # ... or leave unset to use built-in defaults
-  ```
-- [ ] `jig config get templates.spawn` - show effective template path
-- [ ] `jig config reset templates` - remove overrides, restore built-in defaults
+- [ ] Per-repo template overrides in `jig.toml`
+- [ ] Custom variables in `[templates.vars]`
+- [ ] Global user templates in `~/.config/jig/templates/`
 
-## Template Examples
+### CLI
+- [ ] `jig template list` shows available templates
+- [ ] `jig template show <name>` shows effective template (with source)
+- [ ] `jig template export <name>` outputs built-in
+- [ ] `jig template test <name>` renders with sample data
+- [ ] `jig template validate <path>` checks syntax
 
-**spawn-new-issue.md:**
-```markdown
-{issue_content}
+## Testing
 
----
-IMPORTANT: When you start work, update the issue:
-  sed -i 's/Status: Planned/Status: In Progress/' issues/{issue_path}
-  echo -e "\n## Progress Log\n\n### $(date +%Y-%m-%d) - Started\n- Beginning implementation" >> issues/{issue_path}
-  git add issues/{issue_path} && git commit -m 'chore: mark {worker_name} in progress' && git push origin main
+```bash
+# Export built-in
+jig template export spawn-new-issue > test.hbs
 
-When finished, you MUST:
-1. Update issue with final summary and set to In Review
-2. Commit using CONVENTIONAL COMMITS format (required for releases)
-3. Push: git push -u origin {worker_name}
-4. Create PR: gh pr create --title "<title>" --body "Addresses: issues/{issue_path}\n\n<description>"
-5. Call /review to request a review
+# Validate syntax
+jig template validate test.hbs
 
-If you get review feedback later, address ALL comments thoroughly.
+# Test rendering
+jig template test spawn-new-issue --worker features/test
+
+# Create repo override
+mkdir -p .jig/templates
+echo "CUSTOM SPAWN TEMPLATE" > .jig/templates/spawn-new-issue.hbs
+
+# Verify override is used
+jig template show spawn-new-issue  # should show custom template
+
+# Spawn worker and verify context
+jig spawn features/test
+tmux capture-pane -p -t jig-myrepo:features/test | grep "CUSTOM SPAWN TEMPLATE"
 ```
 
-**nudge-ci-failure.md:**
-```markdown
-CI is failing on PR #{pr_number}. Fix these issues:
+## Open Questions
 
-{ci_failures}
-
-{error_logs}
-
-Fix the issues, commit using conventional commits (fix: ...), push, then call /review.
-```
-
-**nudge-conflict.md:**
-```markdown
-PR #{pr_number} has merge conflicts with main. Resolve them:
-
-1. Fetch latest main: git fetch origin
-2. Rebase on main: git rebase origin/main
-3. Git will stop at each conflict - resolve them manually
-4. After resolving each file: git add <file>
-5. Continue: git rebase --continue
-6. Force push: git push --force-with-lease
-7. Call /review when resolved
-
-If the rebase is too complex, ask for human help.
-```
-
-## Implementation Notes
-
-1. Ship default templates with jig binary (embedded)
-2. Template engine: handlebars or tera
-3. Template lookup: repo `.jig/templates/` → global `~/.config/jig/templates/` → built-in
-4. Config in `jig.toml` `[templates]` section to override paths
-5. Inject templates into worker spawn/nudge commands
-6. Update heartbeat system to use templates
-7. Support per-repo template customization for different workflows
+1. Should templates support includes/partials? (e.g., shared workflow steps)
+2. Should we support multiple template engines? (Handlebars is sufficient)
+3. Should templates be able to execute shell commands? (No, security risk)
+4. Should we version templates? (e.g., built-in v1, v2) (No, just update built-ins)
 
 ## Related Issues
 
-- #TBD: Worker heartbeat system
-- #TBD: GitHub integration
-- #TBD: Worker lifecycle management
-
-## References
-
-- Current prompts: `~/.openclaw/workspace/skills/issue-grinder/grind.sh`
-  - Spawn: lines 554-580
-  - Resume: lines 436-486
-  - CI nudge: lines 629-640
-  - Conflict nudge: lines 707-726
-  - Review nudge: lines 798-822
-  - Commit nudge: lines 873-887
+- issues/features/worker-heartbeat-system.md (uses nudge templates)
+- issues/features/github-integration.md (uses CI/conflict/review templates)
