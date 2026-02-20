@@ -335,6 +335,105 @@ All jig hooks uninstalled.
 Your original hooks have been restored.
 ```
 
+## Agent Adapter Integration
+
+**Adapter-agnostic hook design:**
+
+Git hooks work with any agent adapter because:
+
+1. **Hooks track git operations, not agent operations:**
+   - `post-commit`: updates metrics (commit count, timestamp)
+   - `post-merge`: resets conflict nudge counts
+   - `pre-commit`: validates commit messages (agent-independent)
+
+2. **No agent-specific code in hooks:**
+   ```bash
+   #!/bin/bash
+   # jig-managed: v1
+   
+   # Run jig handler (agent-agnostic)
+   if command -v jig &> /dev/null; then
+       jig hooks post-commit "$@" || true
+   fi
+   
+   # Run user hook if exists
+   if [ -f .git/hooks/post-commit.user ]; then
+       .git/hooks/post-commit.user "$@"
+   fi
+   ```
+
+3. **Hook handlers are adapter-agnostic:**
+   ```rust
+   pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
+       // Update metrics (git-based, not agent-based)
+       let metrics = collect_git_metrics(repo_path)?;
+       update_health_state(repo_path, |state| {
+           state.last_commit_at = metrics.last_commit_at;
+           state.commit_count = metrics.commit_count;
+           state.reset_nudge_count("idle");  // Works for any agent
+       })?;
+       
+       // Optionally trigger health check (adapter-agnostic)
+       if config.health.check_on_commit {
+           run_health_check(repo_path)?;  // Uses agent from config
+       }
+       
+       Ok(())
+   }
+   ```
+
+4. **Conventional commit validation is agent-agnostic:**
+   - Validates git commit message format
+   - No agent-specific assumptions
+   - Works regardless of which agent made the commit
+
+**Adapter-specific hook behavior (future):**
+
+If needed, hooks could be made agent-aware:
+
+```rust
+pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
+    let adapter = get_current_adapter(repo_path)?;
+    
+    // Example: agent-specific metric tracking
+    match adapter.agent_type {
+        AgentType::Claude => {
+            // Claude-specific metrics (e.g., parse .claude/context.json)
+        },
+        AgentType::Cursor => {
+            // Cursor-specific metrics (e.g., parse .cursor/state)
+        },
+    }
+    
+    // Standard git metrics (agent-agnostic)
+    update_standard_metrics(repo_path)?;
+    
+    Ok(())
+}
+```
+
+**Configuration per-agent (future):**
+
+```toml
+[hooks]
+enabled = ["post-commit", "post-merge", "pre-commit"]
+
+# Optional: agent-specific hook behavior
+[hooks.claude]
+checkOnCommit = true  # Claude Code is fast, can check on every commit
+
+[hooks.cursor]
+checkOnCommit = false  # Cursor might be slower, check on merge only
+```
+
+**Future extensibility:**
+
+When adding new agents:
+- ✅ Hooks remain agent-agnostic by default
+- ✅ Agent-specific logic can be added if needed
+- ✅ Hook installation is agent-independent
+- ✅ User hooks (.user suffix) work with any agent
+
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure

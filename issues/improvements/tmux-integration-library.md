@@ -480,6 +480,72 @@ mod tests {
 }
 ```
 
+## Agent Adapter Integration
+
+**Adapter-agnostic by design:**
+
+The tmux library works with any agent adapter because:
+
+1. **Session naming is adapter-agnostic:**
+   ```rust
+   // Session name based on repo, not agent
+   let session_name = format!("jig-{}", repo_name);
+   // Window name is worker name
+   let window_name = worker_name;
+   ```
+
+2. **Output scraping is universal:**
+   - Captures raw tmux pane text
+   - Works regardless of what agent is running in the pane
+   - Pattern matching is configurable (not agent-specific)
+
+3. **Input sending is universal:**
+   - Uses tmux send-keys (works for any process in pane)
+   - Handles both literal text and special keys
+   - Delay handling for interactive CLIs (any agent)
+
+4. **Worker state detection is pattern-based:**
+   ```rust
+   pub struct WorkerDetector {
+       prompt_patterns: Vec<Regex>,    // Configurable per-agent if needed
+       stuck_patterns: Vec<Regex>,     // Configurable per-agent if needed
+   }
+   ```
+
+5. **Agent-specific patterns can be configured:**
+   ```toml
+   # Per-repo override for different agent
+   [tmux]
+   promptPatterns = [
+       "cursor>\\s*$",  # Hypothetical Cursor prompt
+       "❯\\s*$",        # Standard shell prompt
+   ]
+   stuckPatterns = [
+       "Cursor: Approve changes?",  # Hypothetical Cursor-specific prompt
+   ]
+   ```
+
+**Integration with agent adapters:**
+
+When spawning workers, jig uses the adapter system to invoke the right agent:
+
+```rust
+// In spawn.rs
+let adapter = get_adapter(&config.agent.type_)?;
+let cmd = adapter.build_spawn_command(context, config.spawn.auto);
+
+// Tmux library doesn't need to know which agent
+tmux.new_window(session, worker_name)?;
+tmux.send_keys(&target, &[&cmd, "Enter"])?;
+```
+
+**Future extensibility:**
+
+Adding new agents (Cursor, Aider, etc.) requires:
+- ✅ No changes to tmux library (it's agent-agnostic)
+- ✅ Optional: add agent-specific patterns to default config
+- ❌ No hardcoded agent assumptions in detection logic
+
 ## Implementation Phases
 
 ### Phase 1: Core Client

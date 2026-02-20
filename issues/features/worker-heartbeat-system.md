@@ -216,6 +216,60 @@ fn is_stale(worker: &WorkerState, threshold_hours: u64) -> bool {
 }
 ```
 
+## Agent Adapter Integration
+
+**Adapter-agnostic design:**
+
+The heartbeat system works with any agent adapter (Claude Code, Cursor, future agents) by:
+
+1. **Tmux targets use worker name, not agent-specific paths:**
+   ```rust
+   let tmux_target = format!("jig-{}:{}", repo_name, worker_name);
+   // Works for any agent in the tmux session
+   ```
+
+2. **Health state is agent-agnostic:**
+   - Tracks git metrics (commits, files) which are agent-independent
+   - Tracks tmux activity (prompt detection) which works for any agent
+   - No agent-specific assumptions in health scoring
+
+3. **Nudge delivery through adapter:**
+   ```rust
+   fn send_nudge(adapter: &AgentAdapter, target: &TmuxTarget, message: &str) -> Result<()> {
+       // Use adapter-agnostic tmux send-keys
+       // Works regardless of whether it's Claude Code, Cursor, etc.
+       tmux::send_keys_literal(target, message)?;
+       thread::sleep(Duration::from_millis(100));
+       tmux::send_keys(target, &["Enter"])?;
+       Ok(())
+   }
+   ```
+
+4. **Auto-approval patterns are agent-agnostic:**
+   ```toml
+   [health]
+   autoApprove = [
+       "Would you like to proceed",  # Works for any agent asking permission
+       "ctrl-g to edit",              # Works for any agent with edit prompt
+   ]
+   ```
+
+5. **Per-repo config can override for agent-specific behaviors:**
+   ```toml
+   # If using a different agent with different prompts
+   [health]
+   autoApprove = [
+       "Continue? (y/n)",  # Custom prompt for hypothetical agent
+   ]
+   ```
+
+**Future extensibility:**
+
+When adding new agent adapters (e.g., Cursor), no changes needed to heartbeat system because:
+- Detection logic is regex-based (configurable)
+- Nudging is tmux-based (universal)
+- Metrics are git/fs-based (agent-independent)
+
 ## Implementation Phases
 
 ### Phase 0: Dependencies

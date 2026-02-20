@@ -436,6 +436,96 @@ jig template reset spawn-new-issue
 jig template reset --all
 ```
 
+## Agent Adapter Integration
+
+**Adapter-aware template variables:**
+
+Templates have access to agent-specific paths via the adapter system:
+
+```rust
+struct TemplateContext {
+    // ... common vars ...
+    
+    // Agent-specific vars (from AgentAdapter)
+    agent_name: String,          // "claude", "cursor", etc.
+    agent_command: String,        // "claude", "cursor", etc.
+    skills_dir: String,           // ".claude/skills", ".cursor/rules"
+    skill_file: String,           // "SKILL.md", "rule.mdc"
+    project_file: String,         // "CLAUDE.md", ".cursorrules"
+}
+```
+
+**Agent-aware templates:**
+
+Templates can reference agent-specific paths:
+
+```handlebars
+{{issue_content}}
+
+---
+## Workflow Instructions
+
+For more guidance, see:
+- Project context: {{project_file}}
+- Skills documentation: {{skills_dir}}/
+
+{{#if (eq agent_name "claude")}}
+Tip: You're running with Claude Code. Use /review to request human review.
+{{else if (eq agent_name "cursor")}}
+Tip: You're running with Cursor. Press Ctrl+Shift+K to open the AI panel.
+{{/if}}
+
+When finished:
+1. Update issue status...
+```
+
+**Adapter-agnostic templates:**
+
+Most templates don't need agent-specific logic:
+- Workflow instructions are agent-independent
+- Git operations are universal
+- Issue tracking is universal
+- PR creation is universal
+
+Only use agent-specific sections when truly necessary (e.g., agent-specific shortcuts or features).
+
+**Template hierarchy respects adapter:**
+
+```rust
+// Template lookup order:
+1. .jig/templates/spawn-new-issue.hbs          // Repo override (any agent)
+2. ~/.config/jig/templates/spawn-new-issue.hbs  // User default (any agent)
+3. [built-in spawn-new-issue.hbs]              // Built-in (agent-agnostic)
+
+// Future: per-agent templates (optional)
+1. .jig/templates/claude/spawn-new-issue.hbs   // Repo + agent override
+2. .jig/templates/spawn-new-issue.hbs          // Repo override (any agent)
+3. ~/.config/jig/templates/spawn-new-issue.hbs  // User default
+4. [built-in]
+```
+
+**Configuration per-agent (future):**
+
+```toml
+[templates]
+spawn = ".jig/templates/spawn-new-issue.hbs"
+
+# Optional: agent-specific overrides
+[templates.claude]
+spawn = ".jig/templates/claude/spawn.hbs"
+
+[templates.cursor]
+spawn = ".jig/templates/cursor/spawn.hbs"
+```
+
+**Future extensibility:**
+
+When adding new agents:
+- ✅ Templates get agent variables automatically
+- ✅ No changes needed to template engine
+- ✅ Built-in templates remain agent-agnostic
+- ✅ Repos can opt-in to agent-specific templates
+
 ## Implementation Phases
 
 ### Phase 1: Core Template System

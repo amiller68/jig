@@ -418,6 +418,82 @@ async fn handle_closed_prs(
 4. Review comments (human waiting)
 5. Conventional commits (nice-to-have)
 
+## Agent Adapter Integration
+
+**Adapter-agnostic GitHub operations:**
+
+GitHub integration works with any agent adapter because:
+
+1. **PR operations are agent-independent:**
+   - Fetching PR status (CI, reviews, conflicts) via octorust API
+   - Validating commits via git log
+   - Auto-cleanup merged PRs via GitHub API
+   - All operations work regardless of which agent created the PR
+
+2. **Nudging through adapter-agnostic tmux:**
+   ```rust
+   async fn nudge_ci_failure(pr: &PullRequest, worker: &WorkerState) -> Result<()> {
+       // Fetch CI failures from GitHub (agent-independent)
+       let failures = check_ci_status(&client, &config, pr.number).await?;
+       
+       // Build nudge message using template (agent-agnostic)
+       let context = NudgeContext {
+           nudge_type: "ci_failure".to_string(),
+           ci_failures: Some(failures),
+           // ... other fields
+       };
+       let message = render_template("nudge-ci.hbs", &context)?;
+       
+       // Send via tmux (works for any agent in pane)
+       tmux.send_nudge(&worker.tmux_target, &message)?;
+       
+       Ok(())
+   }
+   ```
+
+3. **Agent-specific PR workflows (future):**
+   
+   Different agents might have different PR creation patterns:
+   
+   ```rust
+   // Claude Code: uses `gh pr create`
+   // Cursor: might use different command
+   // Future: abstract PR creation through adapter
+   
+   trait AgentAdapter {
+       fn pr_create_command(&self, title: &str, body: &str) -> String;
+   }
+   
+   // Claude Code adapter
+   fn pr_create_command(&self, title: &str, body: &str) -> String {
+       format!("gh pr create --title '{}' --body '{}'", title, body)
+   }
+   ```
+
+4. **Configuration per-agent (future):**
+   ```toml
+   [github]
+   requireConventionalCommits = true
+   
+   # Optional: agent-specific GitHub behavior
+   [github.claude]
+   nudgeOnCiFailure = true
+   includeErrorLogs = true
+   errorLogMaxLines = 50
+   
+   [github.cursor]
+   nudgeOnCiFailure = false  # Cursor has built-in CI awareness
+   ```
+
+**Future extensibility:**
+
+When adding new agents:
+- ✅ GitHub API operations remain adapter-agnostic
+- ✅ PR detection works regardless of agent
+- ✅ Nudging works through universal tmux layer
+- ✅ Optional: agent-specific PR creation commands
+- ✅ Optional: agent-specific nudge behavior
+
 ## Implementation Phases
 
 ### Phase 0: Dependencies
