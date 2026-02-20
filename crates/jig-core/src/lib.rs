@@ -12,6 +12,7 @@ pub mod adapter;
 pub mod config;
 pub mod error;
 pub mod git;
+pub mod hooks;
 pub mod session;
 pub mod spawn;
 pub mod state;
