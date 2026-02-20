@@ -21,14 +21,17 @@ This should be native to jig, not bolted on externally.
 ## Acceptance Criteria
 
 ### Repo Registry Integration
-- [ ] Operate on all registered repos (via `jig register <path>`)
+- [ ] Depends on: `issues/features/global-commands.md` (repo registry)
+- [ ] Operate on all auto-registered repos
+- [ ] Use `GlobalContext` for efficient multi-repo checks
+- [ ] Support `-g`/`--global` flag: `jig health -g`
 - [ ] Support `--repo <path>` to target specific repo
-- [ ] Default: check all registered repos in single run
 - [ ] Store per-repo health settings in repo's `jig.toml`
 
 ### Core Heartbeat
 - [ ] `jig health --watch` command that runs periodic checks (default: every 15min)
-- [ ] `jig health` (single run) - check all registered repos once
+- [ ] `jig health` (single run) - check current repo once
+- [ ] `jig health -g` (global) - check all registered repos once
 - [ ] Track per-worker metrics internally:
   - Worker start time
   - Last commit timestamp
@@ -80,10 +83,8 @@ This should be native to jig, not bolted on externally.
 ## Implementation Notes
 
 **Phase 0: Repo Registry (prerequisite)**
-1. Implement `jig register <path>` to track repos
-2. Store registry in `~/.config/jig/repos` or global config
-3. `jig repos list` to show registered repos
-4. Health system iterates over registered repos
+- Depends on: `issues/features/global-commands.md`
+- Auto-registration, `GlobalContext`, `jig repos` commands
 
 **Phase 1: Core Infrastructure**
 1. Add `WorkerMetrics` struct to jig-core

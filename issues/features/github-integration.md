@@ -22,6 +22,7 @@ This should be built into jig with proper error handling and caching.
 ## Acceptance Criteria
 
 ### Repo Registry Integration
+- [ ] Depends on: `issues/features/global-commands.md` (repo registry)
 - [ ] GitHub org/repo auto-detected from git remote
 - [ ] Store GitHub config in repo's `jig.toml`:
   ```toml
@@ -32,7 +33,8 @@ This should be built into jig with proper error handling and caching.
   autoCleanupMerged = true
   ```
 - [ ] Support per-repo GitHub settings
-- [ ] Operate on all registered repos or specific `--repo <path>`
+- [ ] Use `GlobalContext` for efficient multi-repo operations
+- [ ] Support `-g` flag to operate on all registered repos
 
 ### Core GitHub Client
 - [ ] GitHub API client in jig-core (use `octocrab` or similar)
@@ -79,19 +81,20 @@ This should be built into jig with proper error handling and caching.
 ## Implementation Notes
 
 **Phase 0: Repo Registry (prerequisite)**
-1. GitHub owner/repo auto-detected from git remote
-2. Store in `jig.toml` `[github]` section
-3. Fallback to global token in `~/.config/jig/config`
+- Depends on: `issues/features/global-commands.md`
+- GitHub owner/repo auto-detected from git remote
+- Store in `jig.toml` `[github]` section
+- Fallback to global token in `~/.config/jig/config`
 
 **Phase 1: Core API**
 1. Add `octocrab` or `github-rs` dependency
 2. Auth and basic PR fetching (use repo's GitHub config)
 3. `jig pr status` command (works on current repo or --repo)
-4. Support `--all` flag to iterate registered repos
+4. Use `GlobalContext` for `-g` flag to iterate registered repos efficiently
 
 **Phase 2: Health Checks**
-1. Integrate with heartbeat system (#TBD)
-2. PR status checks on each heartbeat (all registered repos)
+1. Integrate with heartbeat system (issues/features/worker-heartbeat-system.md)
+2. PR status checks on each heartbeat (uses GlobalContext for efficiency)
 3. Auto-nudge for conflicts, CI, reviews (per-repo settings)
 
 **Phase 3: Lifecycle**
@@ -102,7 +105,7 @@ This should be built into jig with proper error handling and caching.
 **Phase 4: Advanced**
 1. Pre-commit hooks for commit validation
 2. Real-time webhooks (optional)
-3. Batch operations across all registered repos
+3. Batch operations with `jig pr cleanup -g` etc.
 
 ## Commands
 
@@ -114,15 +117,15 @@ jig pr status <worker> [--repo <path>]
 jig pr list [--repo <path>]
 
 # List PRs across all registered repos
-jig pr list --all
+jig pr list -g
 
 # Cleanup merged PRs
 jig pr cleanup --merged [--repo <path>]
-jig pr cleanup --merged --all  # all registered repos
+jig pr cleanup --merged -g  # all registered repos
 
 # Force-sync PR state
 jig pr sync [--repo <path>]
-jig pr sync --all  # all registered repos
+jig pr sync -g  # all registered repos
 ```
 
 ## Configuration

@@ -26,9 +26,11 @@ This should be built into jig and displayed in `jig ps`.
 ## Acceptance Criteria
 
 ### Repo Registry Integration
+- [ ] Depends on: `issues/features/global-commands.md` (repo registry)
 - [ ] Metrics tracked per-worker in repo's state file
 - [ ] `jig ps --metrics` shows current repo or `--repo <path>`
-- [ ] `jig ps --metrics --all` aggregates across all registered repos
+- [ ] `jig ps --metrics -g` aggregates across all registered repos
+- [ ] Use `GlobalContext` for efficient multi-repo operations
 
 ### Core Metrics
 - [ ] Track per-worker:

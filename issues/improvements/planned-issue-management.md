@@ -24,7 +24,9 @@ This could be improved with:
 ## Acceptance Criteria
 
 ### Repo Registry Integration
-- [ ] Discover issues in all registered repos or specific `--repo <path>`
+- [ ] Depends on: `issues/features/global-commands.md` (repo registry)
+- [ ] Discover issues in all auto-registered repos or specific `--repo <path>`
+- [ ] Use `GlobalContext` for efficient multi-repo operations
 - [ ] Issue directory configured in `jig.toml`:
   ```toml
   [issues]
@@ -32,11 +34,11 @@ This could be improved with:
   autoSpawnPriorities = ["Urgent", "High"]
   maxConcurrentWorkers = 5  # 0 = unlimited
   ```
-- [ ] Support `--all` to show issues across all registered repos
+- [ ] Support `-g` flag to show issues across all registered repos
 
 ### Issue Discovery
 - [ ] `jig issues list` - show all planned issues (current repo)
-- [ ] `jig issues list --all` - show issues across all registered repos
+- [ ] `jig issues list -g` - show issues across all registered repos
 - [ ] `jig issues list --priority high` - filter by priority
 - [ ] `jig issues list --category features` - filter by category
 - [ ] Display: repo, name, title, priority, category, description excerpt
@@ -81,7 +83,7 @@ This could be improved with:
 jig issues list
 
 # List issues across all registered repos
-jig issues list --all
+jig issues list -g
 
 # Filter by priority
 jig issues list --priority high [--repo <path>]
@@ -98,9 +100,9 @@ jig issues spawn-next [--repo <path>]
 # Spawn specific issue
 jig issues spawn features/github-integration [--repo <path>]
 
-# Batch spawn (interactive, current repo or --all)
+# Batch spawn (interactive, current repo or -g)
 jig issues spawn --batch [--repo <path>]
-jig issues spawn --batch --all  # across all registered repos
+jig issues spawn --batch -g  # across all registered repos
 
 # Create new issue from template
 jig issues create --template feature [--repo <path>]
@@ -150,10 +152,12 @@ templateDirectory = "issues/_templates"
 
 ## Implementation Notes
 
+- Depends on: `issues/features/global-commands.md` (repo registry + GlobalContext)
+
 1. Add issue parsing utilities to jig-core
 2. Parse frontmatter (YAML or key-value)
 3. Issue discovery: recursive scan of configured `issues/` directory per repo
-4. Support multi-repo operations (`--all` flag iterates registered repos)
+4. Use `GlobalContext` for efficient `-g` flag operations
 5. Priority queue: sort by priority + age (per-repo or global)
 6. Dependency graph: check `Depends-On` field (can reference issues in other repos)
 7. Interactive batch spawn: use `inquire` crate
@@ -181,7 +185,7 @@ Run 'jig issues spawn --batch' to spawn multiple issues.
 
 **Multi-repo:**
 ```
-$ jig issues list --all
+$ jig issues list -g
 
 PLANNED ISSUES ACROSS ALL REPOS:
 ┌──────────┬─────────────────────────────────────┬──────────┬──────────┬─────────────────────────────────┐
@@ -193,7 +197,7 @@ PLANNED ISSUES ACROSS ALL REPOS:
 │ jig      │ improvements/activity-metrics       │ Medium   │ Improve  │ Track worker activity           │
 └──────────┴─────────────────────────────────────┴──────────┴──────────┴─────────────────────────────────┘
 
-Run 'jig issues spawn-next --all' to spawn across all repos.
+Run 'jig issues spawn-next -g' to spawn across all repos.
 ```
 
 ## Related Issues
