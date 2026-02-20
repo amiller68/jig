@@ -500,7 +500,7 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jig-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "jig-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "dirs",
