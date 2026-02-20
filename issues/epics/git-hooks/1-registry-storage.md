@@ -1,6 +1,6 @@
 # Hook Registry Storage
 
-**Status:** In Progress  
+**Status:** In Review  
 **Priority:** High  
 **Category:** Features  
 **Epic:** issues/epics/git-hooks/index.md  
@@ -180,3 +180,13 @@ After this ticket:
 - Move to ticket 2 (idempotent init)
 - Init will use registry to check existing installations
 - Init will update registry when installing hooks
+
+## Progress Log
+
+### 2026-02-19 - Ready for Review
+- Implemented `HookRegistry` and `HookEntry` structs with serde support
+- Created `hooks` module in jig-core (`hooks/mod.rs`, `hooks/registry.rs`)
+- All acceptance criteria met: load, save, mark_installed, mark_existing_backed_up, is_installed, remove
+- 8 unit tests passing including save/load roundtrip
+- No new dependencies needed (serde, serde_json, chrono already in workspace)
+- PR: #56
