@@ -1,10 +1,15 @@
 # Nudge System
 
-**Status:** Planned  
-**Priority:** High  
-**Category:** Features  
-**Epic:** issues/epics/worker-heartbeat/index.md  
-**Depends-On:** issues/epics/worker-heartbeat/1-tmux-detection.md
+**Status:** Planned
+**Priority:** High
+**Category:** Features
+**Epic:** issues/epics/worker-heartbeat/index.md
+**Depends-On:** issues/features/smart-context-injection.md, issues/improvements/tmux-integration-library.md
+**Milestone:** milestones/event-driven-pipeline/
+
+> **Note:** This ticket has been reframed for event-driven triggers.
+> Nudges are triggered by state transitions (WaitingInput, Stalled).
+> Uses smart-context-injection templates for nudge messages.
 
 ## Objective
 

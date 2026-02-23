@@ -1,10 +1,14 @@
 # Watch Mode
 
-**Status:** Planned  
-**Priority:** Medium  
-**Category:** Features  
-**Epic:** issues/epics/worker-heartbeat/index.md  
-**Depends-On:** issues/epics/worker-heartbeat/3-git-hooks-integration.md
+**Status:** Superseded
+**Priority:** Medium
+**Category:** Features
+**Epic:** issues/epics/worker-heartbeat/index.md
+**Superseded-By:** issues/epics/event-system/4-state-derivation.md
+
+> **SUPERSEDED:** Periodic polling replaced by event-driven state derivation.
+> `jig daemon` watches event logs continuously instead of polling tmux.
+> See `milestones/event-driven-pipeline/`.
 
 ## Objective
 

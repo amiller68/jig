@@ -1,13 +1,19 @@
 # Epic: Worker Heartbeat System
 
-**Status:** Planned  
-**Priority:** High  
-**Category:** Features  
+**Status:** Partially Superseded
+**Priority:** High
+**Category:** Features
 **Depends-On:** issues/features/global-commands.md, issues/epics/git-hooks/index.md
+**Milestone:** milestones/event-driven-pipeline/
+
+> **Note:** This epic is partially superseded by the event-driven pipeline.
+> - Tickets 0, 1, 4 are superseded by `epics/event-system/`
+> - Ticket 2 (nudge system) remains relevant, reframed for event triggers
+> - Ticket 3 is merged into `epics/git-hooks/3-hook-handlers.md`
 
 ## Objective
 
-Add built-in heartbeat system that periodically checks worker health, detects stuck threads, and automatically nudges or escalates issues.
+Add built-in heartbeat system that ~~periodically checks worker health~~ reacts to worker state changes, ~~detects stuck threads~~ receives notifications from Claude hooks, and automatically nudges or escalates issues.
 
 ## Why This Matters
 

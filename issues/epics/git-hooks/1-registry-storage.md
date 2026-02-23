@@ -75,6 +75,7 @@ impl HookRegistry {
     }
     
     pub fn load(repo_path: &Path) -> Result<Self> {
+        // NOTE: this is an example, always create CONSTs for stuff like this
         let path = repo_path.join(".git/jig-hooks.json");
         
         if !path.exists() {

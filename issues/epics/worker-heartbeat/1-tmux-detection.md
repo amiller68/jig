@@ -1,10 +1,23 @@
 # Tmux Detection
 
-**Status:** Planned  
-**Priority:** High  
-**Category:** Features  
-**Epic:** issues/epics/worker-heartbeat/index.md  
-**Depends-On:** issues/epics/worker-heartbeat/0-health-state-storage.md
+**Status:** Archived
+**Priority:** Low
+**Category:** Features
+**Epic:** issues/epics/worker-heartbeat/index.md
+**Superseded-By:** issues/epics/event-system/
+
+> **ARCHIVED:** This ticket is superseded by the event-driven pipeline.
+> State detection now comes from Claude Code hooks and git hooks,
+> not tmux scraping. See `milestones/event-driven-pipeline/`.
+
+COMMENTS (amiller68):
+- it is not clear to me that this is super maintainable or desirable
+- i think heuristics based off our proposed health system described in the prior ticket as well as github integration
+ as describe in `epics/github-integration` is probably desirable here instead
+  - are there comments for the branch?
+  - are there merge conflicts to work on?
+  - when was the last commit?
+  - at what commit did we last nudge the agent?
 
 ## Objective
 

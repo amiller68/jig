@@ -1,13 +1,21 @@
 # Health State Storage
 
-**Status:** Planned  
-**Priority:** High  
-**Category:** Features  
+**Status:** Superseded
+**Priority:** High
+**Category:** Features
 **Epic:** issues/epics/worker-heartbeat/index.md
+**Superseded-By:** issues/epics/event-system/0-global-state.md
+
+> **SUPERSEDED:** This ticket's goals are now addressed by the global state
+> structure in the event-system epic. State is stored globally at
+> `~/.config/jig/state/` and derived from events. See milestone for context.
+
+COMMENT (amiller68):
+- we should record the last commit we nudged the worker at
 
 ## Objective
 
-Implement health state storage that tracks worker metrics and nudge counts in `.worktrees/.jig-health.json`.
+Implement health state storage that tracks worker metrics and nudge counts in `.jig/.state/health.json`.
 
 ## Background
 
@@ -21,7 +29,7 @@ Need persistent storage for:
 
 ### State File Schema
 
-`.worktrees/.jig-health.json`:
+`.jig/.state/health.json`:
 ```json
 {
   "version": "1",
@@ -149,7 +157,7 @@ chrono = "0.4"
 ## Acceptance Criteria
 
 - [ ] `HealthState` struct with serde support
-- [ ] Load from `.worktrees/.jig-health.json` (create if missing)
+- [ ] Load from `.jig/.state/health.json` (create if missing)
 - [ ] Save with pretty-printed JSON
 - [ ] Add/remove workers
 - [ ] Increment/reset/get nudge counts per type

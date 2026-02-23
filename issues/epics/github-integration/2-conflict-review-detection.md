@@ -14,7 +14,9 @@ Detect merge conflicts and unresolved review comments, nudge with resolution ste
 
 **Conflicts:** Check PR `mergeable` field. If `CONFLICTING`, nudge with rebase instructions.
 
-**Reviews:** Fetch inline comments and general reviews via octorust. Parse file/line/body. Check for `CHANGES_REQUESTED` decision.
+**Reviews:** Fetch inline comments and general reviews via octorust. Parse file/line/body. Check for `CHANGES_REQUESTED` or `COMMENTED` decision.
+
+NOTE: github has this annoying quirk where you can't request changes on a PR made by yourself, and I often run agents under my git id
 
 Nudge messages:
 - Conflicts: Step-by-step rebase guide

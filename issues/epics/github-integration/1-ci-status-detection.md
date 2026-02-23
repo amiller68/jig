@@ -13,6 +13,7 @@ Detect failing CI checks and nudge workers with error logs.
 ## Implementation
 
 Fetch check runs for PR via octorust:
+- Be able to query by commit hash, defaulting to most recent
 - Filter for FAILURE/ERROR status
 - Get check names and details_url
 - Fetch error logs (truncate to 50 lines)

@@ -1,10 +1,13 @@
 # Git Hooks Integration
 
-**Status:** Planned  
-**Priority:** High  
-**Category:** Features  
-**Epic:** issues/epics/worker-heartbeat/index.md  
-**Depends-On:** issues/epics/worker-heartbeat/2-nudge-system.md, issues/epics/git-hooks/index.md
+**Status:** Superseded
+**Priority:** High
+**Category:** Features
+**Epic:** issues/epics/worker-heartbeat/index.md
+**Superseded-By:** issues/epics/git-hooks/3-hook-handlers.md
+
+> **SUPERSEDED:** Merged into the git-hooks epic. Hook handlers now write
+> events to the global event log. See `milestones/event-driven-pipeline/`.
 
 ## Objective
 
@@ -30,7 +33,7 @@ pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
     let metrics = git::collect_metrics(repo_path)?;
     
     // NEW: Update health state
-    let health_path = repo_path.join(".worktrees/.jig-health.json");
+    let health_path = repo_path.join(".jig/.state/health.json");
     if let Ok(mut health) = HealthState::load(&health_path) {
         let branch = git::current_branch(repo_path)?;
         
@@ -60,7 +63,7 @@ pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
 ```rust
 pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
     // NEW: Update health state
-    let health_path = repo_path.join(".worktrees/.jig-health.json");
+    let health_path = repo_path.join(".jig/.state/health.json");
     if let Ok(mut health) = HealthState::load(&health_path) {
         let branch = git::current_branch(repo_path)?;
         

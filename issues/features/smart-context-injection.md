@@ -1,9 +1,13 @@
 # Smart Context Injection for Workers
 
-**Status:** Planned  
-**Priority:** Medium  
-**Category:** Features  
-**Depends-On:** issues/features/worker-heartbeat-system.md, issues/features/github-integration.md
+**Status:** Planned
+**Priority:** High
+**Category:** Features
+**Milestone:** milestones/event-driven-pipeline/
+**Depends-On:** issues/epics/event-system/4-state-derivation.md
+
+> **Note:** This is foundational for the nudge system and action dispatch.
+> Templates render prompts using structured context from events.
 
 ## Objective
 

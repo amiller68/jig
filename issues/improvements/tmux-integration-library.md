@@ -1,25 +1,29 @@
 # Tmux Integration Library
 
-**Status:** Planned  
-**Priority:** Medium  
+**Status:** Planned
+**Priority:** Medium
 **Category:** Improvements
+**Milestone:** milestones/event-driven-pipeline/
+
+> **Scope Change:** This ticket has been refocused to **controller operations only**.
+> Scraping and state detection are superseded by the event-driven pipeline.
+> See `milestones/event-driven-pipeline/` for context.
 
 ## Objective
 
-Build a robust, type-safe Rust library for tmux integration: scraping pane output, sending input, managing sessions/windows, and detecting worker state.
+Build a robust, type-safe Rust library for tmux **control operations**: spawning workers, sending input, killing sessions.
 
 ## Background
 
-Jig needs tmux for:
-- Scraping worker output (stuck prompt detection)
-- Sending nudge messages to workers
-- Detecting if worker is at shell prompt
-- Managing tmux sessions/windows lifecycle
+With the event-driven architecture, tmux is used for **control**, not **observation**:
+- ~~Scraping worker output~~ → Events from Claude hooks
+- Sending nudge messages to workers → **Still needed**
+- ~~Detecting if worker is at shell prompt~~ → Events from hooks
+- Managing tmux sessions/windows lifecycle → **Still needed**
 
 Current approach uses shell commands. Need native Rust library with:
 - Type-safe API
 - Error handling
-- Output parsing
 - Cross-platform support
 
 ## Architecture

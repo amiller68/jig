@@ -1,9 +1,12 @@
 # Worker Activity Metrics
 
-**Status:** Planned  
-**Priority:** Medium  
-**Category:** Improvements  
-**Depends-On:** issues/features/global-commands.md, issues/features/worker-heartbeat-system.md
+**Status:** Superseded
+**Priority:** Medium
+**Category:** Improvements
+**Superseded-By:** issues/epics/event-system/
+
+> **SUPERSEDED:** Metrics are now derived from the event log rather than
+> collected independently. See `milestones/event-driven-pipeline/`.
 
 ## Objective
 
