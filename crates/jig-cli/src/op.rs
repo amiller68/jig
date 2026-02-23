@@ -7,17 +7,22 @@ use std::error::Error;
 use std::fmt::Display;
 
 /// Context passed to all operations
-#[derive(Clone, Default)]
 pub struct OpContext {
-    /// Open/cd into worktree after creating
-    pub open: bool,
-    /// Skip on-create hook execution
-    pub no_hooks: bool,
+    /// Running in global mode (across all tracked repos)
+    pub global: bool,
+    /// Repo context derived at startup (None if not in a git repo)
+    pub repo: Option<jig_core::RepoContext>,
 }
 
 impl OpContext {
-    pub fn new(open: bool, no_hooks: bool) -> Self {
-        Self { open, no_hooks }
+    pub fn new(global: bool) -> Self {
+        let repo = jig_core::RepoContext::from_cwd().ok();
+        Self { global, repo }
+    }
+
+    /// Get a reference to the repo context, or error if not in a git repo.
+    pub fn repo(&self) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
+        self.repo.as_ref().ok_or(jig_core::Error::NotInGitRepo)
     }
 }
 

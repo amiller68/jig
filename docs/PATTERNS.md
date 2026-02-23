@@ -125,6 +125,13 @@ fn test_create_worktree() {
 - **Config cascading**: Repo-specific > Global > Default
   - Check repo config first, fall back to global, then hardcoded default
 
+- **Context threading**: Derive repo context once, thread through all operations
+  - `RepoContext::from_cwd()` resolves repo_root, worktrees_dir, base_branch, session_name once
+  - `OpContext` holds `repo: Option<RepoContext>` (None when not in a git repo)
+  - Commands call `ctx.repo()?` to get `&RepoContext`, pass it to jig-core functions
+  - jig-core functions accept `&RepoContext` instead of re-deriving paths from cwd
+  - Avoids redundant git subprocess calls (e.g., `get_base_repo()` was called 8x per spawn)
+
 - **Agent adapters**: Use `AgentAdapter` struct for agent-specific behavior
   - Defined in `crates/jig-core/src/adapter.rs`
   - Currently supports Claude Code, extensible for others

@@ -9,7 +9,7 @@ mod commands;
 use clap::Parser;
 use colored::Colorize;
 
-use cli::Cli;
+use cli::{Cli, Command};
 use op::{Op, OpContext};
 
 fn main() {
@@ -30,21 +30,89 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    // Build context once (derives RepoContext from cwd)
+    let ctx = OpContext::new(false);
+
+    // Best-effort auto-registration and pruning of current repo
+    if let Some(repo) = &ctx.repo {
+        if let Ok(mut registry) = jig_core::RepoRegistry::load() {
+            let _ = registry.register(repo.repo_root.clone());
+            let pruned = registry.prune();
+            if cli.verbose && !pruned.is_empty() {
+                for p in &pruned {
+                    eprintln!("{} {}", "pruned:".dimmed(), p.display());
+                }
+            }
+            let _ = registry.save();
+        }
+    }
+
     match cli.command {
         None => {
             print_help();
             Ok(())
         }
-        Some(command) => {
-            let ctx = OpContext::new(cli.open, cli.no_hooks);
-            let output = command.execute(&ctx)?;
-            let output_str = output.to_string();
-            if !output_str.is_empty() {
-                println!("{}", output_str);
+        Some(ref command) => {
+            if cli.global {
+                run_global(command)
+            } else {
+                let output = command.execute(&ctx)?;
+                let output_str = output.to_string();
+                if !output_str.is_empty() {
+                    println!("{}", output_str);
+                }
+                Ok(())
             }
-            Ok(())
         }
     }
+}
+
+/// Check if a command is compatible with --global
+fn is_global_compatible(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::List(_) | Command::Ps(_) | Command::Status(_)
+    )
+}
+
+fn run_global(command: &Command) -> Result<(), Box<dyn std::error::Error>> {
+    if !is_global_compatible(command) {
+        eprintln!(
+            "{} this command does not support --global",
+            "warning:".yellow().bold()
+        );
+        return Ok(());
+    }
+
+    let registry = jig_core::RepoRegistry::load()?;
+    let repos = registry.repos();
+
+    if repos.is_empty() {
+        eprintln!("No repos registered. Run jig in a repo first.");
+        return Ok(());
+    }
+
+    for entry in repos {
+        if !entry.path.exists() {
+            continue;
+        }
+        std::env::set_current_dir(&entry.path)?;
+        let repo_name = entry.path.file_name().unwrap_or_default().to_string_lossy();
+        eprintln!("{}", format!("[{}]", repo_name).bold());
+        // Re-derive context for each repo directory
+        let ctx = OpContext::new(true);
+        match command.execute(&ctx) {
+            Ok(output) => {
+                let s = output.to_string();
+                if !s.is_empty() {
+                    println!("{}", s);
+                }
+            }
+            Err(e) => eprintln!("  {} {}", "error:".red(), e),
+        }
+    }
+
+    Ok(())
 }
 
 fn print_help() {
@@ -78,6 +146,9 @@ fn print_help() {
     );
     eprintln!("  {}        Kill a running tmux window", "kill".cyan());
     eprintln!();
+    eprintln!("{}", "REPOSITORY TRACKING:".bold());
+    eprintln!("  {}       List tracked repositories", "repos".cyan());
+    eprintln!();
     eprintln!("{}", "UTILITY:".bold());
     eprintln!("  {}        Initialize repository for jig", "init".cyan());
     eprintln!("  {}      Update jig to latest version", "update".cyan());
@@ -91,10 +162,10 @@ fn print_help() {
     eprintln!();
     eprintln!("{}", "GLOBAL OPTIONS:".bold());
     eprintln!(
-        "  {}            Open/cd into worktree after creating",
-        "-o".cyan()
+        "  {}  Run command across all tracked repos",
+        "-g, --global".cyan()
     );
-    eprintln!("  {}    Skip on-create hook execution", "--no-hooks".cyan());
+    eprintln!("  {} Show verbose output", "-v, --verbose".cyan());
     eprintln!();
     eprintln!(
         "Use '{}' for more information about a command.",

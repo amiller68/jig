@@ -24,9 +24,9 @@ impl Op for Merge {
     type Error = MergeError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktree_path = worktrees_dir.join(&self.name);
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let worktree_path = repo.worktrees_dir.join(&self.name);
 
         if !worktree_path.exists() {
             return Err(Error::WorktreeNotFound(self.name.clone()).into());
@@ -50,10 +50,10 @@ impl Op for Merge {
         );
 
         // Unregister from spawn state
-        spawn::unregister(&self.name)?;
+        spawn::unregister(repo, &self.name)?;
 
         // Kill tmux window if running
-        spawn::kill_window(&self.name)?;
+        spawn::kill_window(repo, &self.name)?;
 
         eprintln!();
         eprintln!(

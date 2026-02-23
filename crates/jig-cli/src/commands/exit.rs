@@ -38,13 +38,14 @@ impl Op for Exit {
     type Error = ExitError;
     type Output = ExitOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        // Check if we're in a worktree
-        let name = git::get_current_worktree_name_auto()?.ok_or(Error::NotInWorktree)?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
 
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktree_path = worktrees_dir.join(&name);
-        let base_repo = git::get_base_repo()?;
+        // Check if we're in a worktree
+        let name =
+            git::get_current_worktree_name(&repo.worktrees_dir)?.ok_or(Error::NotInWorktree)?;
+
+        let worktree_path = repo.worktrees_dir.join(&name);
 
         // Check for uncommitted changes unless force
         if !self.force && git::has_uncommitted_changes(&worktree_path)? {
@@ -57,7 +58,7 @@ impl Op for Exit {
         // Clean up empty parent directories (for nested paths)
         let mut parent = worktree_path.parent();
         while let Some(p) = parent {
-            if p == worktrees_dir {
+            if p == repo.worktrees_dir {
                 break;
             }
             if p.read_dir()?.next().is_none() {
@@ -71,7 +72,7 @@ impl Op for Exit {
         eprintln!("{} Exited worktree '{}'", "✓".green(), name.cyan());
 
         // Output cd command to base repo
-        let canonical = base_repo.canonicalize()?;
+        let canonical = repo.repo_root.canonicalize()?;
         Ok(ExitOutput(canonical))
     }
 }

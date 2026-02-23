@@ -3,7 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{config, git, Error};
+use jig_core::{git, Error};
 
 use crate::op::{Op, OpContext};
 
@@ -41,17 +41,16 @@ impl Op for Review {
     type Error = ReviewError;
     type Output = ReviewOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktree_path = worktrees_dir.join(&self.name);
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let worktree_path = repo.worktrees_dir.join(&self.name);
 
         if !worktree_path.exists() {
             return Err(Error::WorktreeNotFound(self.name.clone()).into());
         }
 
-        let base_branch = config::get_base_branch()?;
         let branch = git::get_worktree_branch(&worktree_path)?;
-        let commits = git::get_commits_ahead(&worktree_path, &base_branch)?;
+        let commits = git::get_commits_ahead(&worktree_path, &repo.base_branch)?;
         let is_dirty = git::has_uncommitted_changes(&worktree_path)?;
 
         // Header
@@ -62,7 +61,7 @@ impl Op for Review {
             "  {} {} ahead of {}",
             "Commits:".dimmed(),
             commits.len().to_string().cyan(),
-            base_branch.dimmed()
+            repo.base_branch.dimmed()
         );
 
         if is_dirty {
@@ -87,7 +86,7 @@ impl Op for Review {
         eprintln!();
         if self.full {
             eprintln!("{}", "Full diff:".bold());
-            let diff = git::get_diff(&worktree_path, &base_branch)?;
+            let diff = git::get_diff(&worktree_path, &repo.base_branch)?;
             if diff.is_empty() {
                 eprintln!("  No changes");
                 Ok(ReviewOutput(String::new()))
@@ -96,7 +95,7 @@ impl Op for Review {
             }
         } else {
             eprintln!("{}", "Changed files:".bold());
-            let stat = git::get_diff_stat(&worktree_path, &base_branch)?;
+            let stat = git::get_diff_stat(&worktree_path, &repo.base_branch)?;
             if stat.is_empty() {
                 eprintln!("  No changes");
                 Ok(ReviewOutput(String::new()))

@@ -11,6 +11,7 @@ jig/
 │   │   └── src/
 │   │       ├── lib.rs      # Public API exports
 │   │       ├── error.rs    # Error types (thiserror)
+│   │       ├── context.rs  # RepoContext (derived once, threaded through)
 │   │       ├── git.rs      # Git operations (shell commands)
 │   │       ├── worktree.rs # Worktree abstraction
 │   │       ├── config.rs   # Configuration management
@@ -19,12 +20,14 @@ jig/
 │   │       ├── session.rs  # Tmux session management
 │   │       ├── state.rs    # Orchestrator state persistence
 │   │       ├── adapter.rs  # Agent adapters (Claude, etc.)
+│   │       ├── registry.rs # Repository registry for global mode
 │   │       └── terminal.rs # Terminal detection
 │   │
 │   ├── jig-cli/            # CLI binary
 │   │   └── src/
 │   │       ├── main.rs     # Entry point, error handling
 │   │       ├── cli.rs      # Clap argument definitions
+│   │       ├── op.rs       # Op trait and OpContext (holds RepoContext)
 │   │       └── commands/   # One file per command
 │   │           ├── mod.rs
 │   │           ├── create.rs

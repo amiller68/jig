@@ -1,6 +1,6 @@
 # Global Commands
 
-**Status:** Planned
+**Status:** In Progress
 
 ## Objective
 
@@ -127,12 +127,12 @@ Prefix output with repo identifier:
 
 ## Acceptance Criteria
 
-- [ ] Repos auto-registered when jig runs
+- [x] Repos auto-registered when jig runs
 - [ ] `jig -g list` shows worktrees from all repos
 - [ ] `jig -g ps` shows workers from all repos
-- [ ] Global commands load config/registry only once
-- [ ] `jig repos list` shows tracked repos
-- [ ] `jig repos prune` removes stale entries
+- [ ] Global commands load config/registry only once (RepoContext done, GlobalContext pending)
+- [x] `jig repos list` shows tracked repos
+- [x] `jig repos prune` removes stale entries
 - [ ] Invalid repo paths skipped with warning
 
 ## Verification

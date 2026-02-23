@@ -28,8 +28,9 @@ impl Op for Ps {
     type Error = PsError;
     type Output = PsOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let tasks = spawn::list_tasks()?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let tasks = spawn::list_tasks(repo)?;
         Ok(PsOutput { tasks })
     }
 }

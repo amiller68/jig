@@ -10,11 +10,6 @@ use crate::config::JIG_DIR;
 use crate::error::{Error, Result};
 use crate::worker::DiffStats;
 
-/// Get the root directory of the git repository (alias for get_repo_root)
-pub fn repo_root() -> Result<PathBuf> {
-    get_repo_root()
-}
-
 /// Get the root directory of the git repository
 pub fn get_repo_root() -> Result<PathBuf> {
     let output = Command::new("git")
@@ -57,34 +52,10 @@ pub fn get_base_repo() -> Result<PathBuf> {
     Ok(git_common.parent().unwrap_or(&git_common).to_path_buf())
 }
 
-/// Get the worktrees directory (.jig in the base repo)
-pub fn get_worktrees_dir() -> Result<PathBuf> {
-    let base = get_base_repo()?;
-    Ok(base.join(JIG_DIR))
-}
-
-/// Ensure worktrees are excluded from git (convenience wrapper)
-pub fn ensure_worktrees_excluded_auto() -> Result<()> {
-    let git_common = get_git_common_dir()?;
-    ensure_worktrees_excluded(&git_common)
-}
-
-/// Check if we're currently inside a worktree
-pub fn is_in_worktree_auto() -> Result<bool> {
-    let worktrees_dir = get_worktrees_dir()?;
-    is_in_worktree(&worktrees_dir)
-}
-
 /// Check if we're inside a worktree (not the main repo)
 pub fn is_in_worktree(worktrees_dir: &Path) -> Result<bool> {
     let cwd = std::env::current_dir()?;
     Ok(cwd.starts_with(worktrees_dir))
-}
-
-/// Get current worktree name if in one (convenience wrapper)
-pub fn get_current_worktree_name_auto() -> Result<Option<String>> {
-    let worktrees_dir = get_worktrees_dir()?;
-    get_current_worktree_name(&worktrees_dir)
 }
 
 /// Get current worktree name (if in one)
@@ -111,12 +82,6 @@ pub fn get_current_worktree_name(worktrees_dir: &Path) -> Result<Option<String>>
     }
 
     Ok(None)
-}
-
-/// List worktree names in the current repo's .jig directory
-pub fn list_worktrees() -> Result<Vec<String>> {
-    let worktrees_dir = get_worktrees_dir()?;
-    list_worktree_names(&worktrees_dir)
 }
 
 /// List all worktree names in a directory

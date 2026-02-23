@@ -3,7 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{git, OrchestratorState, WorkerStatus};
+use jig_core::{OrchestratorState, WorkerStatus};
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -26,9 +26,9 @@ impl Op for Status {
     type Error = StatusError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let repo_root = git::repo_root()?;
-        let state = match OrchestratorState::load(&repo_root)? {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let state = match OrchestratorState::load(&repo.repo_root)? {
             Some(state) => state,
             None => {
                 eprintln!(

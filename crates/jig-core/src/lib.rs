@@ -10,8 +10,10 @@
 
 pub mod adapter;
 pub mod config;
+pub mod context;
 pub mod error;
 pub mod git;
+pub mod registry;
 pub mod session;
 pub mod spawn;
 pub mod state;
@@ -21,7 +23,9 @@ pub mod worktree;
 
 pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
 pub use config::{Config, JigToml, RepoConfig};
+pub use context::RepoContext;
 pub use error::{Error, Result};
+pub use registry::RepoRegistry;
 pub use state::OrchestratorState;
 pub use worker::{DiffStats, FileDiff, TaskContext, Worker, WorkerId, WorkerStatus};
 pub use worktree::Worktree;

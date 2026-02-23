@@ -5,7 +5,7 @@ use colored::Colorize;
 use glob::Pattern;
 use std::path::Path;
 
-use jig_core::{git, Error};
+use jig_core::{git, Error, RepoContext};
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -34,9 +34,9 @@ impl Op for Remove {
     type Error = RemoveError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktrees = git::list_worktrees()?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
 
         // Find matching worktrees
         let pattern = Pattern::new(&self.pattern)?;
@@ -49,9 +49,9 @@ impl Op for Remove {
 
         if matching.is_empty() {
             // If not a pattern match, try exact match
-            let exact_path = worktrees_dir.join(pattern.as_str());
+            let exact_path = repo.worktrees_dir.join(pattern.as_str());
             if exact_path.exists() {
-                remove_single(&exact_path, pattern.as_str(), self.force)?;
+                remove_single(&exact_path, pattern.as_str(), self.force, repo)?;
                 return Ok(NoOutput);
             }
             return Err(Error::WorktreeNotFound(pattern.as_str().to_string()).into());
@@ -59,15 +59,20 @@ impl Op for Remove {
 
         // Remove each matching worktree
         for name in matching {
-            let path = worktrees_dir.join(&name);
-            remove_single(&path, &name, self.force)?;
+            let path = repo.worktrees_dir.join(&name);
+            remove_single(&path, &name, self.force, repo)?;
         }
 
         Ok(NoOutput)
     }
 }
 
-fn remove_single(path: &Path, name: &str, force: bool) -> Result<(), RemoveError> {
+fn remove_single(
+    path: &Path,
+    name: &str,
+    force: bool,
+    repo: &RepoContext,
+) -> Result<(), RemoveError> {
     // Check for uncommitted changes unless force
     if !force && git::has_uncommitted_changes(path)? {
         return Err(Error::UncommittedChanges.into());
@@ -77,10 +82,9 @@ fn remove_single(path: &Path, name: &str, force: bool) -> Result<(), RemoveError
 
     // Clean up empty parent directories (for nested paths)
     let mut parent = path.parent();
-    let worktrees_dir = git::get_worktrees_dir()?;
 
     while let Some(p) = parent {
-        if p == worktrees_dir {
+        if p == repo.worktrees_dir {
             break;
         }
         if p.read_dir()?.next().is_none() {

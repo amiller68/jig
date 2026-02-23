@@ -16,6 +16,14 @@ pub struct Create {
 
     /// Branch name (defaults to worktree name)
     pub branch: Option<String>,
+
+    /// Open/cd into worktree after creating
+    #[arg(short = 'o')]
+    pub open: bool,
+
+    /// Skip on-create hook execution
+    #[arg(long = "no-hooks")]
+    pub no_hooks: bool,
 }
 
 /// Output containing optional cd command
@@ -49,9 +57,8 @@ impl Op for Create {
     type Output = CreateOutput;
 
     fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let repo_root = git::get_base_repo()?;
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktree_path = worktrees_dir.join(&self.name);
+        let repo = ctx.repo()?;
+        let worktree_path = repo.worktrees_dir.join(&self.name);
 
         // Check if already exists
         if worktree_path.exists() {
@@ -60,10 +67,9 @@ impl Op for Create {
 
         // Determine branch name
         let branch = self.branch.as_deref().unwrap_or(&self.name);
-        let base_branch = config::get_base_branch()?;
 
         // Ensure .jig is gitignored
-        git::ensure_worktrees_excluded_auto()?;
+        git::ensure_worktrees_excluded(&repo.git_common_dir)?;
 
         // Create parent directories if needed (for nested paths like feature/auth/login)
         if let Some(parent) = worktree_path.parent() {
@@ -71,7 +77,7 @@ impl Op for Create {
         }
 
         // Create the worktree
-        git::create_worktree(&worktree_path, branch, &base_branch)?;
+        git::create_worktree(&worktree_path, branch, &repo.base_branch)?;
 
         eprintln!(
             "{} Created worktree '{}' on branch '{}'",
@@ -81,23 +87,23 @@ impl Op for Create {
         );
 
         // Copy configured files (e.g., .env)
-        let copy_files = config::get_copy_files()?;
+        let copy_files = config::get_copy_files(&repo.repo_root)?;
         if !copy_files.is_empty() {
-            config::copy_worktree_files(&repo_root, &worktree_path, &copy_files)?;
+            config::copy_worktree_files(&repo.repo_root, &worktree_path, &copy_files)?;
             for file in &copy_files {
-                if repo_root.join(file).exists() {
+                if repo.repo_root.join(file).exists() {
                     eprintln!("  {} Copied {}", "→".dimmed(), file);
                 }
             }
         }
 
         // Run on-create hook unless --no-hooks
-        if !ctx.no_hooks {
-            config::run_on_create_hook_for_repo(&worktree_path)?;
+        if !self.no_hooks {
+            config::run_on_create_hook_for_repo(&repo.repo_root, &worktree_path)?;
         }
 
         // Output cd command if -o flag
-        if ctx.open {
+        if self.open {
             // Canonicalize path for cd command
             let canonical = worktree_path.canonicalize()?;
             Ok(CreateOutput::Cd(canonical))

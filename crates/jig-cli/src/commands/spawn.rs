@@ -3,7 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{config, git, spawn, terminal, Error};
+use jig_core::{git, spawn, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -34,7 +34,9 @@ impl Op for Spawn {
     type Error = SpawnError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+
         // Check for tmux
         if !terminal::command_exists("tmux") {
             return Err(Error::MissingDependency("tmux".to_string()).into());
@@ -45,8 +47,7 @@ impl Op for Spawn {
             return Err(Error::MissingDependency("claude".to_string()).into());
         }
 
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktree_path = worktrees_dir.join(&self.name);
+        let worktree_path = repo.worktrees_dir.join(&self.name);
 
         // Check if worktree already exists
         let needs_create = !worktree_path.exists();
@@ -54,9 +55,8 @@ impl Op for Spawn {
         if needs_create {
             // Create worktree from current branch
             let current_branch = git::get_current_branch()?;
-            let base_branch = config::get_base_branch()?;
 
-            git::ensure_worktrees_excluded_auto()?;
+            git::ensure_worktrees_excluded(&repo.git_common_dir)?;
 
             // Create parent directories for nested paths
             if let Some(parent) = worktree_path.parent() {
@@ -64,7 +64,7 @@ impl Op for Spawn {
             }
 
             // Create new branch from current position
-            git::create_worktree(&worktree_path, &self.name, &base_branch)?;
+            git::create_worktree(&worktree_path, &self.name, &repo.base_branch)?;
 
             eprintln!(
                 "{} Created worktree '{}' from '{}'",
@@ -79,17 +79,18 @@ impl Op for Spawn {
             true
         } else {
             // Check jig.toml for spawn.auto setting
-            config::read_jig_toml()?
+            JigToml::load(&repo.repo_root)?
                 .map(|c| c.spawn.auto)
                 .unwrap_or(false)
         };
 
         // Register in spawn state
         let branch = git::get_worktree_branch(&worktree_path)?;
-        spawn::register(&self.name, &branch, self.context.as_deref())?;
+        spawn::register(repo, &self.name, &branch, self.context.as_deref())?;
 
         // Launch in tmux
         spawn::launch_tmux_window(
+            repo,
             &self.name,
             &worktree_path,
             use_auto,

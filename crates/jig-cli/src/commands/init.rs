@@ -5,7 +5,7 @@ use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
-use jig_core::{adapter, config, git, terminal, Error};
+use jig_core::{adapter, git, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -73,8 +73,13 @@ impl Op for Init {
     type Error = InitError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let repo = git::get_base_repo()?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        // Init needs get_base_repo() directly because RepoContext may not exist
+        // (init is often the first jig command run in a repo)
+        let repo_root = match ctx.repo() {
+            Ok(repo) => repo.repo_root.clone(),
+            Err(_) => git::get_base_repo()?,
+        };
 
         // Validate agent argument
         let adapter = adapter::get_adapter(&self.agent).ok_or_else(|| {
@@ -91,7 +96,7 @@ impl Op for Init {
         }
 
         // Check if already initialized
-        if config::has_jig_toml()? && !self.force {
+        if JigToml::exists(&repo_root) && !self.force {
             return Err(Error::AlreadyInitialized.into());
         }
 
@@ -99,11 +104,11 @@ impl Op for Init {
             "{} Initializing jig for {} in {}",
             "→".cyan(),
             adapter.name,
-            repo.display()
+            repo_root.display()
         );
 
         // Create backup directory if backup is enabled
-        let backup_dir = repo.join(".backup");
+        let backup_dir = repo_root.join(".backup");
         if self.backup {
             fs::create_dir_all(&backup_dir)?;
             eprintln!("  {} Created .backup/", "✓".green());
@@ -126,7 +131,7 @@ impl Op for Init {
             "issues/chores",
         ];
         for dir in generic_dirs {
-            let path = repo.join(dir);
+            let path = repo_root.join(dir);
             if !path.exists() {
                 fs::create_dir_all(&path)?;
                 eprintln!("  {} Created {}/", "✓".green(), dir);
@@ -136,7 +141,7 @@ impl Op for Init {
         // Create adapter-specific skill directories
         let skill_names = ["check", "draft", "issues", "review", "spawn"];
         for skill in skill_names {
-            let dir = repo.join(adapter.skills_dir).join(skill);
+            let dir = repo_root.join(adapter.skills_dir).join(skill);
             if !dir.exists() {
                 fs::create_dir_all(&dir)?;
                 eprintln!(
@@ -167,7 +172,7 @@ type = "{}"
             self.agent
         );
         write_file(
-            &repo,
+            &repo_root,
             "jig.toml",
             &jig_toml_content,
             self.force,
@@ -176,35 +181,35 @@ type = "{}"
 
         // Write generic docs files
         write_file(
-            &repo,
+            &repo_root,
             "docs/index.md",
             DOCS_INDEX,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "docs/PATTERNS.md",
             DOCS_PATTERNS,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "docs/CONTRIBUTING.md",
             DOCS_CONTRIBUTING,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "docs/SUCCESS_CRITERIA.md",
             DOCS_SUCCESS_CRITERIA,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "docs/PROJECT_LAYOUT.md",
             DOCS_PROJECT_LAYOUT,
             self.force,
@@ -213,28 +218,28 @@ type = "{}"
 
         // Write issues files
         write_file(
-            &repo,
+            &repo_root,
             "issues/README.md",
             ISSUES_README,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "issues/_templates/standalone.md",
             ISSUES_TEMPLATE_STANDALONE,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "issues/_templates/epic-index.md",
             ISSUES_TEMPLATE_EPIC,
             self.force,
             backup_dir_opt,
         )?;
         write_file(
-            &repo,
+            &repo_root,
             "issues/_templates/ticket.md",
             ISSUES_TEMPLATE_TICKET,
             self.force,
@@ -243,7 +248,7 @@ type = "{}"
 
         // Write adapter-specific project file (CLAUDE.md, .cursorrules, etc.)
         write_file(
-            &repo,
+            &repo_root,
             adapter.project_file,
             PROJECT_MD_TEMPLATE,
             self.force,
@@ -254,7 +259,7 @@ type = "{}"
         if let Some(settings_path) = adapter.settings_file {
             let settings_content = get_settings_content(adapter);
             write_file(
-                &repo,
+                &repo_root,
                 settings_path,
                 settings_content,
                 self.force,
@@ -275,7 +280,7 @@ type = "{}"
                 "{}/{}/{}",
                 adapter.skills_dir, skill_name, adapter.skill_file
             );
-            write_file(&repo, &path, content, self.force, backup_dir_opt)?;
+            write_file(&repo_root, &path, content, self.force, backup_dir_opt)?;
         }
 
         eprintln!();

@@ -38,7 +38,7 @@ impl Op for List {
     type Error = ListError;
     type Output = ListOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
         if self.all {
             // Show all git worktrees including base repo
             let worktrees = git::list_all_worktrees()?;
@@ -55,9 +55,10 @@ impl Op for List {
             Ok(ListOutput(vec![]))
         } else {
             // Show only .jig/
-            let worktrees = git::list_worktrees()?;
+            let repo = ctx.repo()?;
+            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
 
-            if worktrees.is_empty() {
+            if worktrees.is_empty() && !ctx.global {
                 eprintln!("No worktrees found");
             }
 

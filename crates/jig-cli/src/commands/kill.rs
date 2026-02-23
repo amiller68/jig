@@ -24,12 +24,14 @@ impl Op for Kill {
     type Error = KillError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+
         // Kill tmux window
-        spawn::kill_window(&self.name)?;
+        spawn::kill_window(repo, &self.name)?;
 
         // Unregister from spawn state
-        spawn::unregister(&self.name)?;
+        spawn::unregister(repo, &self.name)?;
 
         eprintln!("{} Killed session '{}'", "✓".green(), self.name.cyan());
 
