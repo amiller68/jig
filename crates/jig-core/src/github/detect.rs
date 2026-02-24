@@ -106,10 +106,11 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max])
+        let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
+        format!("{}...", &s[..end])
     }
 }
 
@@ -126,7 +127,15 @@ mod tests {
     fn truncate_long_string() {
         let long = "a".repeat(200);
         let result = truncate(&long, 100);
-        assert_eq!(result.len(), 103); // 100 + "..."
         assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 103); // 100 + "..."
+    }
+
+    #[test]
+    fn truncate_multibyte_utf8() {
+        // Each emoji is 4 bytes — slicing at byte boundaries would panic
+        let emojis = "🎉🎊🎈🎁🎂🎃🎄🎅🎆🎇";
+        let result = truncate(&emojis, 5);
+        assert_eq!(result, "🎉🎊🎈🎁🎂...");
     }
 }

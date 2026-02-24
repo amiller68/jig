@@ -54,9 +54,15 @@ impl TmuxClient {
     /// Create a session if it doesn't exist.
     pub fn ensure_session(&self, session: &str) -> Result<()> {
         if !self.has_session(session) {
-            Command::new("tmux")
+            let output = Command::new("tmux")
                 .args(["new-session", "-d", "-s", session])
                 .output()?;
+            if !output.status.success() {
+                return Err(Error::Custom(format!(
+                    "tmux new-session failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )));
+            }
         }
         Ok(())
     }
@@ -90,7 +96,7 @@ impl TmuxClient {
     /// Create a new window in a session.
     pub fn create_window(&self, target: &TmuxTarget, dir: &Path) -> Result<()> {
         self.ensure_session(&target.session)?;
-        Command::new("tmux")
+        let output = Command::new("tmux")
             .args([
                 "new-window",
                 "-t",
@@ -101,6 +107,12 @@ impl TmuxClient {
                 &dir.to_string_lossy(),
             ])
             .output()?;
+        if !output.status.success() {
+            return Err(Error::Custom(format!(
+                "tmux new-window failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
         Ok(())
     }
 
@@ -109,9 +121,15 @@ impl TmuxClient {
         if !self.has_window(target) {
             return Ok(());
         }
-        Command::new("tmux")
+        let output = Command::new("tmux")
             .args(["kill-window", "-t", &target.target_str()])
             .output()?;
+        if !output.status.success() {
+            return Err(Error::Custom(format!(
+                "tmux kill-window failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
         Ok(())
     }
 

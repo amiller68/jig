@@ -5,9 +5,13 @@ use std::fmt;
 use clap::Args;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
+use jig_core::daemon::{self, DaemonConfig, TickResult};
 use jig_core::events::{EventLog, WorkerState};
 use jig_core::global::GlobalConfig;
+use jig_core::notify::Notifier;
 use jig_core::spawn::{self, TaskInfo, TaskStatus};
+use jig_core::templates::TemplateEngine;
+use jig_core::tmux::TmuxClient;
 use jig_core::worker::WorkerStatus;
 
 use crate::op::{Op, OpContext};
@@ -59,7 +63,7 @@ impl Op for Ps {
     }
 }
 
-/// Run the watch loop: clear screen, render, sleep, repeat.
+/// Run the watch loop: display + orchestrate on each tick.
 fn run_watch(repo: &jig_core::RepoContext, interval: u64) {
     let config = GlobalConfig::load().unwrap_or_default();
     let repo_name = repo
@@ -68,9 +72,31 @@ fn run_watch(repo: &jig_core::RepoContext, interval: u64) {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
+    // Set up daemon infrastructure for orchestration
+    let tmux = TmuxClient::new();
+    let engine = TemplateEngine::new();
+    let daemon_config = DaemonConfig {
+        interval_seconds: interval,
+        once: true,
+        ..Default::default()
+    };
+    let notifier = jig_core::notify::NotificationQueue::global()
+        .ok()
+        .map(|queue| Notifier::new(config.notify.clone(), queue));
+
+    // Clear screen once on first render
+    eprint!("\x1B[2J");
+
     loop {
-        // Clear screen and move cursor to top-left
-        eprint!("\x1B[2J\x1B[H");
+        // Move cursor to top-left (no clear — overwrite in place)
+        eprint!("\x1B[H");
+
+        // Run daemon tick (nudge, notify, dispatch)
+        let tick_result = if let Some(ref notifier) = notifier {
+            daemon::tick(&config, &tmux, &engine, notifier, &daemon_config).ok()
+        } else {
+            None
+        };
 
         let tasks = match spawn::list_tasks(repo) {
             Ok(t) => t,
@@ -83,16 +109,50 @@ fn run_watch(repo: &jig_core::RepoContext, interval: u64) {
 
         let enriched = enrich_tasks(&tasks, &repo_name, &config);
         let table = render_watch_table(&enriched);
-        eprintln!(
-            "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s, Ctrl+C to stop)\x1B[0m",
+        let status_line = format_tick_status(&tick_result);
+        let output = format!(
+            "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s, Ctrl+C to stop)\x1B[0m{status_line}\n\n{table}",
             enriched.len(),
             interval,
         );
-        eprintln!();
-        eprintln!("{table}");
 
-        // Check for 'q' keypress (non-blocking) — best-effort via sleep
+        for line in output.lines() {
+            eprintln!("{}\x1B[K", line);
+        }
+        // Clear everything below the table
+        eprint!("\x1B[J");
+
         std::thread::sleep(std::time::Duration::from_secs(interval));
+    }
+}
+
+/// Format the daemon tick result as a compact status suffix.
+fn format_tick_status(tick: &Option<TickResult>) -> String {
+    let Some(tick) = tick else {
+        return String::new();
+    };
+    let mut parts = vec![];
+    if tick.nudges_sent > 0 {
+        parts.push(format!(
+            "{} nudge{}",
+            tick.nudges_sent,
+            if tick.nudges_sent == 1 { "" } else { "s" }
+        ));
+    }
+    if tick.notifications_sent > 0 {
+        parts.push(format!("{} notify", tick.notifications_sent));
+    }
+    if !tick.errors.is_empty() {
+        parts.push(format!(
+            "{} err{}",
+            tick.errors.len(),
+            if tick.errors.len() == 1 { "" } else { "s" }
+        ));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("  \x1B[2m[{}]\x1B[0m", parts.join(", "))
     }
 }
 

@@ -17,7 +17,17 @@ cargo run -- <args>      # Run CLI (e.g., cargo run -- list)
 
 ```
 crates/
-├── jig-core/      # Core library (worktree, config, worker, git)
+├── jig-core/      # Core library
+│   ├── events/    # Event log (JSONL per worker, state derivation)
+│   ├── dispatch/  # Action dispatch rules for state transitions
+│   ├── hooks/     # Git + Claude Code hook management
+│   ├── github/    # GitHub integration via gh CLI
+│   ├── notify/    # Notification queue and hook execution
+│   ├── templates/ # Handlebars template engine for nudges
+│   ├── global/    # Global config and state (~/.config/jig/)
+│   ├── daemon.rs  # Orchestrator loop (tick, discover, execute)
+│   ├── nudge.rs   # Nudge classification and delivery via tmux
+│   └── tmux.rs    # Type-safe tmux client
 └── jig-cli/       # CLI binary
 
 templates/         # Templates for jig init

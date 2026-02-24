@@ -8,6 +8,7 @@ use crate::adapter;
 use crate::config::{JigToml, RepoConfig};
 use crate::context::RepoContext;
 use crate::error::{Error, Result};
+use crate::events::{Event, EventLog, EventType};
 use crate::git;
 use crate::session;
 use crate::state::OrchestratorState;
@@ -70,6 +71,20 @@ pub fn register(repo: &RepoContext, name: &str, branch: &str, context: Option<&s
     worker.tmux_window = Some(name.to_string());
     state.add_worker(worker);
     state.save()?;
+
+    // Emit Spawn event so daemon and ps --watch can discover this worker
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
+        let event = Event::new(EventType::Spawn)
+            .with_field("branch", branch)
+            .with_field("repo", repo_name.as_str());
+        let _ = event_log.append(&event);
+    }
 
     Ok(())
 }

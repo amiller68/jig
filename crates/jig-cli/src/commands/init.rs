@@ -95,9 +95,16 @@ impl Op for Init {
             );
         }
 
-        // Check if already initialized
+        // If already initialized, just ensure hooks are set up
         if JigToml::exists(&repo_root) && !self.force {
-            return Err(Error::AlreadyInitialized.into());
+            eprintln!(
+                "{} Already initialized, ensuring hooks are set up...",
+                "→".cyan()
+            );
+            install_hooks(&repo_root, adapter, false);
+            eprintln!();
+            eprintln!("{} Hooks up to date", "✓".green().bold());
+            return Ok(NoOutput);
         }
 
         eprintln!(
@@ -283,6 +290,8 @@ type = "{}"
             write_file(&repo_root, &path, content, self.force, backup_dir_opt)?;
         }
 
+        install_hooks(&repo_root, adapter, self.force);
+
         eprintln!();
         eprintln!("{} Initialization complete", "✓".green().bold());
 
@@ -360,6 +369,52 @@ fn print_audit_prompt(adapter: &adapter::AgentAdapter) {
     );
     eprintln!();
     eprintln!("  {} \"{}\"", adapter.command, audit_prompt(adapter));
+}
+
+/// Install git hooks and agent-specific hooks (idempotent).
+fn install_hooks(repo_root: &Path, adapter: &adapter::AgentAdapter, force: bool) {
+    eprintln!();
+    eprintln!("{} Installing git hooks...", "→".cyan());
+    match jig_core::hooks::init_hooks(repo_root, force) {
+        Ok(result) => {
+            for r in &result.results {
+                match r {
+                    jig_core::hooks::install::HookResult::Installed(name) => {
+                        eprintln!("  {} {}: installed", "✓".green(), name);
+                    }
+                    jig_core::hooks::install::HookResult::AlreadyInstalled(name) => {
+                        eprintln!("  {} {}: already installed", "✓".green(), name);
+                    }
+                    jig_core::hooks::install::HookResult::BackedUpAndInstalled {
+                        hook,
+                        backup: _,
+                    } => {
+                        eprintln!("  {} {}: installed (backed up existing)", "✓".green(), hook);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("  {} Git hooks: {}", "!".yellow(), e);
+        }
+    }
+
+    if matches!(adapter.agent_type, jig_core::adapter::AgentType::Claude) {
+        eprintln!("{} Installing Claude Code hooks...", "→".cyan());
+        match jig_core::hooks::install_claude_hooks() {
+            Ok(result) => {
+                for name in &result.installed {
+                    eprintln!("  {} {}: installed", "✓".green(), name);
+                }
+                for name in &result.skipped {
+                    eprintln!("  {} {}: already exists", "✓".green(), name);
+                }
+            }
+            Err(e) => {
+                eprintln!("  {} Claude hooks: {}", "!".yellow(), e);
+            }
+        }
+    }
 }
 
 fn write_file(

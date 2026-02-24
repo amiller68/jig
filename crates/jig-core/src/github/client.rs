@@ -50,11 +50,12 @@ impl GitHubClient {
 
     /// Get PR info for a branch.
     pub fn get_pr_for_branch(&self, branch: &str) -> Result<Option<PrInfo>> {
+        let encoded_branch = urlencoding::encode(branch);
         let output = self.gh_api(&format!(
             "repos/{}/pulls?head={}:{}&state=open",
             self.repo,
             self.repo.split('/').next().unwrap_or(""),
-            branch
+            encoded_branch
         ))?;
 
         let prs: Vec<serde_json::Value> = serde_json::from_str(&output)?;

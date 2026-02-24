@@ -212,7 +212,9 @@ fn process_worker(
                     worker: worker_id.clone(),
                     reason: message.clone(),
                 };
-                let _ = notifier.emit(event);
+                if let Err(e) = notifier.emit(event) {
+                    tracing::warn!("notification failed for {}: {}", worker_id, e);
+                }
                 notif_count += 1;
             }
             Action::Restart { worker_id, reason } => {
@@ -234,7 +236,7 @@ fn process_worker(
         WorkerEntry {
             repo: repo_name.to_string(),
             branch: worker_name.to_string(),
-            status: format!("{:?}", new_state.status),
+            status: new_state.status.as_str().to_string(),
             issue: None,
             pr_url: new_state.pr_url.clone(),
             started_at: new_state.started_at.unwrap_or(0),
@@ -322,19 +324,7 @@ fn split_worker_dir(dir_name: &str, repo_names: &[String]) -> Option<(String, St
 fn entry_to_worker_state(entry: &WorkerEntry) -> WorkerState {
     use crate::worker::WorkerStatus;
 
-    let status = match entry.status.as_str() {
-        "Spawned" => WorkerStatus::Spawned,
-        "Running" => WorkerStatus::Running,
-        "Idle" => WorkerStatus::Idle,
-        "WaitingInput" => WorkerStatus::WaitingInput,
-        "Stalled" => WorkerStatus::Stalled,
-        "WaitingReview" => WorkerStatus::WaitingReview,
-        "Approved" => WorkerStatus::Approved,
-        "Merged" => WorkerStatus::Merged,
-        "Failed" => WorkerStatus::Failed,
-        "Archived" => WorkerStatus::Archived,
-        _ => WorkerStatus::Spawned,
-    };
+    let status = WorkerStatus::from_legacy(&entry.status);
 
     WorkerState {
         status,
@@ -388,7 +378,7 @@ mod tests {
         let entry = WorkerEntry {
             repo: "test".to_string(),
             branch: "main".to_string(),
-            status: "Running".to_string(),
+            status: "running".to_string(),
             issue: None,
             pr_url: Some("https://github.com/pr/1".to_string()),
             started_at: 1000,

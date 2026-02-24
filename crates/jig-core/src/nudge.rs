@@ -124,8 +124,10 @@ pub fn execute_nudge(
 
     match nudge_type {
         NudgeType::Stuck => {
-            // For stuck prompts, auto-approve then send context
+            // For stuck prompts, auto-approve then send the context message
             tmux.auto_approve(target)?;
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            tmux.send_message(target, &message)?;
         }
         _ => {
             tmux.send_message(target, &message)?;
