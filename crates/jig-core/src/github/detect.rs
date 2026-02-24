@@ -1,9 +1,19 @@
 //! Detection functions — check GitHub state and classify nudge types.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::error::Result;
 use crate::nudge::NudgeType;
 
 use super::client::GitHubClient;
+
+/// Default conventional commit pattern (compiled once).
+static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?!?: .+")
+        .expect("valid regex")
+});
 
 /// Result of checking a PR's GitHub state.
 #[derive(Debug, Clone)]
@@ -105,6 +115,30 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
     })
 }
 
+/// Check if PR commits follow conventional commit format.
+pub fn check_commits(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
+    let commits = client.get_pr_commits(pr_number)?;
+    let re = &*CONVENTIONAL_COMMIT_RE;
+
+    let bad: Vec<String> = commits
+        .iter()
+        .filter(|c| !re.is_match(&c.message))
+        .map(|c| format!("{}: {}", c.sha, c.message))
+        .collect();
+
+    if bad.is_empty() {
+        return Ok(PrCheck {
+            nudge: None,
+            details: vec![],
+        });
+    }
+
+    Ok(PrCheck {
+        nudge: Some(NudgeType::BadCommits),
+        details: bad,
+    })
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -117,6 +151,28 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conventional_commit_regex_valid() {
+        let re = &*CONVENTIONAL_COMMIT_RE;
+        assert!(re.is_match("feat: add login"));
+        assert!(re.is_match("fix(auth): handle expired tokens"));
+        assert!(re.is_match("feat!: breaking change"));
+        assert!(re.is_match("chore(deps): bump serde"));
+        assert!(re.is_match("ci: update workflow"));
+        assert!(re.is_match("build: update Cargo.toml"));
+        assert!(re.is_match("revert: undo last commit"));
+    }
+
+    #[test]
+    fn conventional_commit_regex_invalid() {
+        let re = &*CONVENTIONAL_COMMIT_RE;
+        assert!(!re.is_match("Update README"));
+        assert!(!re.is_match("WIP"));
+        assert!(!re.is_match("fix bug"));
+        assert!(!re.is_match("Merge branch 'main' into feature"));
+        assert!(!re.is_match(""));
+    }
 
     #[test]
     fn truncate_short_string() {

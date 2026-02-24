@@ -17,6 +17,7 @@ pub enum EventType {
     Nudge,
     CiStatus,
     Review,
+    Terminal,
 }
 
 /// A single event in the worker event log.

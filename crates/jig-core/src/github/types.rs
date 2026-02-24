@@ -72,6 +72,13 @@ pub enum ReviewState {
     Pending,
 }
 
+/// A commit on a PR branch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrCommit {
+    pub sha: String,
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

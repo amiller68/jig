@@ -7,6 +7,7 @@ pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("nudge-ci", NUDGE_CI),
     ("nudge-conflict", NUDGE_CONFLICT),
     ("nudge-review", NUDGE_REVIEW),
+    ("nudge-bad-commits", NUDGE_BAD_COMMITS),
 ];
 
 const NUDGE_IDLE: &str = r#"STATUS CHECK: You've been idle for a while (nudge {{nudge_count}}/{{max_nudges}}).
@@ -63,4 +64,21 @@ Resolve them:
 const NUDGE_REVIEW: &str = r#"Your PR has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
 
 Address all feedback, commit, push, and call /review.
+"#;
+
+const NUDGE_BAD_COMMITS: &str = r#"Your PR has commits that don't follow conventional commit format (nudge {{nudge_count}}/{{max_nudges}}).
+
+Bad commits:
+{{#each bad_commits}}
+  - {{this}}
+{{/each}}
+
+Fix with interactive rebase:
+
+1. git rebase -i origin/main
+2. Change 'pick' to 'reword' for each bad commit
+3. Update message to: <type>(<scope>): <description>
+   Types: feat|fix|docs|style|refactor|perf|test|chore|ci
+4. git push --force-with-lease
+5. Call /review
 "#;

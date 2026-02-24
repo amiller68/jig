@@ -42,12 +42,32 @@ pub struct NotifyConfig {
     pub events: Vec<String>,
 }
 
+/// GitHub integration configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitHubConfig {
+    /// Auto-cleanup workers whose PRs have been merged.
+    pub auto_cleanup_merged: bool,
+    /// Auto-cleanup workers whose PRs have been closed without merging.
+    pub auto_cleanup_closed: bool,
+}
+
+impl Default for GitHubConfig {
+    fn default() -> Self {
+        Self {
+            auto_cleanup_merged: true,
+            auto_cleanup_closed: false,
+        }
+    }
+}
+
 /// Global configuration stored at `~/.config/jig/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalConfig {
     pub health: HealthConfig,
     pub notify: NotifyConfig,
+    pub github: GitHubConfig,
 }
 
 impl GlobalConfig {

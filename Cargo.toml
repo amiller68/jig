@@ -42,6 +42,7 @@ sha2 = "0.10"
 which = "6"
 handlebars = "5"
 urlencoding = "2"
+regex = "1"
 nix = { version = "0.28", features = ["process"] }
 
 # Testing

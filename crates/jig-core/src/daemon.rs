@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use crate::dispatch::{dispatch_actions, Action};
 use crate::error::Result;
-use crate::events::{EventLog, WorkerState};
+use crate::events::{Event, EventLog, EventType, WorkerState};
+use crate::github::GitHubClient;
 use crate::global::{GlobalConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::execute_nudge;
@@ -112,6 +113,9 @@ pub fn tick(
     let registry = RepoRegistry::load().unwrap_or_default();
     let worker_list = discover_workers(&registry);
 
+    // Cache GitHub client for the tick (avoids one `gh repo view` per worker)
+    let github_client = GitHubClient::from_remote().ok();
+
     for (repo_name, worker_name) in &worker_list {
         result.workers_checked += 1;
         let key = format!("{}/{}", repo_name, worker_name);
@@ -126,6 +130,7 @@ pub fn tick(
             engine,
             notifier,
             daemon_config,
+            github_client.as_ref(),
         ) {
             Ok((actions, nudges, notifs)) => {
                 result.actions_dispatched += actions;
@@ -158,6 +163,7 @@ fn process_worker(
     engine: &TemplateEngine<'_>,
     notifier: &Notifier,
     daemon_config: &DaemonConfig,
+    github_client: Option<&GitHubClient>,
 ) -> Result<(usize, usize, usize)> {
     // Read event log
     let event_log = EventLog::for_worker(repo_name, worker_name)?;
@@ -173,7 +179,15 @@ fn process_worker(
         .unwrap_or_default();
 
     // Dispatch actions based on state transition
-    let actions = dispatch_actions(worker_name, &old_state, &new_state, global_config);
+    let mut actions = dispatch_actions(worker_name, &old_state, &new_state, global_config);
+
+    // Check PR lifecycle if worker has a PR URL and isn't already terminal
+    if !new_state.status.is_terminal() {
+        if let (Some(pr_url), Some(client)) = (&new_state.pr_url, github_client) {
+            check_pr_lifecycle(worker_name, pr_url, client, global_config, &mut actions);
+        }
+    }
+
     let action_count = actions.len();
     let mut nudge_count = 0;
     let mut notif_count = 0;
@@ -225,7 +239,25 @@ fn process_worker(
                 );
             }
             Action::Cleanup { worker_id } => {
-                tracing::info!("cleanup requested for {} (not yet implemented)", worker_id);
+                let target = TmuxTarget::new(
+                    format!("{}{}", daemon_config.session_prefix, repo_name),
+                    worker_id.to_string(),
+                );
+
+                // Kill tmux window if it exists
+                if tmux.has_window(&target) {
+                    if let Err(e) = tmux.kill_window(&target) {
+                        tracing::warn!("failed to kill window for {}: {}", worker_id, e);
+                    }
+                }
+
+                // Emit terminal event
+                let event = Event::new(EventType::Terminal).with_field("reason", "cleanup");
+                if let Err(e) = event_log.append(&event) {
+                    tracing::warn!("failed to emit cleanup event for {}: {}", key, e);
+                }
+
+                tracing::info!("cleaned up worker {}", worker_id);
             }
         }
     }
@@ -246,6 +278,69 @@ fn process_worker(
     );
 
     Ok((action_count, nudge_count, notif_count))
+}
+
+/// Check PR lifecycle and inject cleanup/notify actions for merged/closed PRs.
+fn check_pr_lifecycle(
+    worker_name: &str,
+    pr_url: &str,
+    client: &GitHubClient,
+    config: &GlobalConfig,
+    actions: &mut Vec<Action>,
+) {
+    // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
+    let pr_number = match pr_url
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        Some(n) => n,
+        None => return,
+    };
+
+    let pr_state = match client.get_pr_state(pr_number) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!("failed to check PR state for {}: {}", worker_name, e);
+            return;
+        }
+    };
+
+    match pr_state {
+        crate::github::PrState::Merged => {
+            if config.github.auto_cleanup_merged {
+                actions.push(Action::Cleanup {
+                    worker_id: worker_name.to_string(),
+                });
+                actions.push(Action::Notify {
+                    worker_id: worker_name.to_string(),
+                    message: format!("PR #{} merged, worker cleaned up", pr_number),
+                });
+            }
+        }
+        crate::github::PrState::Closed => {
+            actions.push(Action::Notify {
+                worker_id: worker_name.to_string(),
+                message: format!("PR #{} closed without merge", pr_number),
+            });
+            if config.github.auto_cleanup_closed {
+                actions.push(Action::Cleanup {
+                    worker_id: worker_name.to_string(),
+                });
+            }
+        }
+        crate::github::PrState::Open => {
+            // Also run commit validation and other PR checks while we have the client
+            if let Ok(check) = crate::github::check_commits(client, pr_number) {
+                if let Some(nudge_type) = check.nudge {
+                    actions.push(Action::Nudge {
+                        worker_id: worker_name.to_string(),
+                        nudge_type,
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Discover all workers by scanning the events directory.

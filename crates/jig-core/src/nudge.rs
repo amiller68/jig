@@ -23,6 +23,8 @@ pub enum NudgeType {
     Conflict,
     /// Worker's PR has unresolved review comments.
     Review,
+    /// Worker's PR has non-conventional commit messages.
+    BadCommits,
 }
 
 impl NudgeType {
@@ -34,6 +36,7 @@ impl NudgeType {
             NudgeType::Ci => "nudge-ci",
             NudgeType::Conflict => "nudge-conflict",
             NudgeType::Review => "nudge-review",
+            NudgeType::BadCommits => "nudge-bad-commits",
         }
     }
 
@@ -45,6 +48,7 @@ impl NudgeType {
             NudgeType::Ci => "ci",
             NudgeType::Conflict => "conflict",
             NudgeType::Review => "review",
+            NudgeType::BadCommits => "bad_commits",
         }
     }
 }
@@ -102,6 +106,9 @@ pub fn build_nudge_context(
         }
         NudgeType::Conflict => {
             ctx.set("base_branch", "origin/main");
+        }
+        NudgeType::BadCommits => {
+            // bad_commits details populated by caller
         }
         _ => {}
     }
@@ -281,6 +288,7 @@ mod tests {
         assert_eq!(NudgeType::Ci.template_name(), "nudge-ci");
         assert_eq!(NudgeType::Conflict.template_name(), "nudge-conflict");
         assert_eq!(NudgeType::Review.template_name(), "nudge-review");
+        assert_eq!(NudgeType::BadCommits.template_name(), "nudge-bad-commits");
     }
 
     #[test]

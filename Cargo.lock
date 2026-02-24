@@ -528,6 +528,7 @@ dependencies = [
  "glob",
  "handlebars",
  "nix",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

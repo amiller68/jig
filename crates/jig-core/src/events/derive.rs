@@ -40,6 +40,7 @@ pub fn derive_status(events: &[Event], config: &HealthConfig) -> WorkerStatus {
         EventType::Spawn => WorkerStatus::Spawned,
         EventType::Review => WorkerStatus::WaitingReview,
         EventType::CiStatus | EventType::Nudge => WorkerStatus::Running,
+        EventType::Terminal => WorkerStatus::Archived,
     }
 }
 

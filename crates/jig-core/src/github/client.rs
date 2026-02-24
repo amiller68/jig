@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::error::{Error, Result};
 
-use super::types::{CheckRun, CheckStatus, PrInfo, PrState, ReviewComment, ReviewState};
+use super::types::{CheckRun, CheckStatus, PrCommit, PrInfo, PrState, ReviewComment, ReviewState};
 
 /// GitHub API client using `gh` CLI.
 ///
@@ -162,6 +162,44 @@ impl GitHubClient {
         let pr: serde_json::Value = serde_json::from_str(&output)?;
         let mergeable_state = pr["mergeable_state"].as_str().unwrap_or("");
         Ok(mergeable_state == "dirty" || pr["mergeable"].as_bool() == Some(false))
+    }
+
+    /// Get commits on a PR.
+    pub fn get_pr_commits(&self, pr_number: u64) -> Result<Vec<PrCommit>> {
+        let output = self.gh_api(&format!("repos/{}/pulls/{}/commits", self.repo, pr_number))?;
+
+        let commits: Vec<serde_json::Value> = serde_json::from_str(&output)?;
+
+        Ok(commits
+            .iter()
+            .map(|c| PrCommit {
+                sha: c["sha"].as_str().unwrap_or("").chars().take(7).collect(),
+                message: c["commit"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+            })
+            .collect())
+    }
+
+    /// Get the current state of a PR (open, closed, or merged).
+    pub fn get_pr_state(&self, pr_number: u64) -> Result<PrState> {
+        let output = self.gh_api(&format!("repos/{}/pulls/{}", self.repo, pr_number))?;
+
+        let pr: serde_json::Value = serde_json::from_str(&output)?;
+        let merged = pr["merged"].as_bool().unwrap_or(false);
+        let state = pr["state"].as_str().unwrap_or("open");
+
+        Ok(if merged {
+            PrState::Merged
+        } else if state == "closed" {
+            PrState::Closed
+        } else {
+            PrState::Open
+        })
     }
 
     /// Check if `gh` CLI is available and authenticated.

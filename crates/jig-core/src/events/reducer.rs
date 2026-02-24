@@ -117,6 +117,9 @@ impl WorkerState {
                 self.status = WorkerStatus::WaitingReview;
             }
             EventType::CiStatus => {}
+            EventType::Terminal => {
+                // Terminal markers are handled above via data.terminal field
+            }
         }
     }
 

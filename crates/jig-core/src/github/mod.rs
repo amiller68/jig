@@ -8,5 +8,5 @@ mod detect;
 mod types;
 
 pub use client::GitHubClient;
-pub use detect::{check_ci, check_conflicts, check_reviews, PrCheck};
-pub use types::{CheckRun, CheckStatus, PrInfo, PrState, ReviewComment, ReviewState};
+pub use detect::{check_ci, check_commits, check_conflicts, check_reviews, PrCheck};
+pub use types::{CheckRun, CheckStatus, PrCommit, PrInfo, PrState, ReviewComment, ReviewState};
