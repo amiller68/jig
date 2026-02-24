@@ -46,6 +46,7 @@ crate::command_enum! {
     (Review, commands::Review),
     (Merge, commands::Merge),
     (Kill, commands::Kill),
+    (Nuke, commands::Nuke),
     (Init, commands::Init),
     (Update, commands::Update),
     (Version, commands::Version),

@@ -86,6 +86,25 @@ impl EventLog {
     pub fn exists(&self) -> bool {
         self.path.exists()
     }
+
+    /// Truncate the log file (clear all events).
+    pub fn reset(&self) -> Result<()> {
+        if self.path.exists() {
+            fs::write(&self.path, "")?;
+        }
+        Ok(())
+    }
+
+    /// Remove the log file and its parent directory.
+    pub fn remove(&self) -> Result<()> {
+        if self.path.exists() {
+            fs::remove_file(&self.path)?;
+        }
+        if let Some(parent) = self.path.parent() {
+            let _ = fs::remove_dir(parent); // only succeeds if empty
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -151,5 +170,34 @@ mod tests {
         let log = EventLog::for_worker("myrepo", "feat/branch").unwrap();
         let path_str = log.path.to_string_lossy();
         assert!(path_str.ends_with("myrepo-feat-branch/events.jsonl"));
+    }
+
+    #[test]
+    fn reset_clears_events() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = EventLog::new(tmp.path().join("events.jsonl"));
+
+        log.append(&Event::new(EventType::Spawn)).unwrap();
+        log.append(&Event::new(EventType::Commit)).unwrap();
+        assert_eq!(log.read_all().unwrap().len(), 2);
+
+        log.reset().unwrap();
+        assert!(log.exists());
+        assert!(log.read_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_deletes_file_and_empty_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let subdir = tmp.path().join("worker-dir");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let log = EventLog::new(subdir.join("events.jsonl"));
+
+        log.append(&Event::new(EventType::Spawn)).unwrap();
+        assert!(log.exists());
+
+        log.remove().unwrap();
+        assert!(!log.exists());
+        assert!(!subdir.exists());
     }
 }

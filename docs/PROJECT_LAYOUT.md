@@ -74,6 +74,8 @@ jig/
 │   │           ├── create.rs
 │   │           ├── list.rs
 │   │           ├── spawn.rs
+│   │           ├── kill.rs
+│   │           ├── nuke.rs
 │   │           └── ...
 │
 ├── templates/              # Templates for jig init

@@ -68,6 +68,8 @@ eval "$(jig shell-init zsh)"
 | `jig review <name>` | Show diff for parent review |
 | `jig merge <name>` | Merge reviewed worktree into current branch |
 | `jig kill <name>` | Kill a running tmux window |
+| `jig kill --all` | Kill all workers |
+| `jig nuke` | Nuke all workers, worktrees, and state (keeps config) |
 | `jig init [--force] [--backup]` | Initialize jig.toml, docs/, issues/, and .claude/ |
 | `jig update` | Show update instructions |
 | `jig version` | Show version |

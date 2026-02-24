@@ -148,6 +148,10 @@ fn print_help() {
         "merge".cyan()
     );
     eprintln!("  {}        Kill a running tmux window", "kill".cyan());
+    eprintln!(
+        "  {}        Nuke all workers and state (keeps config)",
+        "nuke".cyan()
+    );
     eprintln!();
     eprintln!("{}", "REPOSITORY TRACKING:".bold());
     eprintln!("  {}       List tracked repositories", "repos".cyan());

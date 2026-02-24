@@ -124,6 +124,11 @@ impl WorkerState {
         if self.status.is_terminal() {
             return;
         }
+        // Only mark as stalled if the worker was previously active.
+        // A worker that's only "Spawned" hasn't started yet — don't nudge it.
+        if self.status == WorkerStatus::Spawned {
+            return;
+        }
         if let Some(last_ts) = self.last_event_at {
             let now = chrono::Utc::now().timestamp();
             let age = now - last_ts;

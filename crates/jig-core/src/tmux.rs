@@ -133,6 +133,23 @@ impl TmuxClient {
         Ok(())
     }
 
+    /// Kill an entire session.
+    pub fn kill_session(&self, session: &str) -> Result<()> {
+        if !self.has_session(session) {
+            return Ok(());
+        }
+        let output = Command::new("tmux")
+            .args(["kill-session", "-t", session])
+            .output()?;
+        if !output.status.success() {
+            return Err(Error::Custom(format!(
+                "tmux kill-session failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+        Ok(())
+    }
+
     /// List window names in a session.
     pub fn list_windows(&self, session: &str) -> Result<Vec<String>> {
         if !self.has_session(session) {

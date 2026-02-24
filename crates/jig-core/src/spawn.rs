@@ -72,7 +72,8 @@ pub fn register(repo: &RepoContext, name: &str, branch: &str, context: Option<&s
     state.add_worker(worker);
     state.save()?;
 
-    // Emit Spawn event so daemon and ps --watch can discover this worker
+    // Emit Spawn event so daemon and ps --watch can discover this worker.
+    // Reset the log first — if a previous worker had this name, start fresh.
     let repo_name = repo
         .repo_root
         .file_name()
@@ -80,6 +81,7 @@ pub fn register(repo: &RepoContext, name: &str, branch: &str, context: Option<&s
         .unwrap_or_else(|| "unknown".to_string());
 
     if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
+        let _ = event_log.reset();
         let event = Event::new(EventType::Spawn)
             .with_field("branch", branch)
             .with_field("repo", repo_name.as_str());
@@ -173,6 +175,8 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
         }
     }
 
+    tasks.sort_by(|a, b| a.name.cmp(&b.name));
+
     Ok(tasks)
 }
 
@@ -212,7 +216,7 @@ pub fn kill_window(repo: &RepoContext, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Unregister a worker from state (removes entirely)
+/// Unregister a worker from state (removes entirely) and clean up event log.
 pub fn unregister(repo: &RepoContext, name: &str) -> Result<()> {
     if let Some(mut state) = OrchestratorState::load(&repo.repo_root)? {
         let id = state.get_worker_by_name(name).map(|w| w.id);
@@ -220,6 +224,17 @@ pub fn unregister(repo: &RepoContext, name: &str) -> Result<()> {
             state.remove_worker(&id);
             state.save()?;
         }
+    }
+
+    // Clean up event log
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
+        let _ = event_log.remove();
     }
 
     Ok(())
