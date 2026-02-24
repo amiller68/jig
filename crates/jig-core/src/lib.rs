@@ -17,6 +17,7 @@ pub mod events;
 pub mod git;
 pub mod global;
 pub mod hooks;
+pub mod notify;
 pub mod registry;
 pub mod session;
 pub mod spawn;
