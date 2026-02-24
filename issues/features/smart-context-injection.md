@@ -1,6 +1,6 @@
 # Smart Context Injection for Workers
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Category:** Features
 **Milestone:** milestones/event-driven-pipeline/

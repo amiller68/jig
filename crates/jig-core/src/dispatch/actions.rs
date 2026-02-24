@@ -1,15 +1,17 @@
 //! Action types for the dispatch system.
 
+use crate::nudge::NudgeType;
+
 /// An action to be executed in response to a state transition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    /// Send message to worker via tmux.
-    Nudge { worker_id: String, message: String },
+    /// Send a nudge to a worker via tmux.
+    Nudge {
+        worker_id: String,
+        nudge_type: NudgeType,
+    },
 
-    /// Auto-approve a stuck prompt.
-    AutoApprove { worker_id: String },
-
-    /// Emit a notification.
+    /// Emit a notification (escalation or informational).
     Notify { worker_id: String, message: String },
 
     /// Kill and restart worker.

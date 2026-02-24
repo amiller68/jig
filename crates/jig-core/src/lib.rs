@@ -18,11 +18,14 @@ pub mod git;
 pub mod global;
 pub mod hooks;
 pub mod notify;
+pub mod nudge;
 pub mod registry;
 pub mod session;
 pub mod spawn;
 pub mod state;
+pub mod templates;
 pub mod terminal;
+pub mod tmux;
 pub mod worker;
 pub mod worktree;
 
@@ -35,7 +38,10 @@ pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
     WorkersState,
 };
+pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;
 pub use state::OrchestratorState;
+pub use templates::{TemplateContext, TemplateEngine};
+pub use tmux::{TmuxClient, TmuxTarget};
 pub use worker::{DiffStats, FileDiff, TaskContext, Worker, WorkerId, WorkerStatus};
 pub use worktree::Worktree;

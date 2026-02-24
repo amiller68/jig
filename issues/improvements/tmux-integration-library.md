@@ -1,6 +1,6 @@
 # Tmux Integration Library
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Medium
 **Category:** Improvements
 **Milestone:** milestones/event-driven-pipeline/

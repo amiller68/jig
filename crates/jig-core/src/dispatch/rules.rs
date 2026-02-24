@@ -2,6 +2,7 @@
 
 use crate::events::WorkerState;
 use crate::global::GlobalConfig;
+use crate::nudge::classify_nudge;
 use crate::worker::WorkerStatus;
 
 use super::Action;
@@ -15,35 +16,31 @@ pub fn dispatch_actions(
 ) -> Vec<Action> {
     let mut actions = vec![];
 
-    // Transition to WaitingInput
-    if old_state.status != WorkerStatus::WaitingInput
-        && new_state.status == WorkerStatus::WaitingInput
-    {
-        let nudge_count = new_state
-            .nudge_counts
-            .get("waiting_input")
-            .copied()
-            .unwrap_or(0);
-
-        if nudge_count < config.health.max_nudges {
+    // State changed to something nudgeable
+    if old_state.status != new_state.status {
+        if let Some(nudge_type) = classify_nudge(new_state, config) {
             actions.push(Action::Nudge {
                 worker_id: worker_id.to_string(),
-                message: "Waiting for input. Please respond or exit.".to_string(),
+                nudge_type,
             });
-        } else {
+        } else if matches!(
+            new_state.status,
+            WorkerStatus::WaitingInput | WorkerStatus::Stalled | WorkerStatus::Idle
+        ) {
+            // Max nudges reached, escalate
             actions.push(Action::Notify {
                 worker_id: worker_id.to_string(),
-                message: "Max nudges reached, needs human attention".to_string(),
+                message: format!(
+                    "Max nudges reached for {} worker, needs human attention",
+                    match new_state.status {
+                        WorkerStatus::WaitingInput => "stuck",
+                        WorkerStatus::Stalled => "stalled",
+                        WorkerStatus::Idle => "idle",
+                        _ => "unknown",
+                    }
+                ),
             });
         }
-    }
-
-    // Transition to Stalled
-    if old_state.status != WorkerStatus::Stalled && new_state.status == WorkerStatus::Stalled {
-        actions.push(Action::Notify {
-            worker_id: worker_id.to_string(),
-            message: "Worker stalled - no activity".to_string(),
-        });
     }
 
     // PR opened
@@ -71,6 +68,7 @@ pub fn dispatch_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nudge::NudgeType;
 
     fn default_config() -> GlobalConfig {
         GlobalConfig::default()
@@ -89,7 +87,13 @@ mod tests {
 
         let actions = dispatch_actions("test", &old, &new, &default_config());
         assert_eq!(actions.len(), 1);
-        assert!(matches!(&actions[0], Action::Nudge { worker_id, .. } if worker_id == "test"));
+        assert!(matches!(
+            &actions[0],
+            Action::Nudge {
+                worker_id,
+                nudge_type: NudgeType::Stuck,
+            } if worker_id == "test"
+        ));
     }
 
     #[test]
@@ -102,11 +106,9 @@ mod tests {
             status: WorkerStatus::WaitingInput,
             ..Default::default()
         };
-        new.nudge_counts.insert("waiting_input".to_string(), 3);
+        new.nudge_counts.insert("stuck".to_string(), 3);
 
-        let config = GlobalConfig::default(); // max_nudges = 3
-
-        let actions = dispatch_actions("test", &old, &new, &config);
+        let actions = dispatch_actions("test", &old, &new, &default_config());
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], Action::Notify { message, .. } if message.contains("Max nudges"))
@@ -114,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn stalled_triggers_notify() {
+    fn stalled_triggers_nudge() {
         let old = WorkerState {
             status: WorkerStatus::Running,
             ..Default::default()
@@ -126,9 +128,13 @@ mod tests {
 
         let actions = dispatch_actions("test", &old, &new, &default_config());
         assert_eq!(actions.len(), 1);
-        assert!(
-            matches!(&actions[0], Action::Notify { message, .. } if message.contains("stalled"))
-        );
+        assert!(matches!(
+            &actions[0],
+            Action::Nudge {
+                nudge_type: NudgeType::Idle,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -157,7 +163,6 @@ mod tests {
 
     #[test]
     fn same_status_no_retrigger() {
-        // If already WaitingInput and still WaitingInput, don't re-nudge
         let state = WorkerState {
             status: WorkerStatus::WaitingInput,
             ..Default::default()
@@ -183,5 +188,27 @@ mod tests {
         assert!(
             matches!(&actions[0], Action::Notify { message, .. } if message.contains("failed"))
         );
+    }
+
+    #[test]
+    fn idle_triggers_nudge() {
+        let old = WorkerState {
+            status: WorkerStatus::Running,
+            ..Default::default()
+        };
+        let new = WorkerState {
+            status: WorkerStatus::Idle,
+            ..Default::default()
+        };
+
+        let actions = dispatch_actions("test", &old, &new, &default_config());
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            &actions[0],
+            Action::Nudge {
+                nudge_type: NudgeType::Idle,
+                ..
+            }
+        ));
     }
 }

@@ -41,6 +41,12 @@ jig/
 │   │       │   ├── handlers.rs # post-commit/merge/pre-commit handlers
 │   │       │   ├── uninstall.rs # Hook removal and rollback
 │   │       │   └── templates/  # Shell script templates
+│   │       ├── nudge.rs    # Nudge system (classify, build, execute)
+│   │       ├── tmux.rs     # Type-safe tmux client (TmuxClient, TmuxTarget)
+│   │       ├── templates/  # Handlebars template engine
+│   │       │   ├── mod.rs      # Re-exports
+│   │       │   ├── engine.rs   # TemplateEngine with hierarchical loading
+│   │       │   └── builtin.rs  # Built-in nudge templates
 │   │       ├── notify/     # Notification system
 │   │       │   ├── mod.rs      # Re-exports
 │   │       │   ├── events.rs   # NotificationEvent types
