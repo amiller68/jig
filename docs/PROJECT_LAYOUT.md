@@ -25,11 +25,22 @@ jig/
 │   │       ├── events/     # Event log system (JSONL per worker)
 │   │       │   ├── mod.rs      # Re-exports
 │   │       │   ├── schema.rs   # Event/EventType structs
-│   │       │   └── log.rs      # EventLog JSONL reader/writer
+│   │       │   ├── log.rs      # EventLog JSONL reader/writer
+│   │       │   ├── derive.rs   # State derivation from events
+│   │       │   └── reducer.rs  # WorkerState reducer
+│   │       ├── dispatch/   # Action dispatch for state transitions
+│   │       │   ├── mod.rs      # Re-exports
+│   │       │   ├── actions.rs  # Action enum
+│   │       │   └── rules.rs    # Dispatch rules
 │   │       ├── hooks/      # Hook management
 │   │       │   ├── mod.rs      # Re-exports
 │   │       │   ├── claude.rs   # Claude Code hook installation
 │   │       │   └── templates/  # Shell script templates
+│   │       ├── notify/     # Notification system
+│   │       │   ├── mod.rs      # Re-exports
+│   │       │   ├── events.rs   # NotificationEvent types
+│   │       │   ├── queue.rs    # NotificationQueue (JSONL)
+│   │       │   └── hook.rs     # Notifier with hook execution
 │   │       └── global/     # Global state infrastructure (~/.config/jig/)
 │   │           ├── mod.rs      # Re-exports
 │   │           ├── paths.rs    # XDG path helpers

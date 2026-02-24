@@ -1,6 +1,6 @@
 # Notification Queue
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Medium
 **Category:** Features
 **Epic:** issues/epics/event-system/index.md
