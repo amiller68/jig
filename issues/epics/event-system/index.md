@@ -1,6 +1,6 @@
 # Epic: Event System
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Category:** Features
 **Milestone:** milestones/event-driven-pipeline/
