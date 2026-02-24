@@ -43,6 +43,11 @@ jig/
 │   │       │   └── templates/  # Shell script templates
 │   │       ├── nudge.rs    # Nudge system (classify, build, execute)
 │   │       ├── tmux.rs     # Type-safe tmux client (TmuxClient, TmuxTarget)
+│   │       ├── github/     # GitHub integration via gh CLI
+│   │       │   ├── mod.rs      # Re-exports
+│   │       │   ├── client.rs   # GitHubClient (PR, CI, reviews)
+│   │       │   ├── types.rs    # PrInfo, CheckRun, ReviewComment
+│   │       │   └── detect.rs   # CI/conflict/review detection → NudgeType
 │   │       ├── templates/  # Handlebars template engine
 │   │       │   ├── mod.rs      # Re-exports
 │   │       │   ├── engine.rs   # TemplateEngine with hierarchical loading

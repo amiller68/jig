@@ -15,6 +15,7 @@ pub mod dispatch;
 pub mod error;
 pub mod events;
 pub mod git;
+pub mod github;
 pub mod global;
 pub mod hooks;
 pub mod notify;
@@ -34,6 +35,7 @@ pub use config::{Config, JigToml, RepoConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
 pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
+pub use github::GitHubClient;
 pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
     WorkersState,

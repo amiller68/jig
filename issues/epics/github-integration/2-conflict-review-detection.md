@@ -1,6 +1,6 @@
 # Conflict & Review Detection
 
-**Status:** Planned  
+**Status:** Complete  
 **Priority:** High  
 **Category:** Features  
 **Epic:** issues/epics/github-integration/index.md  
