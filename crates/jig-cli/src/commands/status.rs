@@ -81,14 +81,12 @@ fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<(), Statu
         }
     }
 
-    if let WorkerStatus::WaitingReview { diff_stats } = &worker.status {
+    if worker.status.is_waiting_review() {
         eprintln!();
-        eprintln!("  {}", "Changes:".bold());
         eprintln!(
-            "    {} files, {} insertions(+), {} deletions(-)",
-            diff_stats.files_changed,
-            diff_stats.insertions.to_string().green(),
-            diff_stats.deletions.to_string().red()
+            "  {} run '{}' to see changes",
+            "Review:".bold(),
+            format!("jig review {}", worker.name).cyan()
         );
     }
 
@@ -129,16 +127,13 @@ fn format_status(status: &WorkerStatus) -> String {
     match status {
         WorkerStatus::Spawned => "spawned".yellow().to_string(),
         WorkerStatus::Running => "running".blue().to_string(),
-        WorkerStatus::WaitingReview { diff_stats } => {
-            format!(
-                "{} ({} files)",
-                "waiting review".magenta(),
-                diff_stats.files_changed
-            )
-        }
+        WorkerStatus::Idle => "idle".dimmed().to_string(),
+        WorkerStatus::WaitingInput => "waiting input".magenta().to_string(),
+        WorkerStatus::Stalled => "stalled".red().to_string(),
+        WorkerStatus::WaitingReview => "waiting review".magenta().to_string(),
         WorkerStatus::Approved => "approved".green().to_string(),
         WorkerStatus::Merged => "merged".green().bold().to_string(),
-        WorkerStatus::Failed { reason } => format!("{}: {}", "failed".red(), reason),
+        WorkerStatus::Failed => "failed".red().to_string(),
         WorkerStatus::Archived => "archived".dimmed().to_string(),
     }
 }
