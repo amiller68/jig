@@ -28,7 +28,7 @@ pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
 pub use config::{Config, JigToml, RepoConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
-pub use events::{Event, EventLog, EventType};
+pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
 pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
     WorkersState,
