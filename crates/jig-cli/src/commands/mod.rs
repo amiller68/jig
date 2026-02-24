@@ -3,6 +3,7 @@
 pub mod attach;
 pub mod config;
 pub mod create;
+pub mod daemon;
 pub mod exit;
 pub mod health;
 pub mod hooks;
@@ -27,6 +28,7 @@ pub mod which;
 pub use attach::Attach;
 pub use config::Config;
 pub use create::Create;
+pub use daemon::Daemon;
 pub use exit::Exit;
 pub use health::Health;
 pub use hooks::Hooks;

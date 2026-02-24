@@ -11,6 +11,7 @@
 pub mod adapter;
 pub mod config;
 pub mod context;
+pub mod daemon;
 pub mod dispatch;
 pub mod error;
 pub mod events;
