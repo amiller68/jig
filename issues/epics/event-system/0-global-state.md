@@ -1,6 +1,6 @@
 # Global State Structure
 
-**Status:** Planned
+**Status:** Done
 **Priority:** High
 **Category:** Features
 **Epic:** issues/epics/event-system/index.md

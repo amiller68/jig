@@ -21,7 +21,12 @@ jig/
 │   │       ├── state.rs    # Orchestrator state persistence
 │   │       ├── adapter.rs  # Agent adapters (Claude, etc.)
 │   │       ├── registry.rs # Repository registry for global mode
-│   │       └── terminal.rs # Terminal detection
+│   │       ├── terminal.rs # Terminal detection
+│   │       └── global/     # Global state infrastructure (~/.config/jig/)
+│   │           ├── mod.rs      # Re-exports
+│   │           ├── paths.rs    # XDG path helpers
+│   │           ├── config.rs   # Structured TOML config (config.toml)
+│   │           └── state.rs    # Aggregated worker state (workers.json)
 │   │
 │   ├── jig-cli/            # CLI binary
 │   │   └── src/
@@ -76,7 +81,11 @@ jig/
 
 ## Configuration
 
-- `~/.config/jig/config` — Global user configuration (base branch, hooks)
+- `~/.config/jig/config` — Legacy flat key-value user configuration (base branch, hooks)
+- `~/.config/jig/config.toml` — Structured global configuration (health, notify)
+- `~/.config/jig/state/workers.json` — Aggregated worker state across repos
+- `~/.config/jig/hooks/` — User hook scripts
+- `~/.config/jig/state/events/` — Per-worker event logs
 - `jig.toml` or `jig.toml` — Per-repository configuration
 - `.claude/settings.json` — Claude Code settings (when initialized with jig)
 

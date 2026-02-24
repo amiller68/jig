@@ -30,6 +30,9 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    // Best-effort global directory setup
+    let _ = jig_core::ensure_global_dirs();
+
     // Build context once (derives RepoContext from cwd)
     let ctx = OpContext::new(false);
 
