@@ -1,6 +1,6 @@
 # Hook Handlers
 
-**Status:** Planned  
+**Status:** Complete  
 **Priority:** High  
 **Category:** Features  
 **Epic:** issues/epics/git-hooks/index.md  

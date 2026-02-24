@@ -35,6 +35,11 @@ jig/
 │   │       ├── hooks/      # Hook management
 │   │       │   ├── mod.rs      # Re-exports
 │   │       │   ├── claude.rs   # Claude Code hook installation
+│   │       │   ├── git.rs      # Git hook wrapper templates
+│   │       │   ├── registry.rs # HookRegistry (.git/jig-hooks.json)
+│   │       │   ├── install.rs  # Idempotent hook installation
+│   │       │   ├── handlers.rs # post-commit/merge/pre-commit handlers
+│   │       │   ├── uninstall.rs # Hook removal and rollback
 │   │       │   └── templates/  # Shell script templates
 │   │       ├── notify/     # Notification system
 │   │       │   ├── mod.rs      # Re-exports

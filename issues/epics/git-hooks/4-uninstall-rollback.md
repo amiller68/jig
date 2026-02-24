@@ -1,6 +1,6 @@
 # Uninstall & Rollback
 
-**Status:** Planned  
+**Status:** Complete  
 **Priority:** Medium  
 **Category:** Features  
 **Epic:** issues/epics/git-hooks/index.md  
