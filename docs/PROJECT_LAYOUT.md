@@ -22,6 +22,14 @@ jig/
 │   │       ├── adapter.rs  # Agent adapters (Claude, etc.)
 │   │       ├── registry.rs # Repository registry for global mode
 │   │       ├── terminal.rs # Terminal detection
+│   │       ├── events/     # Event log system (JSONL per worker)
+│   │       │   ├── mod.rs      # Re-exports
+│   │       │   ├── schema.rs   # Event/EventType structs
+│   │       │   └── log.rs      # EventLog JSONL reader/writer
+│   │       ├── hooks/      # Hook management
+│   │       │   ├── mod.rs      # Re-exports
+│   │       │   ├── claude.rs   # Claude Code hook installation
+│   │       │   └── templates/  # Shell script templates
 │   │       └── global/     # Global state infrastructure (~/.config/jig/)
 │   │           ├── mod.rs      # Re-exports
 │   │           ├── paths.rs    # XDG path helpers

@@ -12,8 +12,10 @@ pub mod adapter;
 pub mod config;
 pub mod context;
 pub mod error;
+pub mod events;
 pub mod git;
 pub mod global;
+pub mod hooks;
 pub mod registry;
 pub mod session;
 pub mod spawn;
@@ -26,6 +28,7 @@ pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
 pub use config::{Config, JigToml, RepoConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
+pub use events::{Event, EventLog, EventType};
 pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
     WorkersState,

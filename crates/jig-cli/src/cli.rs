@@ -50,6 +50,7 @@ crate::command_enum! {
     (Version, commands::Version),
     (Which, commands::Which),
     (Health, commands::Health),
+    (Hooks, commands::Hooks),
     (Status, commands::Status),
 
     #[command(name = "shell-init")]

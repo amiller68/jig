@@ -1,6 +1,6 @@
 # Claude Code Hooks
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Category:** Features
 **Epic:** issues/epics/event-system/index.md
