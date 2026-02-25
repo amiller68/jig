@@ -22,6 +22,10 @@ pub struct Spawn {
     #[arg(long, short = 'I')]
     pub issue: Option<String>,
 
+    /// Base branch to create worktree from (overrides jig.toml default)
+    #[arg(long, short = 'b')]
+    pub base: Option<String>,
+
     /// Auto-start Claude with full prompt
     #[arg(long)]
     pub auto: bool,
@@ -58,9 +62,6 @@ impl Op for Spawn {
         let needs_create = !worktree_path.exists();
 
         if needs_create {
-            // Create worktree from current branch
-            let current_branch = git::get_current_branch()?;
-
             git::ensure_worktrees_excluded(&repo.git_common_dir)?;
 
             // Create parent directories for nested paths
@@ -68,14 +69,15 @@ impl Op for Spawn {
                 std::fs::create_dir_all(parent)?;
             }
 
-            // Create new branch from current position
-            git::create_worktree(&worktree_path, &self.name, &repo.base_branch)?;
+            // Create new branch from base
+            let base = self.base.as_deref().unwrap_or(&repo.base_branch);
+            git::create_worktree(&worktree_path, &self.name, base)?;
 
             eprintln!(
                 "{} Created worktree '{}' from '{}'",
                 "✓".green(),
                 self.name.cyan(),
-                current_branch.cyan()
+                base.cyan()
             );
         }
 

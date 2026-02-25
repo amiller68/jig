@@ -37,9 +37,18 @@ _jig() {
         command jig issues --ids 2>/dev/null
     }
 
+    # Get branch names for completion
+    __jig_branches() {
+        git branch -a --format='%(refname:short)' 2>/dev/null
+    }
+
     case "$prev" in
         --issue|-I)
             COMPREPLY=($(compgen -W "$(_jig_issues)" -- "$cur"))
+            return
+            ;;
+        --base|-b)
+            COMPREPLY=($(compgen -W "$(__jig_branches)" -- "$cur"))
             return
             ;;
         jig)
@@ -62,13 +71,13 @@ _jig() {
 
     if [[ "$cur" == -* ]]; then
         case "${COMP_WORDS[1]}" in
-            create|c) COMPREPLY=($(compgen -W "-o --no-hooks" -- "$cur")) ;;
+            create|c) COMPREPLY=($(compgen -W "-o -b --base --no-hooks" -- "$cur")) ;;
             list|ls) COMPREPLY=($(compgen -W "--all" -- "$cur")) ;;
             open|o) COMPREPLY=($(compgen -W "--all" -- "$cur")) ;;
             remove|rm) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             exit) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             init) COMPREPLY=($(compgen -W "-f --force --backup --audit" -- "$cur")) ;;
-            spawn) COMPREPLY=($(compgen -W "-c --context -I --issue --auto" -- "$cur")) ;;
+            spawn) COMPREPLY=($(compgen -W "-c --context -b --base -I --issue --auto" -- "$cur")) ;;
             review) COMPREPLY=($(compgen -W "--full" -- "$cur")) ;;
             shell-setup) COMPREPLY=($(compgen -W "--dry-run" -- "$cur")) ;;
             *) COMPREPLY=($(compgen -W "-o --no-hooks -h --help" -- "$cur")) ;;
@@ -132,6 +141,12 @@ _jig() {
         _describe 'issue' ids
     }
 
+    _jig_branches() {
+        local -a branches
+        branches=(${(f)"$(git branch -a --format='%(refname:short)' 2>/dev/null)"})
+        _describe 'branch' branches
+    }
+
     _arguments -C \
         '-o[Open after creating]' \
         '--no-hooks[Skip hooks]' \
@@ -157,6 +172,8 @@ _jig() {
                     ;;
                 create|c)
                     _arguments \
+                        '-b[Base branch]:branch:_jig_branches' \
+                        '--base=[Base branch]:branch:_jig_branches' \
                         '1:name:' \
                         '2:branch:'
                     ;;
@@ -172,6 +189,8 @@ _jig() {
                     _arguments \
                         '-c[Context]:context:' \
                         '--context=[Context]:context:' \
+                        '-b[Base branch]:branch:_jig_branches' \
+                        '--base=[Base branch]:branch:_jig_branches' \
                         '-I[Issue]:issue:_jig_issues' \
                         '--issue=[Issue]:issue:_jig_issues' \
                         '--auto[Auto-start]' \
@@ -218,6 +237,10 @@ end
 
 function __jig_issues
     command jig issues --ids 2>/dev/null
+end
+
+function __jig_branches
+    git branch -a --format='%(refname:short)' 2>/dev/null
 end
 
 function __jig_needs_command
@@ -269,9 +292,11 @@ complete -c jig -n '__jig_using_command init' -l force -s f -d 'Force'
 complete -c jig -n '__jig_using_command init' -l backup -d 'Backup'
 complete -c jig -n '__jig_using_command spawn' -l context -s c -d 'Context'
 complete -c jig -n '__jig_using_command spawn' -l issue -s I -a '(__jig_issues)' -d 'Issue'
+complete -c jig -n '__jig_using_command spawn' -l base -s b -a '(__jig_branches)' -d 'Base branch'
 complete -c jig -n '__jig_using_command spawn' -l auto -d 'Auto-start'
 complete -c jig -n '__jig_using_command shell-init' -a 'bash zsh fish' -d 'Shell'
 complete -c jig -n '__jig_using_command shell-setup' -l dry-run -d 'Dry run'
+complete -c jig -n '__jig_using_command create' -l base -s b -a '(__jig_branches)' -d 'Base branch'
 complete -c jig -n '__jig_using_command config' -a 'base on-create show' -d 'Config cmd'
 "#;
 

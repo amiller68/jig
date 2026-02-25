@@ -21,6 +21,10 @@ pub struct Create {
     #[arg(short = 'o')]
     pub open: bool,
 
+    /// Base branch to create worktree from (overrides jig.toml default)
+    #[arg(long, short = 'b')]
+    pub base: Option<String>,
+
     /// Skip on-create hook execution
     #[arg(long = "no-hooks")]
     pub no_hooks: bool,
@@ -77,7 +81,8 @@ impl Op for Create {
         }
 
         // Create the worktree
-        git::create_worktree(&worktree_path, branch, &repo.base_branch)?;
+        let base = self.base.as_deref().unwrap_or(&repo.base_branch);
+        git::create_worktree(&worktree_path, branch, base)?;
 
         eprintln!(
             "{} Created worktree '{}' on branch '{}'",
