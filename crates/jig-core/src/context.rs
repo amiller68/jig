@@ -48,6 +48,12 @@ impl RepoContext {
         })
     }
 
+    /// Resolve the effective base branch for an arbitrary repo path.
+    /// Useful for daemon code that needs to resolve base branches without a full RepoContext.
+    pub fn resolve_base_branch_for(repo_root: &std::path::Path) -> Result<String> {
+        Self::resolve_base_branch(repo_root)
+    }
+
     /// Resolve the effective base branch.
     /// Priority: jig.toml > repo-specific config > global default > hardcoded fallback.
     fn resolve_base_branch(repo_root: &std::path::Path) -> Result<String> {

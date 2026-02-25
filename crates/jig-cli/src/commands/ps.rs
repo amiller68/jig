@@ -5,7 +5,7 @@ use std::fmt;
 use clap::Args;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
-use jig_core::daemon::{self, DaemonConfig, TickResult};
+use jig_core::daemon::{Daemon, DaemonConfig, TickResult};
 use jig_core::events::{EventLog, WorkerState};
 use jig_core::global::GlobalConfig;
 use jig_core::notify::Notifier;
@@ -97,7 +97,8 @@ fn run_watch(repo: &jig_core::RepoContext, interval: u64) {
 
         // Run daemon tick (nudge, notify, dispatch)
         let tick_result = if let Some(ref notifier) = notifier {
-            daemon::tick(&config, &tmux, &engine, notifier, &daemon_config).ok()
+            let d = Daemon::new(&config, &tmux, &engine, notifier, &daemon_config);
+            d.tick().ok()
         } else {
             None
         };
