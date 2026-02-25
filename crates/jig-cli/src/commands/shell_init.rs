@@ -32,7 +32,16 @@ _jig() {
         command jig list 2>/dev/null
     }
 
+    # Get issue IDs for completion
+    _jig_issues() {
+        command jig issues --ids 2>/dev/null
+    }
+
     case "$prev" in
+        --issue|-I)
+            COMPREPLY=($(compgen -W "$(_jig_issues)" -- "$cur"))
+            return
+            ;;
         jig)
             COMPREPLY=($(compgen -W "$commands" -- "$cur"))
             return
@@ -59,7 +68,7 @@ _jig() {
             remove|rm) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             exit) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             init) COMPREPLY=($(compgen -W "-f --force --backup --audit" -- "$cur")) ;;
-            spawn) COMPREPLY=($(compgen -W "-c --context --auto" -- "$cur")) ;;
+            spawn) COMPREPLY=($(compgen -W "-c --context -I --issue --auto" -- "$cur")) ;;
             review) COMPREPLY=($(compgen -W "--full" -- "$cur")) ;;
             shell-setup) COMPREPLY=($(compgen -W "--dry-run" -- "$cur")) ;;
             *) COMPREPLY=($(compgen -W "-o --no-hooks -h --help" -- "$cur")) ;;
@@ -117,6 +126,12 @@ _jig() {
         _describe 'worktree' wts
     }
 
+    _jig_issues() {
+        local -a ids
+        ids=(${(f)"$(command jig issues --ids 2>/dev/null)"})
+        _describe 'issue' ids
+    }
+
     _arguments -C \
         '-o[Open after creating]' \
         '--no-hooks[Skip hooks]' \
@@ -157,6 +172,8 @@ _jig() {
                     _arguments \
                         '-c[Context]:context:' \
                         '--context=[Context]:context:' \
+                        '-I[Issue]:issue:_jig_issues' \
+                        '--issue=[Issue]:issue:_jig_issues' \
                         '--auto[Auto-start]' \
                         '1:name:'
                     ;;
@@ -197,6 +214,10 @@ end
 # Completions
 function __jig_worktrees
     command jig list 2>/dev/null
+end
+
+function __jig_issues
+    command jig issues --ids 2>/dev/null
 end
 
 function __jig_needs_command
@@ -247,6 +268,7 @@ complete -c jig -n '__jig_using_command remove' -l force -s f -d 'Force'
 complete -c jig -n '__jig_using_command init' -l force -s f -d 'Force'
 complete -c jig -n '__jig_using_command init' -l backup -d 'Backup'
 complete -c jig -n '__jig_using_command spawn' -l context -s c -d 'Context'
+complete -c jig -n '__jig_using_command spawn' -l issue -s I -a '(__jig_issues)' -d 'Issue'
 complete -c jig -n '__jig_using_command spawn' -l auto -d 'Auto-start'
 complete -c jig -n '__jig_using_command shell-init' -a 'bash zsh fish' -d 'Shell'
 complete -c jig -n '__jig_using_command shell-setup' -l dry-run -d 'Dry run'

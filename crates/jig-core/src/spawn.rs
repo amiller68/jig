@@ -42,10 +42,17 @@ pub struct TaskInfo {
     pub branch: String,
     pub commits_ahead: usize,
     pub is_dirty: bool,
+    pub issue_ref: Option<String>,
 }
 
 /// Register a new spawn (creates worker state)
-pub fn register(repo: &RepoContext, name: &str, branch: &str, context: Option<&str>) -> Result<()> {
+pub fn register(
+    repo: &RepoContext,
+    name: &str,
+    branch: &str,
+    context: Option<&str>,
+    issue_ref: Option<&str>,
+) -> Result<()> {
     let worktree_path = repo.worktrees_dir.join(name);
 
     let config = RepoConfig {
@@ -65,7 +72,13 @@ pub fn register(repo: &RepoContext, name: &str, branch: &str, context: Option<&s
 
     // Set task context if provided
     if let Some(ctx) = context {
-        worker.set_task(TaskContext::new(ctx.to_string()));
+        let mut task = TaskContext::new(ctx.to_string());
+        if let Some(issue) = issue_ref {
+            task = task.with_issue(issue.to_string());
+        }
+        worker.set_task(task);
+    } else if let Some(issue) = issue_ref {
+        worker.set_task(TaskContext::new(String::new()).with_issue(issue.to_string()));
     }
 
     worker.tmux_window = Some(name.to_string());
@@ -82,9 +95,12 @@ pub fn register(repo: &RepoContext, name: &str, branch: &str, context: Option<&s
 
     if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
         let _ = event_log.reset();
-        let event = Event::new(EventType::Spawn)
+        let mut event = Event::new(EventType::Spawn)
             .with_field("branch", branch)
             .with_field("repo", repo_name.as_str());
+        if let Some(issue) = issue_ref {
+            event = event.with_field("issue", issue);
+        }
         let _ = event_log.append(&event);
     }
 
@@ -139,12 +155,15 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
                 (0, false)
             };
 
+            let issue_ref = worker.task.as_ref().and_then(|t| t.issue_ref.clone());
+
             tasks.push(TaskInfo {
                 name: worker.name.clone(),
                 status,
                 branch: worker.branch.clone(),
                 commits_ahead,
                 is_dirty,
+                issue_ref,
             });
         }
     } else {
@@ -171,6 +190,7 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
                 branch,
                 commits_ahead,
                 is_dirty,
+                issue_ref: None,
             });
         }
     }

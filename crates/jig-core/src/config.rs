@@ -250,6 +250,36 @@ pub struct JigToml {
     pub spawn: SpawnConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+    #[serde(default)]
+    pub issues: IssuesConfig,
+}
+
+/// Issue tracking configuration in jig.toml
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssuesConfig {
+    /// Provider type (currently only "file").
+    #[serde(default = "default_issues_provider")]
+    pub provider: String,
+    /// Directory containing issue files (relative to repo root).
+    #[serde(default = "default_issues_directory")]
+    pub directory: String,
+}
+
+fn default_issues_provider() -> String {
+    "file".to_string()
+}
+
+fn default_issues_directory() -> String {
+    "issues".to_string()
+}
+
+impl Default for IssuesConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_issues_provider(),
+            directory: default_issues_directory(),
+        }
+    }
 }
 
 /// Worktree configuration in jig.toml

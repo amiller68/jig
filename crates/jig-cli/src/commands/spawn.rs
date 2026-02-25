@@ -3,6 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
+use jig_core::issues::{FileProvider, IssueProvider};
 use jig_core::{git, spawn, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, OpContext};
@@ -16,6 +17,10 @@ pub struct Spawn {
     /// Task context/description
     #[arg(long, short)]
     pub context: Option<String>,
+
+    /// Issue ID to work on (e.g. "features/smart-context-injection")
+    #[arg(long, short = 'I')]
+    pub issue: Option<String>,
 
     /// Auto-start Claude with full prompt
     #[arg(long)]
@@ -74,19 +79,39 @@ impl Op for Spawn {
             );
         }
 
-        // Determine if auto mode should be used
-        let use_auto = if self.auto {
-            true
+        // Resolve issue if provided
+        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+        let issue_ref = self.issue.as_deref();
+        let issue_context = if let Some(id) = issue_ref {
+            let issues_dir = repo.repo_root.join(&jig_toml.issues.directory);
+            let provider = FileProvider::new(&issues_dir);
+            let issue = provider
+                .get(id)?
+                .ok_or_else(|| Error::Custom(format!("issue not found: {}", id)))?;
+            Some(issue.body)
         } else {
-            // Check jig.toml for spawn.auto setting
-            JigToml::load(&repo.repo_root)?
-                .map(|c| c.spawn.auto)
-                .unwrap_or(false)
+            None
         };
+
+        // Build effective context: --context takes precedence, issue body as fallback
+        let effective_context = match (&self.context, &issue_context) {
+            (Some(ctx), _) => Some(ctx.clone()),
+            (None, Some(body)) => Some(body.clone()),
+            (None, None) => None,
+        };
+
+        // Determine if auto mode should be used
+        let use_auto = if self.auto { true } else { jig_toml.spawn.auto };
 
         // Register in spawn state
         let branch = git::get_worktree_branch(&worktree_path)?;
-        spawn::register(repo, &self.name, &branch, self.context.as_deref())?;
+        spawn::register(
+            repo,
+            &self.name,
+            &branch,
+            effective_context.as_deref(),
+            issue_ref,
+        )?;
 
         // Launch in tmux
         spawn::launch_tmux_window(
@@ -94,7 +119,7 @@ impl Op for Spawn {
             &self.name,
             &worktree_path,
             use_auto,
-            self.context.as_deref(),
+            effective_context.as_deref(),
         )?;
 
         eprintln!(

@@ -269,7 +269,7 @@ fn process_worker(
             repo: repo_name.to_string(),
             branch: worker_name.to_string(),
             status: new_state.status.as_str().to_string(),
-            issue: None,
+            issue: new_state.issue_ref.clone(),
             pr_url: new_state.pr_url.clone(),
             started_at: new_state.started_at.unwrap_or(0),
             last_event_at: new_state.last_event_at.unwrap_or(0),
@@ -427,6 +427,7 @@ fn entry_to_worker_state(entry: &WorkerEntry) -> WorkerState {
         last_commit_at: None,
         pr_url: entry.pr_url.clone(),
         nudge_counts: entry.nudge_counts.clone(),
+        issue_ref: entry.issue.clone(),
         started_at: Some(entry.started_at),
         last_event_at: Some(entry.last_event_at),
     }
@@ -474,7 +475,7 @@ mod tests {
             repo: "test".to_string(),
             branch: "main".to_string(),
             status: "running".to_string(),
-            issue: None,
+            issue: Some("features/my-task".to_string()),
             pr_url: Some("https://github.com/pr/1".to_string()),
             started_at: 1000,
             last_event_at: 2000,
@@ -483,6 +484,7 @@ mod tests {
         let state = entry_to_worker_state(&entry);
         assert_eq!(state.status, crate::worker::WorkerStatus::Running);
         assert_eq!(state.pr_url.as_deref(), Some("https://github.com/pr/1"));
+        assert_eq!(state.issue_ref.as_deref(), Some("features/my-task"));
     }
 
     #[test]

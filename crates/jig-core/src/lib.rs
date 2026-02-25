@@ -19,6 +19,7 @@ pub mod git;
 pub mod github;
 pub mod global;
 pub mod hooks;
+pub mod issues;
 pub mod notify;
 pub mod nudge;
 pub mod registry;
@@ -41,6 +42,7 @@ pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
     WorkersState,
 };
+pub use issues::{FileProvider, Issue, IssueFilter, IssuePriority, IssueProvider, IssueStatus};
 pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;
 pub use state::OrchestratorState;

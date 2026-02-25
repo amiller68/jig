@@ -1,0 +1,186 @@
+//! Core issue types.
+
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+/// Issue status values matching the convention in `issues/README.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IssueStatus {
+    Planned,
+    InProgress,
+    Complete,
+    Blocked,
+}
+
+impl IssueStatus {
+    pub fn from_str_loose(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "planned" => Some(Self::Planned),
+            "in progress" | "in_progress" | "inprogress" => Some(Self::InProgress),
+            "complete" | "done" => Some(Self::Complete),
+            "blocked" => Some(Self::Blocked),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Planned => "Planned",
+            Self::InProgress => "In Progress",
+            Self::Complete => "Complete",
+            Self::Blocked => "Blocked",
+        }
+    }
+
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            Self::Planned => "[ ]",
+            Self::InProgress => "[~]",
+            Self::Complete => "[x]",
+            Self::Blocked => "[!]",
+        }
+    }
+}
+
+impl fmt::Display for IssueStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Issue priority levels.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum IssuePriority {
+    Urgent,
+    High,
+    Medium,
+    Low,
+}
+
+impl IssuePriority {
+    pub fn from_str_loose(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "urgent" => Some(Self::Urgent),
+            "high" => Some(Self::High),
+            "medium" | "med" => Some(Self::Medium),
+            "low" => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Urgent => "Urgent",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+}
+
+impl fmt::Display for IssuePriority {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A parsed issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Issue {
+    /// Relative path without `.md`, e.g. "features/smart-context-injection".
+    pub id: String,
+    /// Title from first `# Heading`.
+    pub title: String,
+    pub status: IssueStatus,
+    pub priority: Option<IssuePriority>,
+    /// Category inferred from parent directory or `**Category:**` field.
+    pub category: Option<String>,
+    /// Paths listed in `**Depends-On:**`.
+    pub depends_on: Vec<String>,
+    /// Full markdown body.
+    pub body: String,
+    /// Source file path.
+    pub source: String,
+    /// Child ticket IDs (for epic indices with a `## Tickets` table).
+    pub children: Vec<String>,
+}
+
+/// Filter criteria for listing issues.
+#[derive(Debug, Default)]
+pub struct IssueFilter {
+    pub status: Option<IssueStatus>,
+    pub priority: Option<IssuePriority>,
+    pub category: Option<String>,
+}
+
+impl Issue {
+    /// Whether this issue matches the given filter.
+    pub fn matches(&self, filter: &IssueFilter) -> bool {
+        if let Some(ref status) = filter.status {
+            if &self.status != status {
+                return false;
+            }
+        }
+        if let Some(ref priority) = filter.priority {
+            if self.priority.as_ref() != Some(priority) {
+                return false;
+            }
+        }
+        if let Some(ref category) = filter.category {
+            if self.category.as_deref() != Some(category.as_str()) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_roundtrip() {
+        for status in [
+            IssueStatus::Planned,
+            IssueStatus::InProgress,
+            IssueStatus::Complete,
+            IssueStatus::Blocked,
+        ] {
+            assert_eq!(IssueStatus::from_str_loose(status.as_str()), Some(status));
+        }
+    }
+
+    #[test]
+    fn priority_ordering() {
+        assert!(IssuePriority::Urgent < IssuePriority::High);
+        assert!(IssuePriority::High < IssuePriority::Medium);
+        assert!(IssuePriority::Medium < IssuePriority::Low);
+    }
+
+    #[test]
+    fn filter_matches() {
+        let issue = Issue {
+            id: "test".into(),
+            title: "Test".into(),
+            status: IssueStatus::Planned,
+            priority: Some(IssuePriority::High),
+            category: Some("features".into()),
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+        };
+
+        assert!(issue.matches(&IssueFilter::default()));
+        assert!(issue.matches(&IssueFilter {
+            status: Some(IssueStatus::Planned),
+            ..Default::default()
+        }));
+        assert!(!issue.matches(&IssueFilter {
+            status: Some(IssueStatus::Blocked),
+            ..Default::default()
+        }));
+    }
+}

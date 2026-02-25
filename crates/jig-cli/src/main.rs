@@ -74,7 +74,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn is_global_compatible(command: &Command) -> bool {
     matches!(
         command,
-        Command::List(_) | Command::Ps(_) | Command::Status(_)
+        Command::List(_) | Command::Ps(_) | Command::Status(_) | Command::Issues(_)
     )
 }
 
@@ -152,6 +152,9 @@ fn print_help() {
         "  {}        Nuke all workers and state (keeps config)",
         "nuke".cyan()
     );
+    eprintln!();
+    eprintln!("{}", "ISSUES:".bold());
+    eprintln!("  {}      Browse and filter issues", "issues".cyan());
     eprintln!();
     eprintln!("{}", "REPOSITORY TRACKING:".bold());
     eprintln!("  {}       List tracked repositories", "repos".cyan());

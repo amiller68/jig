@@ -41,6 +41,11 @@ jig/
 │   │       │   ├── handlers.rs # post-commit/merge/pre-commit handlers
 │   │       │   ├── uninstall.rs # Hook removal and rollback
 │   │       │   └── templates/  # Shell script templates
+│   │       ├── issues/     # Issue provider system
+│   │       │   ├── mod.rs          # Re-exports
+│   │       │   ├── types.rs        # Issue, IssueFilter, IssueStatus, IssuePriority
+│   │       │   ├── provider.rs     # IssueProvider trait
+│   │       │   └── file_provider.rs # FileProvider (reads issues/ markdown)
 │   │       ├── daemon.rs   # Daemon loop (tick, discover, execute)
 │   │       ├── nudge.rs    # Nudge system (classify, build, execute)
 │   │       ├── tmux.rs     # Type-safe tmux client (TmuxClient, TmuxTarget)

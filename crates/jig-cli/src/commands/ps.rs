@@ -37,6 +37,7 @@ struct EnrichedTask {
     worker_status: Option<WorkerStatus>,
     nudge_count: u32,
     pr_url: Option<String>,
+    issue_ref: Option<String>,
 }
 
 #[derive(Debug)]
@@ -161,18 +162,21 @@ fn enrich_tasks(tasks: &[TaskInfo], repo_name: &str, config: &GlobalConfig) -> V
     tasks
         .iter()
         .map(|task| {
-            let (worker_status, nudge_count, pr_url) =
+            let (worker_status, nudge_count, pr_url, issue_ref) =
                 match EventLog::for_worker(repo_name, &task.name) {
                     Ok(log) => match log.read_all() {
                         Ok(events) if !events.is_empty() => {
                             let state = WorkerState::reduce(&events, &config.health);
                             let nudges: u32 = state.nudge_counts.values().sum();
-                            (Some(state.status), nudges, state.pr_url)
+                            (Some(state.status), nudges, state.pr_url, state.issue_ref)
                         }
-                        _ => (None, 0, None),
+                        _ => (None, 0, None, None),
                     },
-                    Err(_) => (None, 0, None),
+                    Err(_) => (None, 0, None, None),
                 };
+
+            // Prefer event-derived issue_ref, fall back to TaskInfo
+            let issue_ref = issue_ref.or_else(|| task.issue_ref.clone());
 
             EnrichedTask {
                 info: TaskInfo {
@@ -181,10 +185,12 @@ fn enrich_tasks(tasks: &[TaskInfo], repo_name: &str, config: &GlobalConfig) -> V
                     branch: task.branch.clone(),
                     commits_ahead: task.commits_ahead,
                     is_dirty: task.is_dirty,
+                    issue_ref: task.issue_ref.clone(),
                 },
                 worker_status,
                 nudge_count,
                 pr_url,
+                issue_ref,
             }
         })
         .collect()
@@ -200,6 +206,7 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
             Cell::new("NAME").add_attribute(Attribute::Bold),
             Cell::new("TMUX").add_attribute(Attribute::Bold),
             Cell::new("STATE").add_attribute(Attribute::Bold),
+            Cell::new("ISSUE").add_attribute(Attribute::Bold),
             Cell::new("BRANCH").add_attribute(Attribute::Bold),
             Cell::new("COMMITS").add_attribute(Attribute::Bold),
             Cell::new("DIRTY").add_attribute(Attribute::Bold),
@@ -227,6 +234,13 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
             Some(WorkerStatus::Archived) => ("archived", Color::DarkGrey),
             None => ("-", Color::DarkGrey),
         };
+
+        // Show shortened issue ID (last path segment)
+        let issue = task
+            .issue_ref
+            .as_deref()
+            .map(|id| id.rsplit('/').next().unwrap_or(id).to_string())
+            .unwrap_or_else(|| "-".to_string());
 
         let dirty = if task.info.is_dirty { "●" } else { "-" };
 
@@ -259,6 +273,7 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
             Cell::new(&task.info.name).fg(Color::Cyan),
             Cell::new(tmux_text).fg(tmux_color),
             Cell::new(state_text).fg(state_color),
+            Cell::new(&issue).fg(Color::DarkGrey),
             Cell::new(&task.info.branch),
             Cell::new(task.info.commits_ahead).set_alignment(CellAlignment::Right),
             Cell::new(dirty).set_alignment(CellAlignment::Center),

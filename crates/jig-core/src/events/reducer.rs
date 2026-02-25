@@ -15,6 +15,7 @@ pub struct WorkerState {
     pub last_commit_at: Option<i64>,
     pub pr_url: Option<String>,
     pub nudge_counts: HashMap<String, u32>,
+    pub issue_ref: Option<String>,
     pub started_at: Option<i64>,
     pub last_event_at: Option<i64>,
 }
@@ -27,6 +28,7 @@ impl Default for WorkerState {
             last_commit_at: None,
             pr_url: None,
             nudge_counts: HashMap::new(),
+            issue_ref: None,
             started_at: None,
             last_event_at: None,
         }
@@ -84,6 +86,9 @@ impl WorkerState {
         match event.event_type {
             EventType::Spawn => {
                 self.status = WorkerStatus::Spawned;
+                if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
+                    self.issue_ref = Some(issue.to_string());
+                }
             }
             EventType::ToolUseStart | EventType::ToolUseEnd => {
                 self.status = WorkerStatus::Running;
@@ -178,6 +183,23 @@ mod tests {
         let state = WorkerState::reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::WaitingReview);
         assert_eq!(state.pr_url.as_deref(), Some("https://github.com/pr/1"));
+    }
+
+    #[test]
+    fn issue_ref_extracted() {
+        let events = vec![
+            Event::new(EventType::Spawn).with_field("issue", "features/smart-context"),
+            Event::new(EventType::ToolUseStart),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.issue_ref.as_deref(), Some("features/smart-context"));
+    }
+
+    #[test]
+    fn issue_ref_none_when_absent() {
+        let events = vec![Event::new(EventType::Spawn)];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.issue_ref, None);
     }
 
     #[test]
