@@ -196,7 +196,13 @@ impl<'a> Daemon<'a> {
             if let Some(pr_url) = &new_state.pr_url {
                 if let Some(client) = make_github_client(repo_name, registry) {
                     let monitor = PrMonitor::new(&client, self.config);
-                    monitor.check_lifecycle(worker_name, &branch_name, pr_url, &mut actions);
+                    monitor.check_lifecycle(
+                        worker_name,
+                        &branch_name,
+                        pr_url,
+                        &new_state,
+                        &mut actions,
+                    );
                 }
             }
         }
@@ -220,6 +226,18 @@ impl<'a> Daemon<'a> {
                     );
 
                     if self.tmux.has_window(&target) {
+                        let is_agent = self
+                            .tmux
+                            .pane_command(&target)
+                            .map(|cmd| cmd == "claude" || cmd == "node")
+                            .unwrap_or(false);
+                        if !is_agent {
+                            tracing::debug!(
+                                worker = key,
+                                "agent not running in pane, skipping nudge"
+                            );
+                            continue;
+                        }
                         if let Err(e) = execute_nudge(
                             &target,
                             *nudge_type,

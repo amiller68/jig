@@ -1,6 +1,7 @@
 //! PR lifecycle monitoring — checks merged/closed/open PRs and injects actions.
 
 use crate::dispatch::Action;
+use crate::events::WorkerState;
 use crate::github::GitHubClient;
 use crate::global::GlobalConfig;
 use crate::registry::RepoRegistry;
@@ -22,6 +23,7 @@ impl<'a> PrMonitor<'a> {
         worker_name: &str,
         branch_name: &str,
         pr_url: &str,
+        worker_state: &WorkerState,
         actions: &mut Vec<Action>,
     ) {
         // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
@@ -100,6 +102,19 @@ impl<'a> PrMonitor<'a> {
                                 "PR check result"
                             );
                             if let Some(nudge_type) = check.nudge {
+                                let count = worker_state
+                                    .nudge_counts
+                                    .get(nudge_type.count_key())
+                                    .copied()
+                                    .unwrap_or(0);
+                                if count >= self.config.health.max_nudges {
+                                    tracing::debug!(
+                                        nudge_type = nudge_type.count_key(),
+                                        count,
+                                        "PR nudge limit reached, skipping"
+                                    );
+                                    continue;
+                                }
                                 actions.push(Action::Nudge {
                                     worker_id: worker_name.to_string(),
                                     nudge_type,
