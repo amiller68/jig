@@ -78,6 +78,17 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
                         errors = tick.errors.len(),
                         "tick complete"
                     );
+                    // Always print summary to stderr so it's visible without RUST_LOG
+                    if !daemon_config.once {
+                        eprintln!(
+                            "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
+                            tick.workers_checked,
+                            tick.actions_dispatched,
+                            tick.nudges_sent,
+                            tick.notifications_sent,
+                            tick.errors.len(),
+                        );
+                    }
                 }
                 for err in &tick.errors {
                     tracing::warn!("worker error: {}", err);
@@ -85,6 +96,7 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
             }
             Err(e) => {
                 tracing::error!("tick failed: {}", e);
+                eprintln!("[tick] error: {}", e);
             }
         }
 
@@ -113,8 +125,7 @@ pub fn tick(
     let registry = RepoRegistry::load().unwrap_or_default();
     let worker_list = discover_workers(&registry);
 
-    // Cache GitHub client for the tick (avoids one `gh repo view` per worker)
-    let github_client = GitHubClient::from_remote().ok();
+    tracing::debug!(count = worker_list.len(), "discovered workers");
 
     for (repo_name, worker_name) in &worker_list {
         result.workers_checked += 1;
@@ -130,7 +141,7 @@ pub fn tick(
             engine,
             notifier,
             daemon_config,
-            github_client.as_ref(),
+            &registry,
         ) {
             Ok((actions, nudges, notifs)) => {
                 result.actions_dispatched += actions;
@@ -163,14 +174,50 @@ fn process_worker(
     engine: &TemplateEngine<'_>,
     notifier: &Notifier,
     daemon_config: &DaemonConfig,
-    github_client: Option<&GitHubClient>,
+    registry: &RepoRegistry,
 ) -> Result<(usize, usize, usize)> {
     // Read event log
     let event_log = EventLog::for_worker(repo_name, worker_name)?;
     let events = event_log.read_all()?;
 
     // Derive new state
-    let new_state = WorkerState::reduce(&events, &global_config.health);
+    let mut new_state = WorkerState::reduce(&events, &global_config.health);
+
+    // Extract the real branch name (with slashes) from the spawn event
+    let branch_name = events
+        .iter()
+        .find(|e| e.event_type == EventType::Spawn)
+        .and_then(|e| e.data.get("branch").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| worker_name.to_string());
+
+    // Proactively discover PR if not already known
+    if new_state.pr_url.is_none() && !new_state.status.is_terminal() {
+        if let Some(client) = make_github_client(repo_name, registry) {
+            match client.get_pr_for_branch(&branch_name) {
+                Ok(Some(pr_info)) => {
+                    let event = Event::new(EventType::PrOpened)
+                        .with_field("pr_url", pr_info.url.as_str())
+                        .with_field("pr_number", pr_info.number.to_string());
+                    if let Err(e) = event_log.append(&event) {
+                        tracing::warn!(worker = key, error = %e, "failed to emit PrOpened event");
+                    } else {
+                        tracing::info!(worker = key, pr_url = %pr_info.url, "discovered PR for branch");
+                        // Re-derive state with the new event included
+                        if let Ok(updated_events) = event_log.read_all() {
+                            new_state = WorkerState::reduce(&updated_events, &global_config.health);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    tracing::debug!(worker = key, branch = %branch_name, "no PR found for branch");
+                }
+                Err(e) => {
+                    tracing::debug!(worker = key, error = %e, "PR discovery failed");
+                }
+            }
+        }
+    }
 
     // Get old state from workers.json
     let old_state = workers_state
@@ -178,13 +225,29 @@ fn process_worker(
         .map(entry_to_worker_state)
         .unwrap_or_default();
 
+    tracing::debug!(
+        worker = key,
+        old_status = old_state.status.as_str(),
+        new_status = new_state.status.as_str(),
+        "worker state"
+    );
+
     // Dispatch actions based on state transition
     let mut actions = dispatch_actions(worker_name, &old_state, &new_state, global_config);
 
     // Check PR lifecycle if worker has a PR URL and isn't already terminal
     if !new_state.status.is_terminal() {
-        if let (Some(pr_url), Some(client)) = (&new_state.pr_url, github_client) {
-            check_pr_lifecycle(worker_name, pr_url, client, global_config, &mut actions);
+        if let Some(pr_url) = &new_state.pr_url {
+            if let Some(client) = make_github_client(repo_name, registry) {
+                check_pr_lifecycle(
+                    worker_name,
+                    &branch_name,
+                    pr_url,
+                    &client,
+                    global_config,
+                    &mut actions,
+                );
+            }
         }
     }
 
@@ -196,12 +259,14 @@ fn process_worker(
     for action in &actions {
         match action {
             Action::Nudge {
-                worker_id,
+                worker_id: _,
                 nudge_type,
             } => {
+                // Use branch_name (with slashes) for tmux window lookup,
+                // since spawn creates windows with the real branch name
                 let target = TmuxTarget::new(
                     format!("{}{}", daemon_config.session_prefix, repo_name),
-                    worker_id.to_string(),
+                    branch_name.clone(),
                 );
 
                 if tmux.has_window(&target) {
@@ -216,11 +281,25 @@ fn process_worker(
                     ) {
                         tracing::warn!("nudge failed for {}: {}", key, e);
                     } else {
+                        tracing::info!(
+                            worker = key,
+                            nudge_type = nudge_type.count_key(),
+                            "nudge delivered"
+                        );
                         nudge_count += 1;
                     }
+                } else {
+                    tracing::debug!(
+                        worker = key,
+                        nudge_type = nudge_type.count_key(),
+                        session = %target.session,
+                        window = %target.window,
+                        "tmux window not found, skipping nudge"
+                    );
                 }
             }
             Action::Notify { worker_id, message } => {
+                tracing::info!(worker = key, message = %message, "notification sent");
                 let event = NotificationEvent::NeedsIntervention {
                     repo: repo_name.to_string(),
                     worker: worker_id.clone(),
@@ -241,7 +320,7 @@ fn process_worker(
             Action::Cleanup { worker_id } => {
                 let target = TmuxTarget::new(
                     format!("{}{}", daemon_config.session_prefix, repo_name),
-                    worker_id.to_string(),
+                    branch_name.clone(),
                 );
 
                 // Kill tmux window if it exists
@@ -280,9 +359,31 @@ fn process_worker(
     Ok((action_count, nudge_count, notif_count))
 }
 
+/// Create a GitHub client for a repo by looking up its path in the registry.
+fn make_github_client(repo_name: &str, registry: &RepoRegistry) -> Option<GitHubClient> {
+    registry
+        .repos()
+        .iter()
+        .find(|e| {
+            e.path
+                .file_name()
+                .map(|n| n.to_string_lossy() == repo_name)
+                .unwrap_or(false)
+        })
+        .and_then(|entry| {
+            GitHubClient::from_repo_path(&entry.path)
+                .map_err(|e| {
+                    tracing::debug!(repo = repo_name, error = %e, "GitHub client failed");
+                    e
+                })
+                .ok()
+        })
+}
+
 /// Check PR lifecycle and inject cleanup/notify actions for merged/closed PRs.
 fn check_pr_lifecycle(
     worker_name: &str,
+    branch_name: &str,
     pr_url: &str,
     client: &GitHubClient,
     config: &GlobalConfig,
@@ -305,6 +406,13 @@ fn check_pr_lifecycle(
             return;
         }
     };
+
+    tracing::info!(
+        worker = worker_name,
+        pr_number = pr_number,
+        pr_state = ?pr_state,
+        "PR lifecycle check"
+    );
 
     match pr_state {
         crate::github::PrState::Merged => {
@@ -330,13 +438,40 @@ fn check_pr_lifecycle(
             }
         }
         crate::github::PrState::Open => {
-            // Also run commit validation and other PR checks while we have the client
-            if let Ok(check) = crate::github::check_commits(client, pr_number) {
-                if let Some(nudge_type) = check.nudge {
-                    actions.push(Action::Nudge {
-                        worker_id: worker_name.to_string(),
-                        nudge_type,
-                    });
+            // Run all PR checks: CI, conflicts, reviews, commits
+            let checks: Vec<(&str, std::result::Result<crate::github::PrCheck, _>)> = vec![
+                ("ci", crate::github::check_ci(client, branch_name)),
+                (
+                    "conflicts",
+                    crate::github::check_conflicts(client, pr_number),
+                ),
+                ("reviews", crate::github::check_reviews(client, pr_number)),
+                ("commits", crate::github::check_commits(client, pr_number)),
+            ];
+
+            for (check_type, result) in checks {
+                match result {
+                    Ok(check) => {
+                        tracing::debug!(
+                            check_type = check_type,
+                            has_nudge = check.nudge.is_some(),
+                            details = ?check.details,
+                            "PR check result"
+                        );
+                        if let Some(nudge_type) = check.nudge {
+                            actions.push(Action::Nudge {
+                                worker_id: worker_name.to_string(),
+                                nudge_type,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            check_type = check_type,
+                            error = %e,
+                            "PR check failed"
+                        );
+                    }
                 }
             }
         }

@@ -32,6 +32,7 @@ impl NotificationQueue {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+        tracing::debug!(event_type = event.type_name(), "queuing notification");
         let notification = Notification {
             ts: chrono::Utc::now().timestamp(),
             id: uuid::Uuid::new_v4().to_string(),

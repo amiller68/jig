@@ -1,5 +1,6 @@
 //! GitHub client wrapping `gh` CLI.
 
+use std::path::Path;
 use std::process::Command;
 
 use crate::error::{Error, Result};
@@ -44,6 +45,44 @@ impl GitHubClient {
         if repo.is_empty() {
             return Err(Error::Custom("Could not determine repository name".into()));
         }
+
+        Ok(Self { repo })
+    }
+
+    /// Detect the repository from a specific repo path (runs `gh` in that directory).
+    pub fn from_repo_path(repo_path: &Path) -> Result<Self> {
+        let output = Command::new("gh")
+            .args([
+                "repo",
+                "view",
+                "--json",
+                "nameWithOwner",
+                "-q",
+                ".nameWithOwner",
+            ])
+            .current_dir(repo_path)
+            .output()?;
+
+        if !output.status.success() {
+            return Err(Error::Custom(format!(
+                "Failed to detect GitHub repository at {}. Is `gh` authenticated?",
+                repo_path.display()
+            )));
+        }
+
+        let repo = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if repo.is_empty() {
+            return Err(Error::Custom(format!(
+                "Could not determine repository name at {}",
+                repo_path.display()
+            )));
+        }
+
+        tracing::debug!(
+            repo_path = %repo_path.display(),
+            owner_repo = %repo,
+            "created GitHub client from repo path"
+        );
 
         Ok(Self { repo })
     }

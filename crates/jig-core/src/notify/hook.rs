@@ -35,6 +35,8 @@ impl Notifier {
         if let Some(exec) = &self.config.exec {
             if let Err(e) = self.exec_hook(exec, &json) {
                 tracing::warn!("notification hook failed: {}", e);
+            } else {
+                tracing::debug!(event_type = event.type_name(), "notification hook executed");
             }
         }
 

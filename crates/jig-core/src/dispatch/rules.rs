@@ -15,33 +15,42 @@ pub fn dispatch_actions(
     config: &GlobalConfig,
 ) -> Vec<Action> {
     let mut actions = vec![];
+    let is_transition = old_state.status != new_state.status;
 
-    // State changed to something nudgeable
-    if old_state.status != new_state.status {
-        if let Some(nudge_type) = classify_nudge(new_state, config) {
-            actions.push(Action::Nudge {
-                worker_id: worker_id.to_string(),
-                nudge_type,
-            });
-        } else if matches!(
+    // Nudge whenever classify_nudge says so — the nudge event increments the
+    // count each tick, so classify_nudge naturally stops at max_nudges.
+    if let Some(nudge_type) = classify_nudge(new_state, config) {
+        actions.push(Action::Nudge {
+            worker_id: worker_id.to_string(),
+            nudge_type,
+        });
+    } else if is_transition
+        && matches!(
             new_state.status,
             WorkerStatus::WaitingInput | WorkerStatus::Stalled | WorkerStatus::Idle
-        ) {
-            // Max nudges reached, escalate
-            actions.push(Action::Notify {
-                worker_id: worker_id.to_string(),
-                message: format!(
-                    "Max nudges reached for {} worker, needs human attention",
-                    match new_state.status {
-                        WorkerStatus::WaitingInput => "stuck",
-                        WorkerStatus::Stalled => "stalled",
-                        WorkerStatus::Idle => "idle",
-                        _ => "unknown",
-                    }
-                ),
-            });
-        }
+        )
+    {
+        // Max nudges reached on state transition — escalate once
+        actions.push(Action::Notify {
+            worker_id: worker_id.to_string(),
+            message: format!(
+                "Max nudges reached for {} worker, needs human attention",
+                match new_state.status {
+                    WorkerStatus::WaitingInput => "stuck",
+                    WorkerStatus::Stalled => "stalled",
+                    WorkerStatus::Idle => "idle",
+                    _ => "unknown",
+                }
+            ),
+        });
     }
+
+    tracing::debug!(
+        worker = worker_id,
+        transition = is_transition,
+        action_count = actions.len(),
+        "dispatch_actions"
+    );
 
     // PR opened
     if old_state.pr_url.is_none() && new_state.pr_url.is_some() {
@@ -162,14 +171,21 @@ mod tests {
     }
 
     #[test]
-    fn same_status_no_retrigger() {
+    fn same_status_still_nudges() {
         let state = WorkerState {
             status: WorkerStatus::WaitingInput,
             ..Default::default()
         };
 
         let actions = dispatch_actions("test", &state, &state, &default_config());
-        assert!(actions.is_empty());
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            &actions[0],
+            Action::Nudge {
+                nudge_type: NudgeType::Stuck,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -60,6 +60,9 @@ impl Op for Ps {
         }
 
         let tasks = spawn::list_tasks(repo)?;
+        if tasks.is_empty() {
+            eprintln!("No spawned sessions");
+        }
         Ok(PsOutput { tasks })
     }
 }
@@ -290,7 +293,7 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
 impl fmt::Display for PsOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.tasks.is_empty() {
-            return write!(f, "No spawned sessions");
+            return Ok(());
         }
 
         let mut table = Table::new();

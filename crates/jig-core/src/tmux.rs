@@ -196,8 +196,11 @@ impl TmuxClient {
     // ── Nudge operations ──
 
     /// Send a nudge message to a worker: literal text + Enter.
+    /// Collapses newlines to spaces so the message is sent as a single input
+    /// (multiline literal text causes premature submission in some TUIs).
     pub fn send_message(&self, target: &TmuxTarget, message: &str) -> Result<()> {
-        self.send_keys_literal(target, message)?;
+        let single_line = collapse_to_single_line(message);
+        self.send_keys_literal(target, &single_line)?;
         std::thread::sleep(std::time::Duration::from_millis(100));
         self.send_keys(target, &["Enter"])?;
         Ok(())
@@ -249,6 +252,16 @@ impl TmuxClient {
     }
 }
 
+/// Collapse a multiline message into a single line for tmux input.
+fn collapse_to_single_line(message: &str) -> String {
+    message
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 impl Default for TmuxClient {
     fn default() -> Self {
         Self::new()
@@ -292,5 +305,27 @@ mod tests {
         let client = TmuxClient::new();
         let target = TmuxTarget::new("jig-nonexistent-test-session-xyz", "window");
         assert!(client.pane_command(&target).is_none());
+    }
+
+    #[test]
+    fn collapse_multiline_message() {
+        let msg = "STATUS CHECK: You've been idle (nudge 1/3).\n\nYou have uncommitted changes but no PR yet.\nWhat's blocking you?\n";
+        let result = collapse_to_single_line(msg);
+        assert_eq!(
+            result,
+            "STATUS CHECK: You've been idle (nudge 1/3). You have uncommitted changes but no PR yet. What's blocking you?"
+        );
+    }
+
+    #[test]
+    fn collapse_single_line_unchanged() {
+        let msg = "simple message";
+        assert_eq!(collapse_to_single_line(msg), "simple message");
+    }
+
+    #[test]
+    fn collapse_strips_blank_lines_and_whitespace() {
+        let msg = "  line one  \n\n\n  line two  \n";
+        assert_eq!(collapse_to_single_line(msg), "line one line two");
     }
 }

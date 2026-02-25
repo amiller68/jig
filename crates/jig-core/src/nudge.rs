@@ -74,8 +74,23 @@ pub fn classify_nudge(state: &WorkerState, config: &GlobalConfig) -> Option<Nudg
         .unwrap_or(0);
 
     if count >= config.health.max_nudges {
+        tracing::debug!(
+            status = state.status.as_str(),
+            nudge_type = nudge_type.count_key(),
+            count = count,
+            max = config.health.max_nudges,
+            "max nudges reached, skipping"
+        );
         return None; // Escalate via notification instead
     }
+
+    tracing::debug!(
+        status = state.status.as_str(),
+        nudge_type = nudge_type.count_key(),
+        count = count,
+        max = config.health.max_nudges,
+        "classified nudge"
+    );
 
     Some(nudge_type)
 }
@@ -128,6 +143,13 @@ pub fn execute_nudge(
 ) -> Result<()> {
     let ctx = build_nudge_context(nudge_type, state, config);
     let message = engine.render(nudge_type.template_name(), &ctx)?;
+
+    tracing::info!(
+        target = ?target,
+        nudge_type = nudge_type.count_key(),
+        template = nudge_type.template_name(),
+        "executing nudge"
+    );
 
     match nudge_type {
         NudgeType::Stuck => {
