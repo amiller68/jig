@@ -60,6 +60,12 @@ pub fn classify_nudge(state: &WorkerState, config: &GlobalConfig) -> Option<Nudg
         return None;
     }
 
+    // Workers with an open PR don't get idle nudges — the daemon's PR
+    // lifecycle checks handle CI failures and review comments separately.
+    if state.pr_url.is_some() {
+        return None;
+    }
+
     let nudge_type = match state.status {
         WorkerStatus::WaitingInput => NudgeType::Stuck,
         WorkerStatus::Stalled | WorkerStatus::Idle => NudgeType::Idle,

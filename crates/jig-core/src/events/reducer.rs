@@ -132,9 +132,13 @@ impl WorkerState {
         if self.status.is_terminal() {
             return;
         }
-        // Only mark as stalled if the worker was previously active.
-        // A worker that's only "Spawned" hasn't started yet — don't nudge it.
-        if self.status == WorkerStatus::Spawned {
+        // Don't override these statuses with stalled:
+        // - Spawned: hasn't started yet, don't nudge
+        // - WaitingReview: worker did its job, waiting on human review
+        if matches!(
+            self.status,
+            WorkerStatus::Spawned | WorkerStatus::WaitingReview
+        ) {
             return;
         }
         if let Some(last_ts) = self.last_event_at {
