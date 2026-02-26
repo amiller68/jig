@@ -10,8 +10,10 @@ use crate::context::RepoContext;
 use crate::error::{Error, Result};
 use crate::events::{Event, EventLog, EventType};
 use crate::git;
+use crate::global::GlobalConfig;
 use crate::session;
 use crate::state::OrchestratorState;
+use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker};
 
 /// Task status for ps command
@@ -115,6 +117,23 @@ pub fn launch_tmux_window(
     auto: bool,
     context: Option<&str>,
 ) -> Result<()> {
+    // Render preamble when auto=true
+    let effective_context = if auto {
+        let engine = TemplateEngine::new().with_repo(&repo.repo_root);
+        let global_config = GlobalConfig::load()?;
+        let mut tpl_ctx = TemplateContext::new();
+        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
+        tpl_ctx.set(
+            "task_context",
+            context.unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ),
+        );
+        Some(engine.render("spawn-preamble", &tpl_ctx)?)
+    } else {
+        context.map(|s| s.to_string())
+    };
+
     // Get adapter from config (fallback to claude-code if not configured)
     let config = JigToml::load(&repo.repo_root)?.unwrap_or_default();
     let agent_adapter =
@@ -124,7 +143,7 @@ pub fn launch_tmux_window(
     session::create_window(&repo.session_name, name, worktree_path)?;
 
     // Build spawn command using adapter
-    let cmd = adapter::build_spawn_command(agent_adapter, context, auto);
+    let cmd = adapter::build_spawn_command(agent_adapter, effective_context.as_deref(), auto);
 
     // Send command to window
     session::send_keys(&repo.session_name, name, &cmd)?;

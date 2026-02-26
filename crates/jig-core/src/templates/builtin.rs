@@ -2,6 +2,7 @@
 
 /// Template names and their built-in content.
 pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
+    ("spawn-preamble", SPAWN_PREAMBLE),
     ("nudge-idle", NUDGE_IDLE),
     ("nudge-stuck", NUDGE_STUCK),
     ("nudge-ci", NUDGE_CI),
@@ -9,6 +10,23 @@ pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("nudge-review", NUDGE_REVIEW),
     ("nudge-bad-commits", NUDGE_BAD_COMMITS),
 ];
+
+const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
+
+YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), pushed, draft PR created via `gh pr create --draft`. Call /review when ready.
+
+HOW MONITORING WORKS: A daemon watches your activity via tool-use events. If you go idle or get stuck for ~5 minutes, you'll receive automated nudge messages (up to {{max_nudges}}). After that, a human is notified. Do not wait for input.
+
+IF YOU GET STUCK:
+- Do NOT enter plan mode or ask for confirmation — just proceed
+- If a command fails, try to fix it yourself
+- If tests fail, debug and fix them
+- If unsure about an approach, pick the simplest one and go
+- If truly blocked, explain what's blocking you so the nudge system can relay it
+
+TASK:
+{{task_context}}
+"#;
 
 const NUDGE_IDLE: &str = r#"STATUS CHECK: You've been idle for a while (nudge {{nudge_count}}/{{max_nudges}}).
 
