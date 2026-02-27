@@ -33,7 +33,7 @@ pub mod worker;
 pub mod worktree;
 
 pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
-pub use config::{Config, JigToml, RepoConfig};
+pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
 pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
@@ -42,7 +42,10 @@ pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
     WorkersState,
 };
-pub use issues::{FileProvider, Issue, IssueFilter, IssuePriority, IssueProvider, IssueStatus};
+pub use issues::{
+    make_provider, FileProvider, Issue, IssueFilter, IssuePriority, IssueProvider, IssueStatus,
+    LinearProvider,
+};
 pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;
 pub use state::OrchestratorState;

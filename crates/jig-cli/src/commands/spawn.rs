@@ -3,7 +3,8 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::issues::{FileProvider, IssueProvider};
+use jig_core::global::GlobalConfig;
+use jig_core::issues;
 use jig_core::{git, spawn, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, OpContext};
@@ -85,8 +86,8 @@ impl Op for Spawn {
         let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
         let issue_ref = self.issue.as_deref();
         let issue_context = if let Some(id) = issue_ref {
-            let issues_dir = repo.repo_root.join(&jig_toml.issues.directory);
-            let provider = FileProvider::new(&issues_dir);
+            let global_config = GlobalConfig::load().unwrap_or_default();
+            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
             let issue = provider
                 .get(id)?
                 .ok_or_else(|| Error::Custom(format!("issue not found: {}", id)))?;

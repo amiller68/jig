@@ -9,9 +9,8 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 
 use jig_core::config::JigToml;
-use jig_core::issues::{
-    FileProvider, Issue as CoreIssue, IssueFilter, IssuePriority, IssueProvider, IssueStatus,
-};
+use jig_core::global::GlobalConfig;
+use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
 
 use crate::op::{Op, OpContext};
 
@@ -68,9 +67,8 @@ impl Op for Issues {
     fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-        let issues_dir = repo.repo_root.join(&jig_toml.issues.directory);
-
-        let provider = FileProvider::new(&issues_dir);
+        let global_config = GlobalConfig::load().unwrap_or_default();
+        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
 
         // Single issue detail
         if let Some(ref id) = self.id {

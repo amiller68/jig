@@ -17,6 +17,14 @@ auto = true                    # Auto-start Claude with full permissions
 
 [agent]
 type = "claude"                # Agent framework (claude, cursor)
+
+[issues]
+provider = "linear"            # Issue provider ("file" or "linear")
+
+[issues.linear]
+profile = "work"               # References ~/.config/jig/config.toml profile
+team = "ENG"                   # Linear team key
+projects = ["Backend"]         # Optional project filter
 ```
 
 **Priority:** jig.toml settings override global config.
@@ -130,3 +138,9 @@ copy = [".env", ".env.local", ".secrets"]
 ```
 
 Files are copied from the repo root to the new worktree after creation, before the on_create hook runs. Missing files are silently skipped.
+
+## Issue Provider
+
+By default, jig uses file-based issues from the `issues/` directory. You can switch to Linear by setting `provider = "linear"` in `jig.toml` and adding a Linear API key to your global config.
+
+See [Linear Integration](./linear-integration.md) for full setup instructions.

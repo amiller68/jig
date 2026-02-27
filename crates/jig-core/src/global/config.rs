@@ -2,6 +2,7 @@
 //!
 //! Stored at `~/.config/jig/config.toml`.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -61,6 +62,20 @@ impl Default for GitHubConfig {
     }
 }
 
+/// Linear API configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LinearConfig {
+    /// Named profiles, each holding an API key.
+    pub profiles: HashMap<String, LinearProfile>,
+}
+
+/// A single Linear API profile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinearProfile {
+    pub api_key: String,
+}
+
 /// Global configuration stored at `~/.config/jig/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -68,6 +83,7 @@ pub struct GlobalConfig {
     pub health: HealthConfig,
     pub notify: NotifyConfig,
     pub github: GitHubConfig,
+    pub linear: LinearConfig,
 }
 
 impl GlobalConfig {

@@ -14,6 +14,7 @@ header_pages:
   - background.md
   - concepts.md
   - getting-started.md
+  - putting-it-all-together.md
   - appendix/index.md
 
 minima:

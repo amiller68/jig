@@ -257,12 +257,27 @@ pub struct JigToml {
 /// Issue tracking configuration in jig.toml
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssuesConfig {
-    /// Provider type (currently only "file").
+    /// Provider type ("file" or "linear").
     #[serde(default = "default_issues_provider")]
     pub provider: String,
     /// Directory containing issue files (relative to repo root).
     #[serde(default = "default_issues_directory")]
     pub directory: String,
+    /// Linear-specific configuration (required when provider = "linear").
+    #[serde(default)]
+    pub linear: Option<LinearIssuesConfig>,
+}
+
+/// Linear issue provider configuration in jig.toml.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinearIssuesConfig {
+    /// Name of the profile in global config to use for API key.
+    pub profile: String,
+    /// Linear team key (e.g. "ENG").
+    pub team: String,
+    /// Optional list of allowed project names to filter by.
+    #[serde(default)]
+    pub projects: Vec<String>,
 }
 
 fn default_issues_provider() -> String {
@@ -278,6 +293,7 @@ impl Default for IssuesConfig {
         Self {
             provider: default_issues_provider(),
             directory: default_issues_directory(),
+            linear: None,
         }
     }
 }

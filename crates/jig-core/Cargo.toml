@@ -21,6 +21,7 @@ which.workspace = true
 handlebars.workspace = true
 urlencoding.workspace = true
 regex.workspace = true
+ureq.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true

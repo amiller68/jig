@@ -65,6 +65,9 @@ pub enum Error {
     #[error("State error: {0}")]
     State(String),
 
+    #[error("Linear API error: {0}")]
+    Linear(String),
+
     #[error("{0}")]
     Custom(String),
 }

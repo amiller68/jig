@@ -60,6 +60,7 @@ jig merge feature-auth
 - [Background](/background) — Why parallel agents, and what jig means for engineers
 - [Core Concepts](/concepts) — Worktrees, documentation, issues, and quality
 - [Getting Started](/getting-started) — Installation and first steps
+- [Putting It All Together](/putting-it-all-together) — The full workflow: issues, terminal, PR reviews
 
 ---
 
