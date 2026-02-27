@@ -6,6 +6,22 @@ use crate::github::GitHubClient;
 use crate::global::GlobalConfig;
 use crate::registry::RepoRegistry;
 
+/// Per-check result: check name and whether a problem was detected.
+#[derive(Debug, Clone)]
+pub(crate) struct PrCheckOutcome {
+    pub name: &'static str,
+    pub has_problem: bool,
+}
+
+/// Overall result of PR lifecycle checks for a single worker.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PrLifecycleResult {
+    /// Per-check outcomes (only populated when PR is open).
+    pub checks: Vec<PrCheckOutcome>,
+    /// Whether the PR was merged/closed (terminal state handled separately).
+    pub terminal: bool,
+}
+
 /// Monitors PR state and injects appropriate actions.
 pub(crate) struct PrMonitor<'a> {
     client: &'a GitHubClient,
@@ -18,6 +34,7 @@ impl<'a> PrMonitor<'a> {
     }
 
     /// Check PR lifecycle and inject cleanup/notify actions for merged/closed PRs.
+    /// Returns a summary of check outcomes for display purposes.
     pub(super) fn check_lifecycle(
         &self,
         worker_name: &str,
@@ -25,7 +42,9 @@ impl<'a> PrMonitor<'a> {
         pr_url: &str,
         worker_state: &WorkerState,
         actions: &mut Vec<Action>,
-    ) {
+    ) -> PrLifecycleResult {
+        let mut result = PrLifecycleResult::default();
+
         // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
         let pr_number = match pr_url
             .rsplit('/')
@@ -33,14 +52,14 @@ impl<'a> PrMonitor<'a> {
             .and_then(|s| s.parse::<u64>().ok())
         {
             Some(n) => n,
-            None => return,
+            None => return result,
         };
 
         let pr_state = match self.client.get_pr_state(pr_number) {
             Ok(s) => s,
             Err(e) => {
-                tracing::debug!("failed to check PR state for {}: {}", worker_name, e);
-                return;
+                tracing::info!("failed to check PR state for {}: {}", worker_name, e);
+                return result;
             }
         };
 
@@ -53,6 +72,7 @@ impl<'a> PrMonitor<'a> {
 
         match pr_state {
             crate::github::PrState::Merged => {
+                result.terminal = true;
                 if self.config.github.auto_cleanup_merged {
                     actions.push(Action::Cleanup {
                         worker_id: worker_name.to_string(),
@@ -64,6 +84,7 @@ impl<'a> PrMonitor<'a> {
                 }
             }
             crate::github::PrState::Closed => {
+                result.terminal = true;
                 actions.push(Action::Notify {
                     worker_id: worker_name.to_string(),
                     message: format!("PR #{} closed without merge", pr_number),
@@ -92,15 +113,20 @@ impl<'a> PrMonitor<'a> {
                     ),
                 ];
 
-                for (check_type, result) in checks {
-                    match result {
+                for (check_type, check_result) in checks {
+                    match check_result {
                         Ok(check) => {
+                            let has_problem = check.nudge.is_some();
                             tracing::debug!(
                                 check_type = check_type,
-                                has_nudge = check.nudge.is_some(),
+                                has_problem,
                                 details = ?check.details,
                                 "PR check result"
                             );
+                            result.checks.push(PrCheckOutcome {
+                                name: check_type,
+                                has_problem,
+                            });
                             if let Some(nudge_type) = check.nudge {
                                 let count = worker_state
                                     .nudge_counts
@@ -122,7 +148,7 @@ impl<'a> PrMonitor<'a> {
                             }
                         }
                         Err(e) => {
-                            tracing::debug!(
+                            tracing::info!(
                                 check_type = check_type,
                                 error = %e,
                                 "PR check failed"
@@ -132,6 +158,8 @@ impl<'a> PrMonitor<'a> {
                 }
             }
         }
+
+        result
     }
 }
 
@@ -149,7 +177,7 @@ pub(super) fn make_github_client(repo_name: &str, registry: &RepoRegistry) -> Op
         .and_then(|entry| {
             GitHubClient::from_repo_path(&entry.path)
                 .map_err(|e| {
-                    tracing::debug!(repo = repo_name, error = %e, "GitHub client failed");
+                    tracing::info!(repo = repo_name, error = %e, "GitHub client failed");
                     e
                 })
                 .ok()

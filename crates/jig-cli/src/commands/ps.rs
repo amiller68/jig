@@ -5,7 +5,7 @@ use std::fmt;
 use clap::Args;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
-use jig_core::daemon::{Daemon, DaemonConfig, TickResult};
+use jig_core::daemon::{Daemon, DaemonConfig, TickResult, WorkerTickInfo};
 use jig_core::events::{EventLog, WorkerState};
 use jig_core::global::GlobalConfig;
 use jig_core::notify::Notifier;
@@ -38,6 +38,7 @@ struct EnrichedTask {
     nudge_count: u32,
     pr_url: Option<String>,
     issue_ref: Option<String>,
+    pr_health: Option<WorkerTickInfo>,
 }
 
 #[derive(Debug)]
@@ -112,7 +113,7 @@ fn run_watch(repo: &jig_core::RepoContext, interval: u64) {
             }
         };
 
-        let enriched = enrich_tasks(&tasks, &repo_name, &config);
+        let enriched = enrich_tasks(&tasks, &repo_name, &config, &tick_result);
         let table = render_watch_table(&enriched);
         let status_line = format_tick_status(&tick_result);
         let output = format!(
@@ -162,7 +163,12 @@ fn format_tick_status(tick: &Option<TickResult>) -> String {
 }
 
 /// Enrich tasks with event-derived worker state.
-fn enrich_tasks(tasks: &[TaskInfo], repo_name: &str, config: &GlobalConfig) -> Vec<EnrichedTask> {
+fn enrich_tasks(
+    tasks: &[TaskInfo],
+    repo_name: &str,
+    config: &GlobalConfig,
+    tick_result: &Option<TickResult>,
+) -> Vec<EnrichedTask> {
     tasks
         .iter()
         .map(|task| {
@@ -182,6 +188,12 @@ fn enrich_tasks(tasks: &[TaskInfo], repo_name: &str, config: &GlobalConfig) -> V
             // Prefer event-derived issue_ref, fall back to TaskInfo
             let issue_ref = issue_ref.or_else(|| task.issue_ref.clone());
 
+            // Look up PR health from tick result
+            let key = format!("{}/{}", repo_name, task.name);
+            let pr_health = tick_result
+                .as_ref()
+                .and_then(|tr| tr.worker_info.get(&key).cloned());
+
             EnrichedTask {
                 info: TaskInfo {
                     name: task.name.clone(),
@@ -195,9 +207,48 @@ fn enrich_tasks(tasks: &[TaskInfo], repo_name: &str, config: &GlobalConfig) -> V
                 nudge_count,
                 pr_url,
                 issue_ref,
+                pr_health,
             }
         })
         .collect()
+}
+
+/// Format PR health status for display.
+fn format_health(info: &Option<WorkerTickInfo>, has_pr: bool) -> (String, Color) {
+    let Some(info) = info else {
+        return if has_pr {
+            // Has PR but no tick info (tick didn't run)
+            ("-".to_string(), Color::DarkGrey)
+        } else {
+            ("-".to_string(), Color::DarkGrey)
+        };
+    };
+
+    if !info.has_pr {
+        return ("-".to_string(), Color::DarkGrey);
+    }
+
+    if let Some(err) = &info.pr_error {
+        tracing::debug!(error = %err, "PR health error");
+        return ("?".to_string(), Color::Yellow);
+    }
+
+    if info.pr_checks.is_empty() {
+        return ("-".to_string(), Color::DarkGrey);
+    }
+
+    let problems: Vec<&str> = info
+        .pr_checks
+        .iter()
+        .filter(|(_, has_problem)| *has_problem)
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    if problems.is_empty() {
+        ("ok".to_string(), Color::Green)
+    } else {
+        (problems.join(" "), Color::Red)
+    }
 }
 
 /// Render the enriched watch table.
@@ -216,6 +267,7 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
             Cell::new("DIRTY").add_attribute(Attribute::Bold),
             Cell::new("NUDGES").add_attribute(Attribute::Bold),
             Cell::new("PR").add_attribute(Attribute::Bold),
+            Cell::new("HEALTH").add_attribute(Attribute::Bold),
         ]);
 
     for task in tasks {
@@ -273,6 +325,8 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
             Color::DarkGrey
         };
 
+        let (health_text, health_color) = format_health(&task.pr_health, task.pr_url.is_some());
+
         table.add_row(vec![
             Cell::new(&task.info.name).fg(Color::Cyan),
             Cell::new(tmux_text).fg(tmux_color),
@@ -285,6 +339,7 @@ fn render_watch_table(tasks: &[EnrichedTask]) -> Table {
                 .fg(nudge_color)
                 .set_alignment(CellAlignment::Right),
             Cell::new(&pr),
+            Cell::new(&health_text).fg(health_color),
         ]);
     }
 

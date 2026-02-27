@@ -10,6 +10,7 @@
 mod discovery;
 mod pr;
 
+use std::collections::HashMap;
 use std::process::Command;
 use std::time::Duration;
 
@@ -26,6 +27,17 @@ use crate::tmux::{TmuxClient, TmuxTarget};
 
 use discovery::discover_workers;
 use pr::{make_github_client, PrMonitor};
+
+/// Per-worker PR health info collected during a tick.
+#[derive(Debug, Clone, Default)]
+pub struct WorkerTickInfo {
+    /// Per-check outcomes: (check_name, has_problem).
+    pub pr_checks: Vec<(String, bool)>,
+    /// Error message if the GitHub client failed entirely.
+    pub pr_error: Option<String>,
+    /// Whether the worker has a PR at all.
+    pub has_pr: bool,
+}
 
 /// Configuration for the daemon loop.
 #[derive(Debug, Clone)]
@@ -56,6 +68,8 @@ pub struct TickResult {
     pub nudges_sent: usize,
     pub notifications_sent: usize,
     pub errors: Vec<String>,
+    /// Per-worker PR health info, keyed by "repo/worker".
+    pub worker_info: HashMap<String, WorkerTickInfo>,
 }
 
 /// The daemon orchestrator — holds references to shared infrastructure.
@@ -103,10 +117,11 @@ impl<'a> Daemon<'a> {
             let key = format!("{}/{}", repo_name, worker_name);
 
             match self.process_worker(repo_name, worker_name, &key, &mut workers_state, &registry) {
-                Ok((actions, nudges, notifs)) => {
+                Ok((actions, nudges, notifs, worker_tick_info)) => {
                     result.actions_dispatched += actions;
                     result.nudges_sent += nudges;
                     result.notifications_sent += notifs;
+                    result.worker_info.insert(key.clone(), worker_tick_info);
                 }
                 Err(e) => {
                     result.errors.push(format!("{}: {}", key, e));
@@ -130,7 +145,7 @@ impl<'a> Daemon<'a> {
         key: &str,
         workers_state: &mut WorkersState,
         registry: &RepoRegistry,
-    ) -> Result<(usize, usize, usize)> {
+    ) -> Result<(usize, usize, usize, WorkerTickInfo)> {
         // Read event log
         let event_log = EventLog::for_worker(repo_name, worker_name)?;
         let events = event_log.read_all()?;
@@ -192,17 +207,29 @@ impl<'a> Daemon<'a> {
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
 
         // Check PR lifecycle if worker has a PR URL and isn't already terminal
+        let mut worker_tick_info = WorkerTickInfo::default();
         if !new_state.status.is_terminal() {
             if let Some(pr_url) = &new_state.pr_url {
-                if let Some(client) = make_github_client(repo_name, registry) {
-                    let monitor = PrMonitor::new(&client, self.config);
-                    monitor.check_lifecycle(
-                        worker_name,
-                        &branch_name,
-                        pr_url,
-                        &new_state,
-                        &mut actions,
-                    );
+                worker_tick_info.has_pr = true;
+                match make_github_client(repo_name, registry) {
+                    Some(client) => {
+                        let monitor = PrMonitor::new(&client, self.config);
+                        let pr_result = monitor.check_lifecycle(
+                            worker_name,
+                            &branch_name,
+                            pr_url,
+                            &new_state,
+                            &mut actions,
+                        );
+                        worker_tick_info.pr_checks = pr_result
+                            .checks
+                            .into_iter()
+                            .map(|c| (c.name.to_string(), c.has_problem))
+                            .collect();
+                    }
+                    None => {
+                        worker_tick_info.pr_error = Some("GitHub client unavailable".to_string());
+                    }
                 }
             }
         }
@@ -324,7 +351,7 @@ impl<'a> Daemon<'a> {
             },
         );
 
-        Ok((action_count, nudge_count, notif_count))
+        Ok((action_count, nudge_count, notif_count, worker_tick_info))
     }
 
     /// Fetch the configured base branch for each registered repo.
