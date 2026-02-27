@@ -191,7 +191,7 @@ mod tests {
     fn truncate_multibyte_utf8() {
         // Each emoji is 4 bytes — slicing at byte boundaries would panic
         let emojis = "🎉🎊🎈🎁🎂🎃🎄🎅🎆🎇";
-        let result = truncate(&emojis, 5);
+        let result = truncate(emojis, 5);
         assert_eq!(result, "🎉🎊🎈🎁🎂...");
     }
 }

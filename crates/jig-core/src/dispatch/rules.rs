@@ -149,8 +149,10 @@ mod tests {
     #[test]
     fn pr_opened_triggers_notify() {
         let old = WorkerState::default();
-        let mut new = WorkerState::default();
-        new.pr_url = Some("https://github.com/pr/1".to_string());
+        let new = WorkerState {
+            pr_url: Some("https://github.com/pr/1".to_string()),
+            ..Default::default()
+        };
 
         let actions = dispatch_actions("test", &old, &new, &default_config());
         assert_eq!(actions.len(), 1);
