@@ -28,6 +28,6 @@ exclude:
 
 # Branding
 brand:
-  primary_color: "#7C3AED"    # violet-600
-  accent_color: "#A78BFA"     # violet-400
+  primary_color: "#33ff33"    # phosphor green
+  accent_color: "#00cccc"     # terminal cyan
   tagline: "Multiply yourself."

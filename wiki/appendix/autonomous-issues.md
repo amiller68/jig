@@ -1,188 +1,339 @@
 ---
 layout: page
-title: Autonomous Issue Resolution
+title: Autonomous Orchestration
 nav_order: 1
 parent: Appendix
 ---
 
-# Autonomous Issue Resolution
+# Autonomous Orchestration
 
-What if your AI assistant could not only track issues but actually work on them—spawning autonomous coding agents, monitoring their progress, and intervening when they get stuck?
+jig includes a built-in daemon that supervises workers, monitors their PRs, and intervenes when things go wrong — no cron jobs, no bash scripts, no manual babysitting.
 
-This is possible by combining jig's worktree-based workflow with a scheduling system that periodically scans for work, spawns agents, and supervises their progress.
+This page explains how it all works: spawn, the event system, the daemon tick loop, nudges, PR lifecycle monitoring, and how `jig ps --watch` ties it together.
 
-## The concept
+## The big picture
 
-A cron-driven automation that:
-
-1. Scans repositories for markdown-based issue files
-2. Spawns Claude Code workers to tackle high-priority tasks
-3. Monitors worker progress
-4. Intervenes when things go sideways
-5. Cleans up completed work
-
-Think of it as an autonomous dev manager that never sleeps.
-
-## The execution loop
-
-Every few hours, the automation runs through priorities:
-
-### Priority 0: Clean up completed work
-
-- Detect merged PRs and remove workers
-- Detect closed (not merged) PRs, kill workers, alert you
-- Prevent zombie processes from cluttering tmux sessions
-
-### Priority 1: Check on active workers
-
-- List all running jig workers via `jig list`
-- Identify workers with PRs already created (done, waiting for review)
-- Find stuck workers (no PR, no commits, no progress)
-
-### Priority 2: Nudge stuck workers
-
-- Before killing stuck workers, send them a message via `tmux send-keys`
-- Ask contextual questions: "What's blocking you?" or "Ready to commit?"
-- Only respawn after multiple failed nudges (gentle, not aggressive)
-
-### Priority 3: Spawn new workers
-
-- Scan `issues/` directory for `status: ready` + high priority
-- Spawn fresh workers with full context from issue files
-- Use jig's `--auto` mode for hands-off execution
-
-### Priority 4+: Monitor existing PRs
-
-- Check CI status, respawn workers for failing builds
-- Detect unaddressed PR review comments, nudge original workers
-- Validate conventional commit messages, nudge for fixes
-
-## Why this works
-
-The system composes tools that each do one thing well:
-
-**Scheduler provides:**
-- Reliable scheduling (cron with isolated sessions)
-- Cross-session coordination
-- Persistent state tracking
-- Alerts (Telegram, Discord, etc.)
-
-**jig provides:**
-- Git worktree management (one worktree per task, no branch conflicts)
-- Claude Code lifecycle (spawn, attach, status, kill)
-- Persistent tmux sessions (automation can send keys to active workers)
-
-**Claude Code provides:**
-- Autonomous coding (reads issue, writes code, commits, creates PR)
-- `/review` workflow (workers call this when ready)
-- Auto-resume on restart
-
-## Integration pattern
-
-The automation is just a bash script that calls external CLIs:
-
-### 1. Store state in a persistent location
-
-```bash
-STATE_FILE="$HOME/.automation/issue-resolver-state.json"
+```
+You write a ticket
+  → jig spawn launches an agent in a tmux window
+    → Agent works autonomously (commits, pushes, opens PR)
+      → Daemon watches activity via events
+        → If idle/stuck: nudge the agent via tmux
+        → If PR has issues: nudge about CI/conflicts/reviews
+        → If max nudges exceeded: notify you
+        → If PR merged/closed: clean up automatically
 ```
 
-Track:
-- Nudge counts per worker (avoid infinite nudging)
-- Seen PRs (only alert on new PRs)
-- Last run timestamp (rate limiting)
+You stay in the loop through `jig ps --watch`, which shows a live dashboard of all workers, their state, and PR health.
 
-### 2. Call external CLIs
+## Spawn: launching autonomous workers
 
-```bash
-# jig CLI for worker status
-jig list
-
-# GitHub CLI for PR info
-gh pr list --state open --json number,headRefName
-
-# tmux for sending messages to workers
-tmux send-keys -t "jig-reponame:workername" "STATUS CHECK..." Enter
-```
-
-No custom integrations needed—just shell commands.
-
-### 3. Parse output for alerts
+`jig spawn` creates a git worktree, opens a tmux window, and starts an agent session:
 
 ```bash
-alert() {
-    ALERTS="${ALERTS}\n$1"
-}
+# Spawn with free-text context
+jig spawn feature-auth --context "Implement JWT authentication"
 
-# Later...
-echo "=== ALERTS ==="
-echo -e "$ALERTS"
+# Spawn from an issue file
+jig spawn feature-auth --issue features/jwt-auth
+
+# Spawn in auto mode (fully autonomous, no human interaction)
+jig spawn feature-auth --issue features/jwt-auth --auto
 ```
 
-The scheduler parses these and routes them to your notification system.
+### Auto mode
 
-## Lessons learned
+The `--auto` flag (or `spawn.auto = true` in `jig.toml`) launches the agent with `--dangerously-skip-permissions` and a structured preamble that tells the agent:
 
-Building autonomous agent supervision teaches hard lessons:
+- It's autonomous — don't ask for confirmation, don't enter plan mode
+- Its goal is to complete the task and create a draft PR
+- A daemon is watching — if it goes idle for ~5 minutes, it'll get nudged
+- If it's truly stuck, it should explain what's blocking it
 
-### Nudge before killing
+This preamble is a Handlebars template (`spawn-preamble`) that can be customized per-repo.
 
-Early versions immediately respawned stuck workers. Wasteful—often the worker was just planning or waiting for a long build. Send multiple contextual nudges via tmux before giving up.
+### What spawn registers
 
-### Conventional commits are mandatory
+When you spawn a worker, jig:
 
-Add automatic commit message linting. If a worker makes non-conventional commits, respawn with instructions to fix. This ensures clean changelogs and automated releases.
+1. Creates the worktree and branch
+2. Records the worker in `.jig/state.json` (local orchestrator state)
+3. Emits a `Spawn` event to the worker's event log
+4. Opens a tmux window in a `jig-<repo>` session
+5. Sends the agent command to the window
 
-### Closed PRs mean stop immediately
+## The event system
 
-The biggest source of zombie workers: continuing to work on tasks where the human already merged or closed the PR manually. Check for closed PRs first and kill workers immediately.
+Every worker has a JSONL event log at `~/.config/jig/events/<repo>-<worker>/events.jsonl`. Events are appended by git hooks (post-commit, post-merge) and by the daemon itself.
 
-### Workers must update issue files
+### Event types
 
-Require workers to document progress in the issue markdown as they work (status changes, progress logs, PR numbers). This creates an audit trail and helps future workers if the task restarts.
+| Event | Source | Meaning |
+|-------|--------|---------|
+| `Spawn` | `jig spawn` | Worker created |
+| `ToolUseStart` / `ToolUseEnd` | Claude hooks | Agent is actively using tools |
+| `Commit` | post-commit hook | Code committed |
+| `Push` | post-commit hook | Code pushed |
+| `PrOpened` | Daemon discovery | PR found for the branch |
+| `Notification` | Agent | Agent hit an interactive prompt |
+| `Stop` | Agent exit | Agent session ended |
+| `Nudge` | Daemon | Nudge delivered |
+| `Terminal` | Daemon | Worker cleaned up |
 
-### State management is critical
+### State derivation
 
-Without persistent state, the automation spams you with alerts about the same PR every cycle. Track seen PRs, nudge counts, and last-run state to make it feel intelligent instead of noisy.
+Worker state is derived by replaying the event stream — there's no mutable state database. The reducer walks events in order and produces a `WorkerState`:
 
-## Results
+| Status | Meaning |
+|--------|---------|
+| `spawned` | Just created, no activity yet |
+| `running` | Tool use events flowing |
+| `idle` | Agent exited, at shell prompt |
+| `waiting` | Agent hit an interactive prompt |
+| `stalled` | No events for 5+ minutes (configurable) |
+| `review` | PR opened, waiting on human review |
+| `approved` | PR approved |
+| `merged` | PR merged (terminal) |
+| `failed` | Error or killed (terminal) |
+| `archived` | Cleaned up (terminal) |
 
-With this approach:
+The silence check is key: if no events arrive for `silence_threshold_seconds` (default 300s), and the worker isn't terminal or in review, it transitions to `stalled`. This is what triggers idle nudges.
 
-- **Active workers:** 2-5 at any given time
-- **Manual intervention:** Only for complex issues or design decisions
-- **False positives:** <5%
+## The daemon tick loop
 
-You go from manually checking issues daily to getting periodic summaries. When something needs attention, you know immediately. When work completes, PRs show up ready for review.
+The daemon runs a periodic loop (default every 30 seconds). Each tick:
 
-The automation isn't perfect—workers still get confused, CI still breaks, humans still need to review code. But it handles the grunt work of issue tracking, worker lifecycle, and basic supervision autonomously.
+1. **Sync repos** — `git fetch` the base branch for each registered repo
+2. **Discover workers** — Scan `~/.config/jig/events/` for active event logs
+3. **For each worker:**
+   - Read the event log and derive current state
+   - Discover PRs if not already known (via `gh pr list`)
+   - Compare against previous state (from `~/.config/jig/workers.json`)
+   - Dispatch actions based on state transitions
+   - Check PR lifecycle (CI, conflicts, reviews, commits)
+   - Execute actions (nudge, notify, cleanup)
+4. **Save state** — Write updated `workers.json`
 
-## Hurdles
+### Running the daemon
 
-### Worker context limits
+The daemon runs in two ways:
 
-Long-running workers accumulate context and eventually hit limits. The automation needs to detect this and gracefully restart workers with summarized context.
+- **`jig ps --watch`** — Runs the tick loop inline, displaying a live table with keypress-driven log toggle. Best for active supervision.
+- **`jig daemon`** — Runs headless. Good for persistent background supervision.
 
-### Conflicting changes
+Both share the same `run_with()` entrypoint — `ps --watch` just adds the display layer and keypress handling.
 
-Multiple workers on related issues can create merge conflicts. The automation needs to detect overlapping file changes and either serialize the work or alert for human intervention.
+## Nudges: intervening when agents get stuck
 
-### Flaky CI
+Nudges are messages sent to agents via `tmux send-keys`. The daemon classifies what kind of nudge is needed and renders a template with contextual information.
 
-Workers get respawned repeatedly when CI is flaky rather than genuinely broken. Add backoff logic and distinguish between "test failed" and "infrastructure failed."
+### Nudge types
 
-### Issue scope creep
+| Type | Trigger | What it does |
+|------|---------|--------------|
+| **idle** | Worker is `stalled` or `idle`, no PR | Asks for a status update. If there are uncommitted changes, pushes toward committing and opening a PR. |
+| **stuck** | Worker is `waiting` (interactive prompt) | Sends an auto-approve keystroke to dismiss the prompt, then a message. |
+| **ci** | CI failing on open PR | Lists the failing checks, tells the agent to fix and push. |
+| **conflict** | Merge conflicts on open PR | Tells the agent to rebase and resolve. |
+| **review** | Unresolved review comments on PR | Tells the agent to address feedback. |
+| **bad-commits** | Non-conventional commits on PR | Lists the bad commits, tells the agent to reword them. |
 
-Workers sometimes expand scope beyond the original issue. The automation should detect when diff size exceeds expected bounds and pause for human review.
+### Escalation
 
-### tmux session management
+Each nudge type has an independent counter. After `max_nudges` (default 3) of the same type, the daemon stops nudging and fires a `Notify` action instead — alerting you that the worker needs human attention.
 
-tmux sessions can get into weird states. The automation needs robust session detection and cleanup logic.
+The nudge templates are Handlebars and can be overridden per-repo by placing custom templates in your repo's template directory.
 
-## Conclusion
+### Example: idle nudge
 
-Autonomous issue resolution shows how jig can be orchestrated by external tools without tight integration. By combining cron scheduling, tmux control, and CLI shelling, you can build sophisticated automation that feels native to your workflow.
+```
+STATUS CHECK: You've been idle for a while (nudge 2/3).
 
-The key insight: the orchestrator doesn't need to integrate with everything. It just needs to schedule agents, manage state, and route alerts. The rest is bash and CLIs.
+You have uncommitted changes but no PR yet. What's blocking you?
 
-Start simple (check status every hour), then layer in intelligence (nudge, respawn, alert). You'll be surprised how much you can automate.
+1. If ready: commit (conventional format), push, create PR, update issue, call /review
+2. If stuck: explain what you need help with
+3. If complete but confused: finish the PR
+```
+
+### Example: CI nudge
+
+```
+CI is failing on your PR (nudge 1/3).
+
+Fix these issues:
+  - lint: cargo clippy found 3 warnings
+  - test: 2 tests failing in auth module
+
+STEPS:
+1. Fix the failing checks
+2. Commit using conventional commits: fix(ci): fix linting errors
+3. Push to your branch: git push
+4. Verify CI passes
+5. Call /review when green
+```
+
+## PR lifecycle monitoring
+
+When a worker has an open PR, the daemon runs four checks every tick:
+
+### CI status
+Queries GitHub for check run results. If any required check is failing, fires a `ci` nudge with the failure details.
+
+### Merge conflicts
+Checks the PR's `mergeable` state. If the PR has conflicts with the base branch, fires a `conflict` nudge.
+
+### Review comments
+Checks for unresolved review comments or changes-requested reviews. If found, fires a `review` nudge.
+
+### Commit format
+Validates that all commits follow conventional commit format (`type(scope): description`). Non-conforming commits trigger a `bad-commits` nudge.
+
+### PR state transitions
+
+The daemon also handles terminal PR states:
+
+- **Merged** — If `github.auto_cleanup_merged` is true (default), kills the tmux window and emits a `Terminal` event. Sends a notification.
+- **Closed without merge** — Sends a notification. If `github.auto_cleanup_closed` is true, also cleans up.
+
+### PR discovery
+
+Workers don't need to tell jig about their PR. The daemon proactively checks GitHub for PRs matching the worker's branch name. When found, it emits a `PrOpened` event and the worker transitions to `review` status.
+
+## The watch display
+
+`jig ps --watch` shows a live table updated every tick:
+
+```
+jig ps --watch — 3 workers  (every 2s)
+
+NAME            TMUX  STATE    ISSUE       BRANCH           COMMITS  DIRTY  NUDGES  PR    HEALTH
+feature-auth    ●     running  jwt-auth    feature-auth           3    -       -     #42   ok
+fix-pagination  ●     stalled  fix-page    fix-pagination         1    ●       2     #43   ci conflicts
+add-tests       ○     idle     add-tests   add-tests              0    -       -     -     -
+
+                                                                              [l]ogs  [q]uit
+```
+
+Column meanings:
+
+| Column | Description |
+|--------|-------------|
+| **TMUX** | Is the tmux window alive? `●` running, `○` exited, `✗` missing |
+| **STATE** | Derived worker status from the event stream |
+| **ISSUE** | Linked issue reference |
+| **COMMITS** | Commits ahead of base branch |
+| **DIRTY** | Uncommitted changes in the worktree |
+| **NUDGES** | Total nudges sent across all types |
+| **PR** | PR number if one exists |
+| **HEALTH** | PR check results: `ok` (all green), problem names in red, `?` if GitHub unavailable, `-` if no PR |
+
+The HEALTH column gives you at-a-glance visibility into what's wrong with each worker's PR, independent of whether nudges have fired.
+
+### Log view
+
+Press `l` in watch mode to switch to the log view. This shows timestamped daemon activity — which nudges fired, PR check results, errors — so you can see what the daemon is actually doing:
+
+```
+jig ps --watch — logs  (every 2s)
+
+[14:32:05] tick: 3 workers, 1 action, 1 nudge, 0 errors
+[14:32:05]   myrepo/feature-auth PR: ok
+[14:32:05]   myrepo/fix-pagination PR: ci, conflicts
+[14:32:35] tick: 3 workers, 0 actions, 0 nudges, 0 errors
+[14:32:35]   myrepo/feature-auth PR: ok
+[14:32:35]   myrepo/fix-pagination PR: ok
+
+                                                    [t]able  [q]uit
+```
+
+Press `t` or `l` again to switch back to the table. Press `q` to quit cleanly.
+
+## Global configuration
+
+The daemon reads `~/.config/jig/config.toml`:
+
+```toml
+[health]
+silence_threshold_seconds = 300  # 5 minutes before "stalled"
+max_nudges = 3                   # per nudge type before escalation
+
+[github]
+auto_cleanup_merged = true       # kill workers when PR merges
+auto_cleanup_closed = false      # kill workers when PR closed without merge
+
+[notify]
+exec = "notify-send 'jig' '$MESSAGE'"  # shell command for notifications
+# webhook = "https://hooks.slack.com/..." # or a webhook URL
+# events = ["worker.done"]              # filter which events trigger
+```
+
+### State files
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/jig/config.toml` | Global daemon configuration |
+| `~/.config/jig/workers.json` | Last-known state of all workers (for diff-based dispatch) |
+| `~/.config/jig/events/<repo>-<worker>/events.jsonl` | Per-worker event stream |
+| `~/.config/jig/notifications.jsonl` | Notification log |
+
+## Putting it all together
+
+A typical autonomous workflow:
+
+```bash
+# 1. Write issues with clear scope and acceptance criteria
+# 2. Spawn workers
+jig spawn feature-auth --issue features/jwt-auth --auto
+jig spawn fix-pagination --issue bugs/pagination --auto
+jig spawn add-tests --issue tasks/test-coverage --auto
+
+# 3. Watch them work
+jig ps -w
+
+# 4. Workers autonomously:
+#    - Read the issue, plan, implement
+#    - Commit with conventional format
+#    - Push and create draft PRs
+#    - Get nudged if they stall
+#    - Fix CI failures, conflicts, review comments
+
+# 5. You review PRs when they show up
+#    - HEALTH column tells you what's ready
+#    - Attach to a worker if you need to intervene: jig attach feature-auth
+#    - Merge when satisfied
+
+# 6. Daemon auto-cleans merged workers
+```
+
+The daemon handles the supervision loop that used to require manual checking, cron scripts, or custom bash automation. You focus on writing good tickets and reviewing good code.
+
+## Customization
+
+### Custom nudge templates
+
+Override any built-in template by placing a file in your repo's `.jig/templates/` directory:
+
+```
+.jig/templates/
+├── nudge-idle.hbs
+├── nudge-ci.hbs
+└── spawn-preamble.hbs
+```
+
+Available template variables vary by nudge type but always include `nudge_count`, `max_nudges`, and `is_final_nudge`.
+
+### Notification hooks
+
+The `[notify]` config supports shell commands and webhooks. The command receives a JSON payload on stdin with event details:
+
+```toml
+[notify]
+exec = "jq -r '.reason' | terminal-notifier -title 'jig'"
+```
+
+### Tuning thresholds
+
+- **Lower `silence_threshold_seconds`** if your agents are fast and you want quicker intervention
+- **Raise `max_nudges`** if agents often recover on their own after a few tries
+- **Set `auto_cleanup_closed = true`** if you want aggressive cleanup of abandoned work
