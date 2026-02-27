@@ -393,8 +393,15 @@ fn make_notifier(global_config: &GlobalConfig) -> Result<Notifier> {
     Ok(Notifier::new(global_config.notify.clone(), queue))
 }
 
-/// Run the daemon loop. Returns after one pass if `config.once` is true.
-pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
+/// Run the daemon loop with a per-tick callback.
+///
+/// The callback receives each `TickResult` and returns `true` to continue or `false` to stop.
+/// The callback is responsible for any inter-tick delay (sleep, keypress polling, etc.).
+/// Returns after one pass if `config.once` is true.
+pub fn run_with<F>(daemon_config: &DaemonConfig, mut on_tick: F) -> Result<()>
+where
+    F: FnMut(&TickResult) -> bool,
+{
     let global_config = GlobalConfig::load()?;
     let tmux = TmuxClient::new();
     let engine = TemplateEngine::new();
@@ -403,9 +410,7 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
     let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
 
     loop {
-        let result = daemon.tick();
-
-        match &result {
+        match daemon.tick() {
             Ok(tick) => {
                 if tick.workers_checked > 0 || !tick.errors.is_empty() {
                     tracing::info!(
@@ -416,34 +421,44 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
                         errors = tick.errors.len(),
                         "tick complete"
                     );
-                    // Always print summary to stderr so it's visible without RUST_LOG
-                    if !daemon_config.once {
-                        eprintln!(
-                            "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
-                            tick.workers_checked,
-                            tick.actions_dispatched,
-                            tick.nudges_sent,
-                            tick.notifications_sent,
-                            tick.errors.len(),
-                        );
-                    }
                 }
                 for err in &tick.errors {
                     tracing::warn!("worker error: {}", err);
                 }
+                let keep_going = on_tick(&tick);
+                if daemon_config.once || !keep_going {
+                    return Ok(());
+                }
             }
             Err(e) => {
                 tracing::error!("tick failed: {}", e);
-                eprintln!("[tick] error: {}", e);
+                if daemon_config.once {
+                    return Err(e);
+                }
+                // Sleep on error to avoid tight loop
+                std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
             }
         }
-
-        if daemon_config.once {
-            return result.map(|_| ());
-        }
-
-        std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
     }
+}
+
+/// Run the daemon loop. Returns after one pass if `config.once` is true.
+pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
+    run_with(daemon_config, |tick| {
+        // Print summary to stderr so it's visible without RUST_LOG
+        if tick.workers_checked > 0 || !tick.errors.is_empty() {
+            eprintln!(
+                "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
+                tick.workers_checked,
+                tick.actions_dispatched,
+                tick.nudges_sent,
+                tick.notifications_sent,
+                tick.errors.len(),
+            );
+        }
+        std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
+        true // keep looping
+    })
 }
 
 /// Convert a WorkerEntry (from workers.json) back to a WorkerState for comparison.

@@ -1,17 +1,18 @@
 //! Ps command — show status of spawned sessions
 
+use std::collections::VecDeque;
 use std::fmt;
+use std::time::Instant;
 
 use clap::Args;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::terminal;
 
-use jig_core::daemon::{Daemon, DaemonConfig, TickResult, WorkerTickInfo};
+use jig_core::daemon::{DaemonConfig, TickResult, WorkerTickInfo};
 use jig_core::events::{EventLog, WorkerState};
 use jig_core::global::GlobalConfig;
-use jig_core::notify::Notifier;
 use jig_core::spawn::{self, TaskInfo, TaskStatus};
-use jig_core::templates::TemplateEngine;
-use jig_core::tmux::TmuxClient;
 use jig_core::worker::WorkerStatus;
 
 use crate::op::{Op, OpContext};
@@ -68,72 +69,168 @@ impl Op for Ps {
     }
 }
 
-/// Run the watch loop: display + orchestrate on each tick.
+/// View mode for the watch display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewMode {
+    Table,
+    Logs,
+}
+
+impl ViewMode {
+    fn toggle(&mut self) {
+        *self = match self {
+            ViewMode::Table => ViewMode::Logs,
+            ViewMode::Logs => ViewMode::Table,
+        };
+    }
+}
+
+const LOG_BUFFER_SIZE: usize = 50;
+
+/// Format structured log lines from a TickResult.
+fn format_tick_log(tick: &TickResult) -> Vec<String> {
+    let now = chrono::Local::now().format("%H:%M:%S");
+    let mut lines = vec![];
+
+    lines.push(format!(
+        "[{}] tick: {} workers, {} actions, {} nudges, {} errors",
+        now,
+        tick.workers_checked,
+        tick.actions_dispatched,
+        tick.nudges_sent,
+        tick.errors.len(),
+    ));
+
+    for (key, info) in &tick.worker_info {
+        if !info.has_pr {
+            continue;
+        }
+        if let Some(err) = &info.pr_error {
+            lines.push(format!("[{}]   {} PR: {}", now, key, err));
+        } else if !info.pr_checks.is_empty() {
+            let problems: Vec<&str> = info
+                .pr_checks
+                .iter()
+                .filter(|(_, bad)| *bad)
+                .map(|(name, _)| name.as_str())
+                .collect();
+            if problems.is_empty() {
+                lines.push(format!("[{}]   {} PR: ok", now, key));
+            } else {
+                lines.push(format!("[{}]   {} PR: {}", now, key, problems.join(", ")));
+            }
+        }
+    }
+
+    for err in &tick.errors {
+        lines.push(format!("[{}]   error: {}", now, err));
+    }
+
+    lines
+}
+
+/// Run the watch loop: display + orchestrate via daemon::run_with.
 fn run_watch(repo: &jig_core::RepoContext, interval: u64) {
-    let config = GlobalConfig::load().unwrap_or_default();
     let repo_name = repo
         .repo_root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Set up daemon infrastructure for orchestration
-    let tmux = TmuxClient::new();
-    let engine = TemplateEngine::new();
     let daemon_config = DaemonConfig {
         interval_seconds: interval,
-        once: true,
+        once: false,
         ..Default::default()
     };
-    let notifier = jig_core::notify::NotificationQueue::global()
-        .ok()
-        .map(|queue| Notifier::new(config.notify.clone(), queue));
+
+    // Shared state for the callback
+    let mut view_mode = ViewMode::Table;
+    let mut log_buffer: VecDeque<String> = VecDeque::with_capacity(LOG_BUFFER_SIZE);
+
+    // Enable raw mode for keypress detection
+    terminal::enable_raw_mode().ok();
 
     // Clear screen once on first render
     eprint!("\x1B[2J");
 
-    loop {
-        // Move cursor to top-left (no clear — overwrite in place)
+    let result = jig_core::daemon::run_with(&daemon_config, |tick| {
+        // Append log entries
+        for line in format_tick_log(tick) {
+            if log_buffer.len() >= LOG_BUFFER_SIZE {
+                log_buffer.pop_front();
+            }
+            log_buffer.push_back(line);
+        }
+
+        // Move cursor to top-left
         eprint!("\x1B[H");
 
-        // Run daemon tick (nudge, notify, dispatch)
-        let tick_result = if let Some(ref notifier) = notifier {
-            let d = Daemon::new(&config, &tmux, &engine, notifier, &daemon_config);
-            d.tick().ok()
-        } else {
-            None
-        };
-
-        let tasks = match spawn::list_tasks(repo) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                std::thread::sleep(std::time::Duration::from_secs(interval));
-                continue;
+        match view_mode {
+            ViewMode::Table => {
+                let config = GlobalConfig::load().unwrap_or_default();
+                let tasks = spawn::list_tasks(repo).unwrap_or_default();
+                let tick_result = Some(tick);
+                let enriched = enrich_tasks(&tasks, &repo_name, &config, &tick_result);
+                let table = render_watch_table(&enriched);
+                let status_line = format_tick_status(&tick_result);
+                let output = format!(
+                    "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}\n\n{table}\n\n\x1B[2m[l]ogs  [q]uit\x1B[0m",
+                    enriched.len(),
+                    interval,
+                );
+                for line in output.lines() {
+                    eprintln!("{}\x1B[K", line);
+                }
             }
-        };
-
-        let enriched = enrich_tasks(&tasks, &repo_name, &config, &tick_result);
-        let table = render_watch_table(&enriched);
-        let status_line = format_tick_status(&tick_result);
-        let output = format!(
-            "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s, Ctrl+C to stop)\x1B[0m{status_line}\n\n{table}",
-            enriched.len(),
-            interval,
-        );
-
-        for line in output.lines() {
-            eprintln!("{}\x1B[K", line);
+            ViewMode::Logs => {
+                let header = format!(
+                    "\x1B[1mjig ps --watch\x1B[0m — logs  \x1B[2m(every {}s)\x1B[0m\n",
+                    interval,
+                );
+                eprint!("{}\x1B[K", header);
+                for line in &log_buffer {
+                    eprintln!("{}\x1B[K", line);
+                }
+                eprintln!("\x1B[K");
+                eprintln!("\x1B[2m[t]able  [q]uit\x1B[0m\x1B[K");
+            }
         }
-        // Clear everything below the table
+        // Clear everything below
         eprint!("\x1B[J");
 
-        std::thread::sleep(std::time::Duration::from_secs(interval));
+        // Poll for keypresses during the sleep interval
+        let sleep_end = Instant::now() + std::time::Duration::from_secs(interval);
+        while Instant::now() < sleep_end {
+            if event::poll(std::time::Duration::from_millis(100)).unwrap_or(false) {
+                if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
+                    match code {
+                        KeyCode::Char('l') | KeyCode::Char('t') => {
+                            view_mode.toggle();
+                            // Redraw immediately on toggle
+                            break;
+                        }
+                        KeyCode::Char('q') => {
+                            terminal::disable_raw_mode().ok();
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        true // keep looping
+    });
+
+    terminal::disable_raw_mode().ok();
+
+    if let Err(e) = result {
+        eprintln!("daemon error: {}", e);
     }
 }
 
 /// Format the daemon tick result as a compact status suffix.
-fn format_tick_status(tick: &Option<TickResult>) -> String {
+fn format_tick_status(tick: &Option<&TickResult>) -> String {
     let Some(tick) = tick else {
         return String::new();
     };
@@ -167,7 +264,7 @@ fn enrich_tasks(
     tasks: &[TaskInfo],
     repo_name: &str,
     config: &GlobalConfig,
-    tick_result: &Option<TickResult>,
+    tick_result: &Option<&TickResult>,
 ) -> Vec<EnrichedTask> {
     tasks
         .iter()

@@ -23,6 +23,7 @@ tracing-subscriber.workspace = true
 glob.workspace = true
 dirs.workspace = true
 crossterm.workspace = true
+chrono.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["process"] }

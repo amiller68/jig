@@ -132,13 +132,8 @@ impl WorkerState {
         if self.status.is_terminal() {
             return;
         }
-        // Don't override these statuses with stalled:
-        // - Spawned: hasn't started yet, don't nudge
-        // - WaitingReview: worker did its job, waiting on human review
-        if matches!(
-            self.status,
-            WorkerStatus::Spawned | WorkerStatus::WaitingReview
-        ) {
+        // WaitingReview: worker did its job, waiting on human review — don't mark stalled
+        if matches!(self.status, WorkerStatus::WaitingReview) {
             return;
         }
         if let Some(last_ts) = self.last_event_at {
