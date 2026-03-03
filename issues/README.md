@@ -13,6 +13,10 @@ issues/
 │   ├── standalone.md
 │   ├── epic-index.md
 │   └── ticket.md
+├── milestones/                     # Cross-epic roadmaps
+│   └── event-driven-pipeline/
+│       ├── index.md                # Vision, architecture
+│       └── roadmap.md              # All issues in execution order
 ├── epics/                          # Large multi-ticket features
 │   └── plan-and-execute/
 │       ├── index.md
@@ -33,6 +37,7 @@ issues/
 
 | Directory | Purpose | Examples |
 |-----------|---------|----------|
+| `milestones/` | Cross-epic roadmaps | Architectural shifts, major initiatives |
 | `epics/` | Large features, multiple tickets | New subsystem, major refactor |
 | `features/` | Single-ticket features | Add a flag, new command |
 | `bugs/` | Bug fixes | Crash fix, incorrect behavior |
@@ -53,6 +58,22 @@ issues/chores/update-clap-v5.md
 ```
 
 **Use when:** Task is small enough for one session.
+
+### Milestones
+
+Cross-epic roadmaps that unify execution order across multiple epics.
+
+```
+issues/milestones/event-driven-pipeline/
+├── index.md                    # Vision, architecture, end goal
+└── roadmap.md                  # All issues in execution order
+```
+
+**Use when:** Work spans multiple epics and needs a unifying vision + execution order.
+
+**Structure:**
+- `index.md` — Vision document (why, architecture, success criteria)
+- `roadmap.md` — References all issues in execution order (doesn't duplicate content)
 
 ### Epics
 

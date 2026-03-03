@@ -11,7 +11,7 @@ nav_order: 1
 jig is a git worktree manager for orchestrating Agentic Coding Assistants (ACAs) in parallel. It helps you scale your skills across multiple AI coding sessions, getting more done while spending your time on what matters: deciding *what* to build rather than the minutiae of *how*.
 
 *NOTE*: jig is designed to work with all sorts of ACAs, but I say that with the following caveats:
-- it makes the most sense to use with minimal TUIs. Jig is designed to help you stay in there terminal focused on getting work done.
+- it makes the most sense to use with minimal TUIs. Jig is designed to help you stay in the terminal focused on getting work done.
 - jig is extensible to any ACA with user-defined skills and commands (which is pretty much all of them). That being said, I am a very heavy Claude Code user, and I prioritize feature development and testing for that. If I assume something that does not apply to ACAs in general, I apologize, and please feel free to reach out!
 
 ## What jig does
@@ -60,6 +60,7 @@ jig merge feature-auth
 - [Background](/background) — Why parallel agents, and what jig means for engineers
 - [Core Concepts](/concepts) — Worktrees, documentation, issues, and quality
 - [Getting Started](/getting-started) — Installation and first steps
+- [Putting It All Together](/putting-it-all-together) — The full workflow: issues, terminal, PR reviews
 
 ---
 

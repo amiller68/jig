@@ -250,6 +250,52 @@ pub struct JigToml {
     pub spawn: SpawnConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+    #[serde(default)]
+    pub issues: IssuesConfig,
+}
+
+/// Issue tracking configuration in jig.toml
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssuesConfig {
+    /// Provider type ("file" or "linear").
+    #[serde(default = "default_issues_provider")]
+    pub provider: String,
+    /// Directory containing issue files (relative to repo root).
+    #[serde(default = "default_issues_directory")]
+    pub directory: String,
+    /// Linear-specific configuration (required when provider = "linear").
+    #[serde(default)]
+    pub linear: Option<LinearIssuesConfig>,
+}
+
+/// Linear issue provider configuration in jig.toml.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinearIssuesConfig {
+    /// Name of the profile in global config to use for API key.
+    pub profile: String,
+    /// Linear team key (e.g. "ENG").
+    pub team: String,
+    /// Optional list of allowed project names to filter by.
+    #[serde(default)]
+    pub projects: Vec<String>,
+}
+
+fn default_issues_provider() -> String {
+    "file".to_string()
+}
+
+fn default_issues_directory() -> String {
+    "issues".to_string()
+}
+
+impl Default for IssuesConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_issues_provider(),
+            directory: default_issues_directory(),
+            linear: None,
+        }
+    }
 }
 
 /// Worktree configuration in jig.toml
@@ -267,10 +313,39 @@ pub struct WorktreeConfig {
 }
 
 /// Spawn configuration in jig.toml
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnConfig {
+    /// Auto-start Claude in spawned windows.
     #[serde(default)]
     pub auto: bool,
+    /// Whether the daemon should auto-spawn workers for eligible issues.
+    #[serde(default)]
+    pub auto_spawn: bool,
+    /// Max concurrent workers the daemon will auto-spawn (default 3).
+    #[serde(default = "default_max_concurrent_workers")]
+    pub max_concurrent_workers: usize,
+    /// Seconds between issue polls for auto-spawn (default 120).
+    #[serde(default = "default_auto_spawn_interval")]
+    pub auto_spawn_interval: u64,
+}
+
+fn default_max_concurrent_workers() -> usize {
+    3
+}
+
+fn default_auto_spawn_interval() -> u64 {
+    120
+}
+
+impl Default for SpawnConfig {
+    fn default() -> Self {
+        Self {
+            auto: false,
+            auto_spawn: false,
+            max_concurrent_workers: default_max_concurrent_workers(),
+            auto_spawn_interval: default_auto_spawn_interval(),
+        }
+    }
 }
 
 /// Agent configuration in jig.toml
@@ -321,36 +396,11 @@ impl JigToml {
     }
 }
 
-/// Get the base branch for the current repository (convenience function)
-/// Priority: jig.toml > repo-specific global config > global default > hardcoded fallback
-pub fn get_base_branch() -> Result<String> {
-    let repo_path = crate::git::get_base_repo()?;
-
+/// Run on-create hook if configured for a repo.
+/// Priority: jig.toml > global config.
+pub fn run_on_create_hook_for_repo(repo_root: &Path, worktree_path: &Path) -> Result<()> {
     // Check jig.toml first
-    if let Some(jig_toml) = JigToml::load(&repo_path)? {
-        if let Some(base) = jig_toml.worktree.base {
-            return Ok(base);
-        }
-    }
-
-    // Fall back to global config
-    let config = Config::load()?;
-    Ok(config.get_base_branch(&repo_path))
-}
-
-/// Read jig.toml from current repository (convenience function)
-pub fn read_jig_toml() -> Result<Option<JigToml>> {
-    let repo_root = crate::git::get_base_repo()?;
-    JigToml::load(&repo_root)
-}
-
-/// Run on-create hook if configured for current repo (convenience function)
-/// Priority: jig.toml > global config
-pub fn run_on_create_hook_for_repo(worktree_path: &Path) -> Result<()> {
-    let repo_path = crate::git::get_base_repo()?;
-
-    // Check jig.toml first
-    let hook = if let Some(jig_toml) = JigToml::load(&repo_path)? {
+    let hook = if let Some(jig_toml) = JigToml::load(repo_root)? {
         jig_toml.worktree.on_create
     } else {
         None
@@ -360,7 +410,7 @@ pub fn run_on_create_hook_for_repo(worktree_path: &Path) -> Result<()> {
     let hook = hook.or_else(|| {
         Config::load()
             .ok()
-            .and_then(|c| c.get_on_create_hook(&repo_path))
+            .and_then(|c| c.get_on_create_hook(repo_root))
     });
 
     if let Some(hook) = hook {
@@ -415,43 +465,14 @@ impl ConfigDisplay {
             global_on_create: config.get_on_create_hook(repo_path),
         })
     }
-
-    /// Load config display for current repository
-    pub fn load_auto() -> Result<Self> {
-        let repo_path = crate::git::get_base_repo()?;
-        Self::load(&repo_path)
-    }
 }
 
-// Convenience functions for CLI that operate on current repo
+// Convenience functions that don't need repo context (global operations)
 
 /// Get all config entries for --list
 pub fn list_all_config() -> Result<Vec<(String, String, String)>> {
     let config = Config::load()?;
     Ok(config.list_all())
-}
-
-/// Set repo-specific base branch for current repo
-pub fn set_repo_base_branch(branch: &str) -> Result<()> {
-    let repo_path = crate::git::get_base_repo()?;
-    let mut config = Config::load()?;
-    config.set_repo_base_branch(&repo_path, branch);
-    config.save()
-}
-
-/// Unset repo-specific base branch for current repo
-pub fn unset_repo_base_branch() -> Result<()> {
-    let repo_path = crate::git::get_base_repo()?;
-    let mut config = Config::load()?;
-    config.unset_repo_base_branch(&repo_path);
-    config.save()
-}
-
-/// Get repo-specific base branch for current repo
-pub fn get_repo_base_branch() -> Result<Option<String>> {
-    let repo_path = crate::git::get_base_repo()?;
-    let config = Config::load()?;
-    Ok(config.get_repo_base_branch(&repo_path))
 }
 
 /// Set global default base branch
@@ -474,29 +495,47 @@ pub fn get_global_base_branch() -> Result<Option<String>> {
     Ok(config.get_global_base_branch())
 }
 
-/// Set on-create hook for current repo
-pub fn set_on_create_hook(command: &str) -> Result<()> {
-    let repo_path = crate::git::get_base_repo()?;
+// Convenience functions that accept repo_root
+
+/// Set repo-specific base branch
+pub fn set_repo_base_branch(repo_root: &Path, branch: &str) -> Result<()> {
     let mut config = Config::load()?;
-    config.set_on_create_hook(&repo_path, command);
+    config.set_repo_base_branch(repo_root, branch);
     config.save()
 }
 
-/// Unset on-create hook for current repo
-pub fn unset_on_create_hook() -> Result<()> {
-    let repo_path = crate::git::get_base_repo()?;
+/// Unset repo-specific base branch
+pub fn unset_repo_base_branch(repo_root: &Path) -> Result<()> {
     let mut config = Config::load()?;
-    config.unset_on_create_hook(&repo_path);
+    config.unset_repo_base_branch(repo_root);
     config.save()
 }
 
-/// Get on-create hook for current repo
-/// Priority: jig.toml > global config
-pub fn get_on_create_hook() -> Result<Option<String>> {
-    let repo_path = crate::git::get_base_repo()?;
+/// Get repo-specific base branch
+pub fn get_repo_base_branch(repo_root: &Path) -> Result<Option<String>> {
+    let config = Config::load()?;
+    Ok(config.get_repo_base_branch(repo_root))
+}
 
+/// Set on-create hook for a repo
+pub fn set_on_create_hook(repo_root: &Path, command: &str) -> Result<()> {
+    let mut config = Config::load()?;
+    config.set_on_create_hook(repo_root, command);
+    config.save()
+}
+
+/// Unset on-create hook for a repo
+pub fn unset_on_create_hook(repo_root: &Path) -> Result<()> {
+    let mut config = Config::load()?;
+    config.unset_on_create_hook(repo_root);
+    config.save()
+}
+
+/// Get on-create hook for a repo.
+/// Priority: jig.toml > global config.
+pub fn get_on_create_hook(repo_root: &Path) -> Result<Option<String>> {
     // Check jig.toml first
-    if let Some(jig_toml) = JigToml::load(&repo_path)? {
+    if let Some(jig_toml) = JigToml::load(repo_root)? {
         if jig_toml.worktree.on_create.is_some() {
             return Ok(jig_toml.worktree.on_create);
         }
@@ -504,19 +543,12 @@ pub fn get_on_create_hook() -> Result<Option<String>> {
 
     // Fall back to global config
     let config = Config::load()?;
-    Ok(config.get_on_create_hook(&repo_path))
-}
-
-/// Check if jig.toml exists in current repo
-pub fn has_jig_toml() -> Result<bool> {
-    let repo_root = crate::git::get_base_repo()?;
-    Ok(JigToml::exists(&repo_root))
+    Ok(config.get_on_create_hook(repo_root))
 }
 
 /// Get list of files to copy to new worktrees
-pub fn get_copy_files() -> Result<Vec<String>> {
-    let repo_root = crate::git::get_base_repo()?;
-    if let Some(jig_toml) = JigToml::load(&repo_root)? {
+pub fn get_copy_files(repo_root: &Path) -> Result<Vec<String>> {
+    if let Some(jig_toml) = JigToml::load(repo_root)? {
         Ok(jig_toml.worktree.copy)
     } else {
         Ok(Vec::new())

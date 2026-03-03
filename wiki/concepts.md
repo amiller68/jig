@@ -59,7 +59,7 @@ Plus a `CLAUDE.md` (or agent-specific config) at the repo root with:
 
 ## Issues
 
-Well-scoped tickets are the input to agent work. jig supports file-based issue tracking in `issues/`:
+Well-scoped tickets are the input to agent work. jig supports file-based issue tracking in `issues/` and can also pull issues directly from [Linear](/appendix/linear-integration):
 
 ```
 issues/

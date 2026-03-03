@@ -5,11 +5,15 @@
 use std::path::Path;
 
 use crate::adapter;
-use crate::config::{get_base_branch, JigToml, RepoConfig};
+use crate::config::{JigToml, RepoConfig};
+use crate::context::RepoContext;
 use crate::error::{Error, Result};
+use crate::events::{Event, EventLog, EventType};
 use crate::git;
+use crate::global::GlobalConfig;
 use crate::session;
 use crate::state::OrchestratorState;
+use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker};
 
 /// Task status for ps command
@@ -40,100 +44,128 @@ pub struct TaskInfo {
     pub branch: String,
     pub commits_ahead: usize,
     pub is_dirty: bool,
-}
-
-/// Get the tmux session name for this repo
-pub fn get_session_name() -> Result<String> {
-    let repo_root = git::get_base_repo()?;
-    let name = repo_root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-    Ok(format!("jig-{}", name))
+    pub issue_ref: Option<String>,
 }
 
 /// Register a new spawn (creates worker state)
-pub fn register(name: &str, branch: &str, context: Option<&str>) -> Result<()> {
-    let repo_root = git::get_base_repo()?;
-    let worktrees_dir = git::get_worktrees_dir()?;
-    let worktree_path = worktrees_dir.join(name);
-    let session_name = get_session_name()?;
-    let base_branch = get_base_branch()?;
+pub fn register(
+    repo: &RepoContext,
+    name: &str,
+    branch: &str,
+    context: Option<&str>,
+    issue_ref: Option<&str>,
+) -> Result<()> {
+    let worktree_path = repo.worktrees_dir.join(name);
 
     let config = RepoConfig {
-        base_branch: base_branch.clone(),
+        base_branch: repo.base_branch.clone(),
         ..Default::default()
     };
 
-    let mut state = OrchestratorState::load_or_create(repo_root, config)?;
+    let mut state = OrchestratorState::load_or_create(repo.repo_root.clone(), config)?;
 
     let mut worker = Worker::new(
         name.to_string(),
         worktree_path,
         branch.to_string(),
-        base_branch,
-        session_name.clone(),
+        repo.base_branch.clone(),
+        repo.session_name.clone(),
     );
 
     // Set task context if provided
     if let Some(ctx) = context {
-        worker.set_task(TaskContext::new(ctx.to_string()));
+        let mut task = TaskContext::new(ctx.to_string());
+        if let Some(issue) = issue_ref {
+            task = task.with_issue(issue.to_string());
+        }
+        worker.set_task(task);
+    } else if let Some(issue) = issue_ref {
+        worker.set_task(TaskContext::new(String::new()).with_issue(issue.to_string()));
     }
 
     worker.tmux_window = Some(name.to_string());
     state.add_worker(worker);
     state.save()?;
 
+    // Emit Spawn event so daemon and ps --watch can discover this worker.
+    // Reset the log first — if a previous worker had this name, start fresh.
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
+        let _ = event_log.reset();
+        let mut event = Event::new(EventType::Spawn)
+            .with_field("branch", branch)
+            .with_field("repo", repo_name.as_str());
+        if let Some(issue) = issue_ref {
+            event = event.with_field("issue", issue);
+        }
+        let _ = event_log.append(&event);
+    }
+
     Ok(())
 }
 
 /// Launch a tmux window for a worker
 pub fn launch_tmux_window(
+    repo: &RepoContext,
     name: &str,
     worktree_path: &Path,
     auto: bool,
     context: Option<&str>,
 ) -> Result<()> {
-    let session_name = get_session_name()?;
-    let repo_root = git::get_base_repo()?;
+    // Render preamble when auto=true
+    let effective_context = if auto {
+        let engine = TemplateEngine::new().with_repo(&repo.repo_root);
+        let global_config = GlobalConfig::load()?;
+        let mut tpl_ctx = TemplateContext::new();
+        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
+        tpl_ctx.set(
+            "task_context",
+            context.unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ),
+        );
+        Some(engine.render("spawn-preamble", &tpl_ctx)?)
+    } else {
+        context.map(|s| s.to_string())
+    };
 
     // Get adapter from config (fallback to claude-code if not configured)
-    let config = JigToml::load(&repo_root)?.unwrap_or_default();
+    let config = JigToml::load(&repo.repo_root)?.unwrap_or_default();
     let agent_adapter =
         adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
 
     // Create window in tmux
-    session::create_window(&session_name, name, worktree_path)?;
+    session::create_window(&repo.session_name, name, worktree_path)?;
 
     // Build spawn command using adapter
-    let cmd = adapter::build_spawn_command(agent_adapter, context, auto);
+    let cmd = adapter::build_spawn_command(agent_adapter, effective_context.as_deref(), auto);
 
     // Send command to window
-    session::send_keys(&session_name, name, &cmd)?;
+    session::send_keys(&repo.session_name, name, &cmd)?;
 
     Ok(())
 }
 
 /// List all tasks (workers) with their status
-pub fn list_tasks() -> Result<Vec<TaskInfo>> {
-    let repo_root = git::get_base_repo()?;
-    let session_name = get_session_name()?;
-    let base_branch = get_base_branch()?;
-    let worktrees_dir = git::get_worktrees_dir()?;
-
+pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
     // Clean up stale workers and get the (already loaded) state
-    let state = cleanup_stale_workers(&repo_root, &session_name)?;
+    let state = cleanup_stale_workers(&repo.repo_root, &repo.session_name)?;
 
     let mut tasks = Vec::new();
 
     // If we have state, use workers from state
     if let Some(state) = state {
         for worker in state.workers.values() {
-            let status = get_worker_status(&session_name, &worker.name);
-            let worktree_path = worktrees_dir.join(&worker.name);
+            let status = get_worker_status(&repo.session_name, &worker.name);
+            let worktree_path = repo.worktrees_dir.join(&worker.name);
 
             let (commits_ahead, is_dirty) = if worktree_path.exists() {
-                let commits = git::get_commits_ahead(&worktree_path, &base_branch)
+                let commits = git::get_commits_ahead(&worktree_path, &repo.base_branch)
                     .unwrap_or_default()
                     .len();
                 let dirty = git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
@@ -142,28 +174,31 @@ pub fn list_tasks() -> Result<Vec<TaskInfo>> {
                 (0, false)
             };
 
+            let issue_ref = worker.task.as_ref().and_then(|t| t.issue_ref.clone());
+
             tasks.push(TaskInfo {
                 name: worker.name.clone(),
                 status,
                 branch: worker.branch.clone(),
                 commits_ahead,
                 is_dirty,
+                issue_ref,
             });
         }
     } else {
         // Fall back to checking tmux windows directly
-        let windows = session::list_windows(&session_name)?;
+        let windows = session::list_windows(&repo.session_name)?;
 
         for window_name in windows {
-            let worktree_path = worktrees_dir.join(&window_name);
+            let worktree_path = repo.worktrees_dir.join(&window_name);
             if !worktree_path.exists() {
                 continue;
             }
 
-            let status = get_worker_status(&session_name, &window_name);
+            let status = get_worker_status(&repo.session_name, &window_name);
             let branch = git::get_worktree_branch(&worktree_path).unwrap_or_default();
 
-            let commits_ahead = git::get_commits_ahead(&worktree_path, &base_branch)
+            let commits_ahead = git::get_commits_ahead(&worktree_path, &repo.base_branch)
                 .unwrap_or_default()
                 .len();
             let is_dirty = git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
@@ -174,9 +209,12 @@ pub fn list_tasks() -> Result<Vec<TaskInfo>> {
                 branch,
                 commits_ahead,
                 is_dirty,
+                issue_ref: None,
             });
         }
     }
+
+    tasks.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(tasks)
 }
@@ -198,58 +236,43 @@ fn get_worker_status(session: &str, window: &str) -> TaskStatus {
 }
 
 /// Attach to tmux session
-pub fn attach(name: Option<&str>) -> Result<()> {
-    let session_name = get_session_name()?;
-
-    // If a specific window is requested, select it first
+pub fn attach(repo: &RepoContext, name: Option<&str>) -> Result<()> {
     if let Some(window) = name {
-        if !session::window_exists(&session_name, window) {
+        if !session::window_exists(&repo.session_name, window) {
             return Err(Error::WorkerNotFound(window.to_string()));
         }
-        session::select_window(&session_name, window)?;
+        // Attach directly to session:window — doesn't change other clients' active window
+        session::attach_window(&repo.session_name, window)
+    } else {
+        session::attach(&repo.session_name)
     }
-
-    // Attach to session
-    session::attach(&session_name)
-}
-
-/// Kill a worker's tmux window
-pub fn kill(name: &str) -> Result<()> {
-    let session_name = get_session_name()?;
-    let repo_root = git::get_base_repo()?;
-
-    // Kill tmux window
-    session::kill_window(&session_name, name)?;
-
-    // Remove worker from state entirely
-    if let Some(mut state) = OrchestratorState::load(&repo_root)? {
-        let id = state.get_worker_by_name(name).map(|w| w.id);
-        if let Some(id) = id {
-            state.remove_worker(&id);
-            state.save()?;
-        }
-    }
-
-    Ok(())
 }
 
 /// Kill a worker's tmux window (without updating state)
-pub fn kill_window(name: &str) -> Result<()> {
-    let session_name = get_session_name()?;
-    session::kill_window(&session_name, name)?;
+pub fn kill_window(repo: &RepoContext, name: &str) -> Result<()> {
+    session::kill_window(&repo.session_name, name)?;
     Ok(())
 }
 
-/// Unregister a worker from state (removes entirely)
-pub fn unregister(name: &str) -> Result<()> {
-    let repo_root = git::get_base_repo()?;
-
-    if let Some(mut state) = OrchestratorState::load(&repo_root)? {
+/// Unregister a worker from state (removes entirely) and clean up event log.
+pub fn unregister(repo: &RepoContext, name: &str) -> Result<()> {
+    if let Some(mut state) = OrchestratorState::load(&repo.repo_root)? {
         let id = state.get_worker_by_name(name).map(|w| w.id);
         if let Some(id) = id {
             state.remove_worker(&id);
             state.save()?;
         }
+    }
+
+    // Clean up event log
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
+        let _ = event_log.remove();
     }
 
     Ok(())

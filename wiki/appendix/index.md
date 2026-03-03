@@ -9,4 +9,5 @@ has_children: true
 
 Additional articles on advanced topics, integrations, and real-world implementations.
 
-- [Autonomous Issue Resolution](autonomous-issues) — Using jig with schedulers for hands-off issue completion
+- [Autonomous Orchestration](autonomous-issues) — How jig's daemon supervises workers, monitors PRs, and intervenes automatically
+- [Linear Integration](linear-integration) — Connect jig's issue system to Linear for teams using external project management

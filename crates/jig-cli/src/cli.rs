@@ -10,13 +10,13 @@ use crate::commands;
     after_help = "Use 'jig <command> --help' for more information about a command."
 )]
 pub struct Cli {
-    /// Open/cd into worktree after creating
-    #[arg(short = 'o', global = true)]
-    pub open: bool,
+    /// Run command across all tracked repositories
+    #[arg(short = 'g', long = "global", global = true)]
+    pub global: bool,
 
-    /// Skip on-create hook execution
-    #[arg(long = "no-hooks", global = true)]
-    pub no_hooks: bool,
+    /// Show verbose output (e.g. pruned repos at startup)
+    #[arg(short = 'v', long = "verbose", global = true)]
+    pub verbose: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -36,19 +36,24 @@ crate::command_enum! {
     #[command(visible_alias = "rm")]
     (Remove, commands::Remove),
 
+    (Issues, commands::Issues),
+    (Daemon, commands::Daemon),
     (Exit, commands::Exit),
     (Config, commands::Config),
+    (Repos, commands::Repos),
     (Spawn, commands::Spawn),
     (Ps, commands::Ps),
     (Attach, commands::Attach),
     (Review, commands::Review),
     (Merge, commands::Merge),
     (Kill, commands::Kill),
+    (Nuke, commands::Nuke),
     (Init, commands::Init),
     (Update, commands::Update),
     (Version, commands::Version),
     (Which, commands::Which),
     (Health, commands::Health),
+    (Hooks, commands::Hooks),
     (Status, commands::Status),
 
     #[command(name = "shell-init")]

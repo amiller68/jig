@@ -3,7 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{git, OrchestratorState, WorkerStatus};
+use jig_core::OrchestratorState;
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -26,9 +26,9 @@ impl Op for Status {
     type Error = StatusError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let repo_root = git::repo_root()?;
-        let state = match OrchestratorState::load(&repo_root)? {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let state = match OrchestratorState::load(&repo.repo_root)? {
             Some(state) => state,
             None => {
                 eprintln!(
@@ -61,7 +61,11 @@ fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<(), Statu
     eprintln!("  {} {}", "Branch:".dimmed(), worker.branch);
     eprintln!("  {} {}", "Base:".dimmed(), worker.base_branch);
     eprintln!("  {} {}", "Path:".dimmed(), worker.worktree_path.display());
-    eprintln!("  {} {}", "Status:".dimmed(), format_status(&worker.status));
+    eprintln!(
+        "  {} {}",
+        "Status:".dimmed(),
+        crate::ui::format_worker_status_colored(&worker.status)
+    );
     eprintln!(
         "  {} {}:{}",
         "Session:".dimmed(),
@@ -81,14 +85,12 @@ fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<(), Statu
         }
     }
 
-    if let WorkerStatus::WaitingReview { diff_stats } = &worker.status {
+    if worker.status.is_waiting_review() {
         eprintln!();
-        eprintln!("  {}", "Changes:".bold());
         eprintln!(
-            "    {} files, {} insertions(+), {} deletions(-)",
-            diff_stats.files_changed,
-            diff_stats.insertions.to_string().green(),
-            diff_stats.deletions.to_string().red()
+            "  {} run '{}' to see changes",
+            "Review:".bold(),
+            format!("jig review {}", worker.name).cyan()
         );
     }
 
@@ -117,28 +119,10 @@ fn show_all_workers(state: &OrchestratorState) {
     eprintln!();
 
     for worker in state.workers.values() {
-        let status_str = format_status(&worker.status);
+        let status_str = crate::ui::format_worker_status_colored(&worker.status);
         eprintln!("  {} {} {}", worker.name.cyan(), "→".dimmed(), status_str);
         if let Some(task) = &worker.task {
             eprintln!("    {}", task.description.dimmed());
         }
-    }
-}
-
-fn format_status(status: &WorkerStatus) -> String {
-    match status {
-        WorkerStatus::Spawned => "spawned".yellow().to_string(),
-        WorkerStatus::Running => "running".blue().to_string(),
-        WorkerStatus::WaitingReview { diff_stats } => {
-            format!(
-                "{} ({} files)",
-                "waiting review".magenta(),
-                diff_stats.files_changed
-            )
-        }
-        WorkerStatus::Approved => "approved".green().to_string(),
-        WorkerStatus::Merged => "merged".green().bold().to_string(),
-        WorkerStatus::Failed { reason } => format!("{}: {}", "failed".red(), reason),
-        WorkerStatus::Archived => "archived".dimmed().to_string(),
     }
 }

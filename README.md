@@ -19,6 +19,10 @@ Git worktree manager for orchestrating Agentic Coding Assistants in parallel. Sc
 - **Shell integration** - Tab completion for commands and worktree names
 - **Nested paths** - Supports branch names like `feature/auth/login`
 - **Multi-agent workflow** - Spawn parallel Claude Code sessions with tmux integration
+- **Event-driven orchestration** - JSONL event logs track worker lifecycle, derive state, and trigger actions
+- **Daemon loop** - Background orchestrator monitors workers, nudges idle/stuck sessions, and sends notifications
+- **GitHub integration** - Detect CI failures, merge conflicts, and review comments via `gh` CLI
+- **Live dashboard** - `jig ps --watch` shows real-time worker status with event-derived state
 
 ## Install
 
@@ -64,10 +68,18 @@ eval "$(jig shell-init zsh)"
 | `jig review <name>` | Show diff for parent review |
 | `jig merge <name>` | Merge reviewed worktree into current branch |
 | `jig kill <name>` | Kill a running tmux window |
+| `jig kill --all` | Kill all workers |
+| `jig nuke` | Nuke all workers, worktrees, and state (keeps config) |
 | `jig init [--force] [--backup]` | Initialize jig.toml, docs/, issues/, and .claude/ |
 | `jig update` | Show update instructions |
 | `jig version` | Show version |
 | `jig which` | Show path to jig executable |
+| `jig daemon [--interval N] [--once]` | Run the orchestrator loop |
+| `jig ps --watch [N]` | Live dashboard (refresh every N seconds) |
+| `jig status` | Show worker event-derived status |
+| `jig hooks [--install\|--uninstall]` | Manage git/Claude hooks |
+| `jig repos` | List tracked repositories |
+| `jig health` | Show worker health and dependency status |
 
 ## Quick Start
 

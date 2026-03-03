@@ -12,14 +12,14 @@ repository = "https://github.com/amiller68/jig"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1"
 
 # Time and IDs
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 
 # Error handling
-thiserror = "1"
+thiserror = "2"
 anyhow = "1"
 
 # Logging
@@ -29,19 +29,24 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
-colored = "2"
+colored = "3"
 comfy-table = "7"
 
 # Async
 tokio = { version = "1", features = ["full"] }
 
 # Utilities
-dirs = "5"
+dirs = "6"
 glob = "0.3"
 sha2 = "0.10"
-which = "6"
-handlebars = "5"
-nix = { version = "0.28", features = ["process"] }
+which = "8"
+handlebars = "6"
+urlencoding = "2"
+regex = "1"
+ureq = { version = "3", features = ["json"] }
+crossterm = "0.29"
+nix = { version = "0.31", features = ["process"] }
+flume = "0.12"
 
 # Testing
 tempfile = "3"

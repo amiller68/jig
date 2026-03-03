@@ -32,6 +32,8 @@ cargo run -- spawn <name> --context "task description"
 | [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | CI checks that must pass |
 | [PROJECT_LAYOUT.md](./PROJECT_LAYOUT.md) | Codebase structure overview |
 | [RELEASING.md](./RELEASING.md) | Release workflow and automation |
+| [daemon.md](./daemon.md) | Daemon setup and background service installation |
+| [Linear Integration](./cli/usage/linear-integration.md) | Connect issue system to Linear API |
 
 ## For AI Agents
 

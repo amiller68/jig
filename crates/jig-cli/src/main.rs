@@ -5,6 +5,7 @@ mod op;
 
 mod cli;
 mod commands;
+mod ui;
 
 use clap::Parser;
 use colored::Colorize;
@@ -16,8 +17,8 @@ fn main() {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
 
@@ -30,13 +31,32 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    // Best-effort global directory setup
+    let _ = jig_core::ensure_global_dirs();
+
+    // Build context — resolves the repos list based on -g flag
+    let ctx = OpContext::new(cli.global);
+
+    // Best-effort auto-registration and pruning of current repo
+    if let Some(repo) = ctx.repos.first() {
+        if let Ok(mut registry) = jig_core::RepoRegistry::load() {
+            let _ = registry.register(repo.repo_root.clone());
+            let pruned = registry.prune();
+            if cli.verbose && !pruned.is_empty() {
+                for p in &pruned {
+                    eprintln!("{} {}", "pruned:".dimmed(), p.display());
+                }
+            }
+            let _ = registry.save();
+        }
+    }
+
     match cli.command {
         None => {
             print_help();
             Ok(())
         }
-        Some(command) => {
-            let ctx = OpContext::new(cli.open, cli.no_hooks);
+        Some(ref command) => {
             let output = command.execute(&ctx)?;
             let output_str = output.to_string();
             if !output_str.is_empty() {
@@ -77,6 +97,16 @@ fn print_help() {
         "merge".cyan()
     );
     eprintln!("  {}        Kill a running tmux window", "kill".cyan());
+    eprintln!(
+        "  {}        Nuke all workers and state (keeps config)",
+        "nuke".cyan()
+    );
+    eprintln!();
+    eprintln!("{}", "ISSUES:".bold());
+    eprintln!("  {}      Browse and filter issues", "issues".cyan());
+    eprintln!();
+    eprintln!("{}", "REPOSITORY TRACKING:".bold());
+    eprintln!("  {}       List tracked repositories", "repos".cyan());
     eprintln!();
     eprintln!("{}", "UTILITY:".bold());
     eprintln!("  {}        Initialize repository for jig", "init".cyan());
@@ -91,10 +121,10 @@ fn print_help() {
     eprintln!();
     eprintln!("{}", "GLOBAL OPTIONS:".bold());
     eprintln!(
-        "  {}            Open/cd into worktree after creating",
-        "-o".cyan()
+        "  {}  Run command across all tracked repos",
+        "-g, --global".cyan()
     );
-    eprintln!("  {}    Skip on-create hook execution", "--no-hooks".cyan());
+    eprintln!("  {} Show verbose output", "-v, --verbose".cyan());
     eprintln!();
     eprintln!(
         "Use '{}' for more information about a command.",

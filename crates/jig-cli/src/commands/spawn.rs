@@ -3,7 +3,9 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{config, git, spawn, terminal, Error};
+use jig_core::global::GlobalConfig;
+use jig_core::issues;
+use jig_core::{git, spawn, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -16,6 +18,14 @@ pub struct Spawn {
     /// Task context/description
     #[arg(long, short)]
     pub context: Option<String>,
+
+    /// Issue ID to work on (e.g. "features/smart-context-injection")
+    #[arg(long, short = 'I')]
+    pub issue: Option<String>,
+
+    /// Base branch to create worktree from (overrides jig.toml default)
+    #[arg(long, short = 'b')]
+    pub base: Option<String>,
 
     /// Auto-start Claude with full prompt
     #[arg(long)]
@@ -34,7 +44,9 @@ impl Op for Spawn {
     type Error = SpawnError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+
         // Check for tmux
         if !terminal::command_exists("tmux") {
             return Err(Error::MissingDependency("tmux".to_string()).into());
@@ -45,55 +57,72 @@ impl Op for Spawn {
             return Err(Error::MissingDependency("claude".to_string()).into());
         }
 
-        let worktrees_dir = git::get_worktrees_dir()?;
-        let worktree_path = worktrees_dir.join(&self.name);
+        let worktree_path = repo.worktrees_dir.join(&self.name);
 
         // Check if worktree already exists
         let needs_create = !worktree_path.exists();
 
         if needs_create {
-            // Create worktree from current branch
-            let current_branch = git::get_current_branch()?;
-            let base_branch = config::get_base_branch()?;
-
-            git::ensure_worktrees_excluded_auto()?;
+            git::ensure_worktrees_excluded(&repo.git_common_dir)?;
 
             // Create parent directories for nested paths
             if let Some(parent) = worktree_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
 
-            // Create new branch from current position
-            git::create_worktree(&worktree_path, &self.name, &base_branch)?;
+            // Create new branch from base
+            let base = self.base.as_deref().unwrap_or(&repo.base_branch);
+            git::create_worktree(&worktree_path, &self.name, base)?;
 
             eprintln!(
                 "{} Created worktree '{}' from '{}'",
                 "✓".green(),
                 self.name.cyan(),
-                current_branch.cyan()
+                base.cyan()
             );
         }
 
-        // Determine if auto mode should be used
-        let use_auto = if self.auto {
-            true
+        // Resolve issue if provided
+        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+        let issue_ref = self.issue.as_deref();
+        let issue_context = if let Some(id) = issue_ref {
+            let global_config = GlobalConfig::load().unwrap_or_default();
+            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+            let issue = provider
+                .get(id)?
+                .ok_or_else(|| Error::Custom(format!("issue not found: {}", id)))?;
+            Some(issue.body)
         } else {
-            // Check jig.toml for spawn.auto setting
-            config::read_jig_toml()?
-                .map(|c| c.spawn.auto)
-                .unwrap_or(false)
+            None
         };
+
+        // Build effective context: --context takes precedence, issue body as fallback
+        let effective_context = match (&self.context, &issue_context) {
+            (Some(ctx), _) => Some(ctx.clone()),
+            (None, Some(body)) => Some(body.clone()),
+            (None, None) => None,
+        };
+
+        // Determine if auto mode should be used
+        let use_auto = if self.auto { true } else { jig_toml.spawn.auto };
 
         // Register in spawn state
         let branch = git::get_worktree_branch(&worktree_path)?;
-        spawn::register(&self.name, &branch, self.context.as_deref())?;
+        spawn::register(
+            repo,
+            &self.name,
+            &branch,
+            effective_context.as_deref(),
+            issue_ref,
+        )?;
 
         // Launch in tmux
         spawn::launch_tmux_window(
+            repo,
             &self.name,
             &worktree_path,
             use_auto,
-            self.context.as_deref(),
+            effective_context.as_deref(),
         )?;
 
         eprintln!(

@@ -72,27 +72,28 @@ impl Op for Config {
     type Error = ConfigError;
     type Output = ConfigOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
         if self.list {
             return show_list();
         }
 
         match &self.subcommand {
-            None | Some(ConfigCommands::Show) => show_config(),
+            None | Some(ConfigCommands::Show) => show_config(ctx),
             Some(ConfigCommands::Base {
                 branch,
                 global,
                 unset,
-            }) => handle_base(branch.as_deref(), *global, *unset),
+            }) => handle_base(ctx, branch.as_deref(), *global, *unset),
             Some(ConfigCommands::OnCreate { command, unset }) => {
-                handle_on_create(command.as_deref(), *unset)
+                handle_on_create(ctx, command.as_deref(), *unset)
             }
         }
     }
 }
 
-fn show_config() -> Result<ConfigOutput, ConfigError> {
-    let display = ConfigDisplay::load_auto()?;
+fn show_config(ctx: &OpContext) -> Result<ConfigOutput, ConfigError> {
+    let repo = ctx.repo()?;
+    let display = ConfigDisplay::load(&repo.repo_root)?;
 
     eprintln!("{}", "Configuration".bold());
     eprintln!();
@@ -105,8 +106,8 @@ fn show_config() -> Result<ConfigOutput, ConfigError> {
     if let Some(ref toml) = display.toml_base {
         eprintln!("    {} {}", "(jig.toml)".dimmed(), toml);
     }
-    if let Some(ref repo) = display.repo_base {
-        eprintln!("    {} {}", "(global config)".dimmed(), repo);
+    if let Some(ref repo_base) = display.repo_base {
+        eprintln!("    {} {}", "(global config)".dimmed(), repo_base);
     }
     if let Some(ref global) = display.global_base {
         eprintln!("    {} {}", "(global default)".dimmed(), global);
@@ -141,6 +142,7 @@ fn show_list() -> Result<ConfigOutput, ConfigError> {
 }
 
 fn handle_base(
+    ctx: &OpContext,
     branch: Option<&str>,
     global: bool,
     unset: bool,
@@ -150,7 +152,8 @@ fn handle_base(
             config::unset_global_base_branch()?;
             eprintln!("{} Unset global base branch", "✓".green());
         } else {
-            config::unset_repo_base_branch()?;
+            let repo = ctx.repo()?;
+            config::unset_repo_base_branch(&repo.repo_root)?;
             eprintln!("{} Unset repo base branch", "✓".green());
         }
         return Ok(ConfigOutput(None));
@@ -162,7 +165,8 @@ fn handle_base(
                 config::set_global_base_branch(b)?;
                 eprintln!("{} Set global base branch to '{}'", "✓".green(), b.cyan());
             } else {
-                config::set_repo_base_branch(b)?;
+                let repo = ctx.repo()?;
+                config::set_repo_base_branch(&repo.repo_root, b)?;
                 eprintln!("{} Set repo base branch to '{}'", "✓".green(), b.cyan());
             }
             Ok(ConfigOutput(None))
@@ -178,7 +182,8 @@ fn handle_base(
                     }
                 }
             } else {
-                match config::get_repo_base_branch()? {
+                let repo = ctx.repo()?;
+                match config::get_repo_base_branch(&repo.repo_root)? {
                     Some(b) => Ok(ConfigOutput(Some(b))),
                     None => {
                         eprintln!("No config set for this repo");
@@ -190,20 +195,26 @@ fn handle_base(
     }
 }
 
-fn handle_on_create(command: Option<&str>, unset: bool) -> Result<ConfigOutput, ConfigError> {
+fn handle_on_create(
+    ctx: &OpContext,
+    command: Option<&str>,
+    unset: bool,
+) -> Result<ConfigOutput, ConfigError> {
+    let repo = ctx.repo()?;
+
     if unset {
-        config::unset_on_create_hook()?;
+        config::unset_on_create_hook(&repo.repo_root)?;
         eprintln!("{} Unset on-create hook", "✓".green());
         return Ok(ConfigOutput(None));
     }
 
     match command {
         Some(cmd) => {
-            config::set_on_create_hook(cmd)?;
+            config::set_on_create_hook(&repo.repo_root, cmd)?;
             eprintln!("{} Set on-create hook to '{}'", "✓".green(), cmd.cyan());
             Ok(ConfigOutput(None))
         }
-        None => match config::get_on_create_hook()? {
+        None => match config::get_on_create_hook(&repo.repo_root)? {
             Some(cmd) => Ok(ConfigOutput(Some(cmd))),
             None => {
                 eprintln!("No on-create hook set");

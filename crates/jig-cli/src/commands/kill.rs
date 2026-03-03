@@ -11,27 +11,48 @@ use crate::op::{NoOutput, Op, OpContext};
 #[derive(Args, Debug, Clone)]
 pub struct Kill {
     /// Worktree name
-    pub name: String,
+    pub name: Option<String>,
+
+    /// Kill all workers
+    #[arg(long, short)]
+    pub all: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum KillError {
     #[error(transparent)]
     Core(#[from] jig_core::Error),
+
+    #[error("specify a worker name or --all")]
+    NoTarget,
 }
 
 impl Op for Kill {
     type Error = KillError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        // Kill tmux window
-        spawn::kill_window(&self.name)?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
 
-        // Unregister from spawn state
-        spawn::unregister(&self.name)?;
+        if self.all {
+            let tasks = spawn::list_tasks(repo)?;
+            if tasks.is_empty() {
+                eprintln!("{}", "No workers to kill.".dimmed());
+                return Ok(NoOutput);
+            }
+            for task in &tasks {
+                let _ = spawn::kill_window(repo, &task.name);
+                spawn::unregister(repo, &task.name)?;
+                eprintln!("{} Killed '{}'", "✓".green(), task.name.cyan());
+            }
+            return Ok(NoOutput);
+        }
 
-        eprintln!("{} Killed session '{}'", "✓".green(), self.name.cyan());
+        let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
+
+        spawn::kill_window(repo, name)?;
+        spawn::unregister(repo, name)?;
+        eprintln!("{} Killed '{}'", "✓".green(), name.cyan());
 
         Ok(NoOutput)
     }

@@ -23,8 +23,9 @@ impl Op for Attach {
     type Error = AttachError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        spawn::attach(self.name.as_deref())?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        spawn::attach(repo, self.name.as_deref())?;
         Ok(NoOutput)
     }
 }

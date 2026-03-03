@@ -56,11 +56,17 @@ pub enum Error {
     #[error("TOML parse error: {0}")]
     TomlParse(#[from] toml::de::Error),
 
+    #[error("Template error: {0}")]
+    Template(#[from] handlebars::RenderError),
+
     #[error("Invalid path: {0}")]
     InvalidPath(PathBuf),
 
     #[error("State error: {0}")]
     State(String),
+
+    #[error("Linear API error: {0}")]
+    Linear(String),
 
     #[error("{0}")]
     Custom(String),

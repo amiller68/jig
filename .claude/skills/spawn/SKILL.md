@@ -28,6 +28,8 @@ Before spawning, you should have a clear picture of the work. Run `/issues` firs
 2. **Spawn** a worker for each task:
    ```bash
    jig spawn <task-name> --context "<detailed context>" --auto
+   # Or use an issue as context:
+   jig spawn <task-name> --issue features/my-feature --auto
    ```
 3. **Monitor** progress:
    ```bash
@@ -59,6 +61,19 @@ Protect all routes under /api/v1/ except /api/v1/health.
 Return 401 with {error: 'unauthorized'} on invalid/missing token.
 Do NOT modify the health endpoint or add any new packages." --auto
 ```
+
+## Using --issue
+
+The `--issue` flag (`-I`) resolves a file-based issue and uses its body as context:
+
+```bash
+jig spawn fix-auth --issue bugs/auth-crash --auto
+```
+
+- Issue IDs match paths under `issues/` without the `.md` extension (e.g. `features/my-feature`)
+- The issue body (full markdown) becomes the worker's context
+- `--context` takes precedence if both are provided
+- Tab completion works for issue IDs in all shells
 
 ## Rules
 

@@ -49,12 +49,12 @@ impl Op for Open {
     type Error = OpenError;
     type Output = OpenOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let worktrees_dir = git::get_worktrees_dir()?;
+    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
 
         if self.all {
             // Open all worktrees in new tabs
-            let worktrees = git::list_worktrees()?;
+            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
 
             if worktrees.is_empty() {
                 eprintln!("No worktrees to open");
@@ -62,7 +62,7 @@ impl Op for Open {
             }
 
             for wt_name in worktrees {
-                let path = worktrees_dir.join(&wt_name);
+                let path = repo.worktrees_dir.join(&wt_name);
                 if path.exists() {
                     let opened = terminal::open_tab(&path)?;
                     if opened {
@@ -76,7 +76,7 @@ impl Op for Open {
         } else {
             // Open specific worktree
             let name = self.name.as_deref().ok_or(Error::NameRequired)?;
-            let worktree_path = worktrees_dir.join(name);
+            let worktree_path = repo.worktrees_dir.join(name);
 
             if !worktree_path.exists() {
                 return Err(Error::WorktreeNotFound(name.to_string()).into());

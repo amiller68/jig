@@ -4,21 +4,17 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::config::JIG_DIR;
 use crate::error::{Error, Result};
 use crate::worker::DiffStats;
 
-/// Get the root directory of the git repository (alias for get_repo_root)
-pub fn repo_root() -> Result<PathBuf> {
-    get_repo_root()
-}
-
 /// Get the root directory of the git repository
 pub fn get_repo_root() -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -33,6 +29,7 @@ pub fn get_repo_root() -> Result<PathBuf> {
 pub fn get_git_common_dir() -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--git-common-dir"])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -50,6 +47,28 @@ pub fn get_git_common_dir() -> Result<PathBuf> {
     }
 }
 
+/// Get the common git directory for a specific repo path.
+pub fn get_git_common_dir_for(repo_root: &Path) -> Result<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .current_dir(repo_root)
+        .stdin(Stdio::null())
+        .output()?;
+
+    if !output.status.success() {
+        return Err(Error::NotInGitRepo);
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let path = PathBuf::from(path);
+
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(repo_root.join(path).canonicalize()?)
+    }
+}
+
 /// Get the base repository directory (even when in a worktree)
 pub fn get_base_repo() -> Result<PathBuf> {
     let git_common = get_git_common_dir()?;
@@ -57,34 +76,10 @@ pub fn get_base_repo() -> Result<PathBuf> {
     Ok(git_common.parent().unwrap_or(&git_common).to_path_buf())
 }
 
-/// Get the worktrees directory (.jig in the base repo)
-pub fn get_worktrees_dir() -> Result<PathBuf> {
-    let base = get_base_repo()?;
-    Ok(base.join(JIG_DIR))
-}
-
-/// Ensure worktrees are excluded from git (convenience wrapper)
-pub fn ensure_worktrees_excluded_auto() -> Result<()> {
-    let git_common = get_git_common_dir()?;
-    ensure_worktrees_excluded(&git_common)
-}
-
-/// Check if we're currently inside a worktree
-pub fn is_in_worktree_auto() -> Result<bool> {
-    let worktrees_dir = get_worktrees_dir()?;
-    is_in_worktree(&worktrees_dir)
-}
-
 /// Check if we're inside a worktree (not the main repo)
 pub fn is_in_worktree(worktrees_dir: &Path) -> Result<bool> {
     let cwd = std::env::current_dir()?;
     Ok(cwd.starts_with(worktrees_dir))
-}
-
-/// Get current worktree name if in one (convenience wrapper)
-pub fn get_current_worktree_name_auto() -> Result<Option<String>> {
-    let worktrees_dir = get_worktrees_dir()?;
-    get_current_worktree_name(&worktrees_dir)
 }
 
 /// Get current worktree name (if in one)
@@ -111,12 +106,6 @@ pub fn get_current_worktree_name(worktrees_dir: &Path) -> Result<Option<String>>
     }
 
     Ok(None)
-}
-
-/// List worktree names in the current repo's .jig directory
-pub fn list_worktrees() -> Result<Vec<String>> {
-    let worktrees_dir = get_worktrees_dir()?;
-    list_worktree_names(&worktrees_dir)
 }
 
 /// List all worktree names in a directory
@@ -175,6 +164,7 @@ fn find_worktrees_recursive(
 pub fn list_all_worktrees() -> Result<Vec<(PathBuf, String)>> {
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -215,6 +205,7 @@ pub fn branch_exists(branch: &str) -> Result<bool> {
 
     let output = Command::new("git")
         .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch)])
+        .stdin(Stdio::null())
         .output()?;
 
     if output.status.success() {
@@ -228,6 +219,7 @@ pub fn branch_exists(branch: &str) -> Result<bool> {
             "--verify",
             &format!("refs/remotes/origin/{}", branch),
         ])
+        .stdin(Stdio::null())
         .output()?;
 
     Ok(output.status.success())
@@ -237,6 +229,7 @@ pub fn branch_exists(branch: &str) -> Result<bool> {
 pub fn get_current_branch() -> Result<String> {
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -254,6 +247,7 @@ pub fn create_worktree(path: &Path, branch: &str, base_branch: &str) -> Result<(
     let output = if branch_exists_already {
         Command::new("git")
             .args(["worktree", "add", &path.to_string_lossy(), branch])
+            .stdin(Stdio::null())
             .output()?
     } else {
         // Create new branch from base
@@ -268,6 +262,7 @@ pub fn create_worktree(path: &Path, branch: &str, base_branch: &str) -> Result<(
                 &path.to_string_lossy(),
                 &start_point,
             ])
+            .stdin(Stdio::null())
             .output()?
     };
 
@@ -287,6 +282,7 @@ pub fn create_worktree(path: &Path, branch: &str, base_branch: &str) -> Result<(
                 "push.autoSetupRemote",
                 "true",
             ])
+            .stdin(Stdio::null())
             .output()?;
     }
 
@@ -298,6 +294,7 @@ fn find_valid_start_point(base_branch: &str) -> Result<String> {
     // Try the base branch as-is first
     let output = Command::new("git")
         .args(["rev-parse", "--verify", base_branch])
+        .stdin(Stdio::null())
         .output()?;
 
     if output.status.success() {
@@ -309,6 +306,7 @@ fn find_valid_start_point(base_branch: &str) -> Result<String> {
         let with_origin = format!("origin/{}", base_branch);
         let output = Command::new("git")
             .args(["rev-parse", "--verify", &with_origin])
+            .stdin(Stdio::null())
             .output()?;
 
         if output.status.success() {
@@ -320,6 +318,7 @@ fn find_valid_start_point(base_branch: &str) -> Result<String> {
     let with_refs = format!("refs/heads/{}", base_branch);
     let output = Command::new("git")
         .args(["rev-parse", "--verify", &with_refs])
+        .stdin(Stdio::null())
         .output()?;
 
     if output.status.success() {
@@ -335,6 +334,7 @@ fn find_valid_start_point(base_branch: &str) -> Result<String> {
     };
     let output = Command::new("git")
         .args(["rev-parse", "--verify", &with_remotes])
+        .stdin(Stdio::null())
         .output()?;
 
     if output.status.success() {
@@ -343,7 +343,10 @@ fn find_valid_start_point(base_branch: &str) -> Result<String> {
     }
 
     // Fall back to current HEAD commit
-    let output = Command::new("git").args(["rev-parse", "HEAD"]).output()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .stdin(Stdio::null())
+        .output()?;
 
     if output.status.success() {
         let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -362,7 +365,10 @@ pub fn remove_worktree(path: &Path, force: bool) -> Result<()> {
     }
     args.push(&path_str);
 
-    let output = Command::new("git").args(&args).output()?;
+    let output = Command::new("git")
+        .args(&args)
+        .stdin(Stdio::null())
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -379,6 +385,7 @@ pub fn remove_worktree(path: &Path, force: bool) -> Result<()> {
 pub fn has_uncommitted_changes(path: &Path) -> Result<bool> {
     let output = Command::new("git")
         .args(["-C", &path.to_string_lossy(), "status", "--porcelain"])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -400,6 +407,7 @@ pub fn get_commits_ahead(path: &Path, base_branch: &str) -> Result<Vec<String>> 
             &format!("{}..HEAD", base_branch),
             "--oneline",
         ])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -414,6 +422,7 @@ pub fn get_commits_ahead(path: &Path, base_branch: &str) -> Result<Vec<String>> 
 pub fn get_diff_stat(path: &Path, base_branch: &str) -> Result<String> {
     let output = Command::new("git")
         .args(["-C", &path.to_string_lossy(), "diff", "--stat", base_branch])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -435,6 +444,7 @@ pub fn get_diff_stats(path: &Path, base_branch: &str) -> Result<DiffStats> {
             "--numstat",
             base_branch,
         ])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -469,6 +479,7 @@ pub fn get_diff_stats(path: &Path, base_branch: &str) -> Result<DiffStats> {
 pub fn get_diff(path: &Path, base_branch: &str) -> Result<String> {
     let output = Command::new("git")
         .args(["-C", &path.to_string_lossy(), "diff", base_branch])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -484,6 +495,7 @@ pub fn get_diff(path: &Path, base_branch: &str) -> Result<String> {
 pub fn merge_branch(branch: &str) -> Result<()> {
     let output = Command::new("git")
         .args(["merge", branch, "--no-edit"])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
@@ -505,6 +517,7 @@ pub fn get_worktree_branch(path: &Path) -> Result<String> {
             "--abbrev-ref",
             "HEAD",
         ])
+        .stdin(Stdio::null())
         .output()?;
 
     if !output.status.success() {
