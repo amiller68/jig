@@ -129,7 +129,8 @@ impl<'a> PrMonitor<'a> {
                                 has_problem,
                             });
                             // Only nudge draft PRs — non-draft PRs are in human review
-                            if let Some(nudge_type) = check.nudge.filter(|_| pr_state_info.is_draft) {
+                            if let Some(nudge_type) = check.nudge.filter(|_| pr_state_info.is_draft)
+                            {
                                 let count = worker_state
                                     .nudge_counts
                                     .get(nudge_type.count_key())
