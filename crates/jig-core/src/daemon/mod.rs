@@ -29,7 +29,7 @@ use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::global::{GlobalConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
-use crate::nudge::execute_nudge;
+use crate::nudge::{execute_nudge, NudgeType};
 use crate::registry::{RepoEntry, RepoRegistry};
 use crate::spawn::TaskStatus;
 use crate::templates::TemplateEngine;
@@ -406,6 +406,39 @@ impl<'a> Daemon<'a> {
                 if self.config.github.auto_cleanup_closed {
                     actions.push(Action::Cleanup {
                         worker_id: worker_name.to_string(),
+                    });
+                }
+            } else if cached.is_draft {
+                // Draft PR — dispatch nudges from cached check results
+                // Non-draft PRs are in human review, skip nudges.
+                for (check_name, has_problem) in &cached.pr_checks {
+                    if !has_problem {
+                        continue;
+                    }
+                    let nudge_type = match check_name.as_str() {
+                        "ci" => NudgeType::Ci,
+                        "conflicts" => NudgeType::Conflict,
+                        "reviews" => NudgeType::Review,
+                        "commits" => NudgeType::BadCommits,
+                        _ => continue,
+                    };
+                    let count = new_state
+                        .nudge_counts
+                        .get(nudge_type.count_key())
+                        .copied()
+                        .unwrap_or(0);
+                    if count >= self.config.health.max_nudges {
+                        tracing::debug!(
+                            worker = key,
+                            nudge_type = nudge_type.count_key(),
+                            count,
+                            "PR nudge limit reached, skipping"
+                        );
+                        continue;
+                    }
+                    actions.push(Action::Nudge {
+                        worker_id: worker_name.to_string(),
+                        nudge_type,
                     });
                 }
             }

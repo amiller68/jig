@@ -55,7 +55,7 @@ impl<'a> PrMonitor<'a> {
             None => return result,
         };
 
-        let pr_state = match self.client.get_pr_state(pr_number) {
+        let pr_state_info = match self.client.get_pr_state(pr_number) {
             Ok(s) => s,
             Err(e) => {
                 tracing::info!("failed to check PR state for {}: {}", worker_name, e);
@@ -66,11 +66,12 @@ impl<'a> PrMonitor<'a> {
         tracing::info!(
             worker = worker_name,
             pr_number = pr_number,
-            pr_state = ?pr_state,
+            pr_state = ?pr_state_info.state,
+            is_draft = pr_state_info.is_draft,
             "PR lifecycle check"
         );
 
-        match pr_state {
+        match pr_state_info.state {
             crate::github::PrState::Merged => {
                 result.terminal = true;
                 if self.config.github.auto_cleanup_merged {
@@ -127,7 +128,8 @@ impl<'a> PrMonitor<'a> {
                                 name: check_type,
                                 has_problem,
                             });
-                            if let Some(nudge_type) = check.nudge {
+                            // Only nudge draft PRs — non-draft PRs are in human review
+                            if let Some(nudge_type) = check.nudge.filter(|_| pr_state_info.is_draft) {
                                 let count = worker_state
                                     .nudge_counts
                                     .get(nudge_type.count_key())

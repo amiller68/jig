@@ -1,6 +1,6 @@
 //! GitHub actor — runs PR discovery and lifecycle checks in a background thread.
 
-use crate::github::{self, GitHubClient, PrState};
+use crate::github::{self, GitHubClient};
 use crate::registry::RepoRegistry;
 
 use super::messages::{GitHubRequest, GitHubResponse};
@@ -37,6 +37,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: Some("GitHub client unavailable".to_string()),
                 pr_merged: false,
                 pr_closed: false,
+                is_draft: false,
             };
         }
     };
@@ -69,6 +70,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
             pr_error: None,
             pr_merged: false,
             pr_closed: false,
+            is_draft: false,
         };
     };
 
@@ -87,12 +89,13 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: Some("invalid PR URL".to_string()),
                 pr_merged: false,
                 pr_closed: false,
+                is_draft: false,
             };
         }
     };
 
     // Check PR state
-    let pr_state = match client.get_pr_state(pr_number) {
+    let pr_state_info = match client.get_pr_state(pr_number) {
         Ok(s) => s,
         Err(e) => {
             return GitHubResponse {
@@ -102,28 +105,31 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: Some(e.to_string()),
                 pr_merged: false,
                 pr_closed: false,
+                is_draft: false,
             };
         }
     };
 
-    match pr_state {
-        PrState::Merged => GitHubResponse {
+    match pr_state_info.state {
+        github::PrState::Merged => GitHubResponse {
             worker_key: req.worker_key.clone(),
             pr_url: Some(pr_url.clone()),
             pr_checks: vec![],
             pr_error: None,
             pr_merged: true,
             pr_closed: false,
+            is_draft: false,
         },
-        PrState::Closed => GitHubResponse {
+        github::PrState::Closed => GitHubResponse {
             worker_key: req.worker_key.clone(),
             pr_url: Some(pr_url.clone()),
             pr_checks: vec![],
             pr_error: None,
             pr_merged: false,
             pr_closed: true,
+            is_draft: false,
         },
-        PrState::Open => {
+        github::PrState::Open => {
             let checks: Vec<(&str, Result<github::PrCheck, _>)> = vec![
                 ("ci", github::check_ci(&client, &req.branch)),
                 ("conflicts", github::check_conflicts(&client, pr_number)),
@@ -149,6 +155,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: None,
                 pr_merged: false,
                 pr_closed: false,
+                is_draft: pr_state_info.is_draft,
             }
         }
     }

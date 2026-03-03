@@ -41,6 +41,8 @@ pub struct GitHubResponse {
     pub pr_merged: bool,
     /// Whether the PR was closed (without merge).
     pub pr_closed: bool,
+    /// Whether the PR is a draft.
+    pub is_draft: bool,
 }
 
 /// Request sent to the issue actor to poll for auto-spawnable issues.

@@ -22,6 +22,13 @@ pub enum PrState {
     Merged,
 }
 
+/// Result of checking a PR's current state.
+#[derive(Debug, Clone)]
+pub struct PrStateInfo {
+    pub state: PrState,
+    pub is_draft: bool,
+}
+
 /// CI check run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckRun {
