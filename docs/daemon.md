@@ -127,6 +127,19 @@ max_nudges = 3                   # nudges before escalating to notification
 # events = ["needs_intervention", "worker_failed"]  # filter which events trigger the hook
 ```
 
+## PR Nudges
+
+When a worker has an open PR, the daemon monitors it for problems:
+
+- **ci** — CI checks are failing
+- **conflicts** — PR has merge conflicts
+- **reviews** — PR has unresolved review comments
+- **commits** — PR has non-conventional commit messages
+
+**Draft PRs** receive nudges for these problems — the agent is still actively working and can act on them. The STATE column shows `draft` (blue) for these workers.
+
+**Non-draft PRs** do not receive nudges — they're in human review. The STATE column shows `review` (cyan). Health problems still appear in the HEALTH column for visibility, but the daemon won't interrupt the agent.
+
 ## Troubleshooting
 
 **No workers discovered:**

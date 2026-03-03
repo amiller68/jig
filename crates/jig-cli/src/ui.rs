@@ -136,6 +136,9 @@ pub fn render_worker_table(workers: &[WorkerDisplayInfo], borders: bool) -> Tabl
         };
 
         let (state_text, state_color) = match w.worker_status {
+            Some(ref status) if *status == WorkerStatus::WaitingReview && w.is_draft => {
+                ("draft", Color::Blue)
+            }
             Some(ref status) => (worker_state_str(status), worker_state_color(status)),
             None => ("-", Color::DarkGrey),
         };

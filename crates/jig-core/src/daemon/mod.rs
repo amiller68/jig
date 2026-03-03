@@ -56,6 +56,8 @@ pub struct WorkerDisplayInfo {
     pub pr_url: Option<String>,
     pub issue_ref: Option<String>,
     pub pr_health: WorkerTickInfo,
+    /// Whether the worker's PR is a draft (affects display and nudge behavior).
+    pub is_draft: bool,
 }
 
 /// Per-worker PR health info collected during a tick.
@@ -343,6 +345,7 @@ impl<'a> Daemon<'a> {
 
         // Use cached GitHub data — request a check for next tick if needed
         let mut worker_tick_info = WorkerTickInfo::default();
+        let mut is_draft = false;
 
         if let Some(cached) = runtime.get_cached_pr(key) {
             worker_tick_info.has_pr = cached.pr_url.is_some();
@@ -350,6 +353,7 @@ impl<'a> Daemon<'a> {
                 worker_tick_info.pr_error = Some(err.clone());
             }
             worker_tick_info.pr_checks = cached.pr_checks.clone();
+            is_draft = cached.is_draft;
 
             // If PR was discovered by the actor but we don't have it in events, emit PrOpened
             if cached.pr_url.is_some() && new_state.pr_url.is_none() {
@@ -502,6 +506,7 @@ impl<'a> Daemon<'a> {
             pr_url: new_state.pr_url.clone(),
             issue_ref: new_state.issue_ref.clone(),
             pr_health: worker_tick_info.clone(),
+            is_draft,
         };
 
         Ok((
