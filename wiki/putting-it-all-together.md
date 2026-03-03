@@ -135,20 +135,22 @@ jig ps -w
 This starts the live watch display:
 
 ```
-jig ps --watch — 3 workers  (every 2s)
+jig ps --watch — 4 workers  (every 2s)
 
-NAME            TMUX  STATE    ISSUE       BRANCH           COMMITS  DIRTY  NUDGES  PR    HEALTH
-jwt-auth        ●     running  ENG-123     jwt-auth               2    -       -     -     -
-pagination      ●     running  ENG-124     pagination             0    ●       -     -     -
-test-coverage   ●     stalled  ENG-125     test-coverage          1    -       1     #42   ci
+WORKER                STATE    COMMITS  PR     HEALTH  ISSUE
+● jwt-auth            running        2  -      -       ENG-123
+● pagination          running        0  -      -       ENG-124
+● test-coverage       draft          3  #42    ci      ENG-125
+● error-pages         review         5  #43    ok      ENG-126
 
-                                                                              [l]ogs  [q]uit
+                                                [l]ogs  [q]uit
 ```
 
 At a glance you can see:
 
 - **Which agents are active** — `running` means tool use is flowing
 - **Who's stuck** — `stalled` means silence for 5+ minutes, the daemon will nudge
+- **Draft vs review** — `draft` (blue) means the PR is a draft and the agent is still working; `review` (cyan) means the PR is ready for human review
 - **PR health** — `ci` means checks are failing, `conflicts` means merge conflicts
 - **Progress** — Commit count tells you how far along each worker is
 
@@ -181,11 +183,23 @@ While you're writing the next batch of tickets — or reviewing code, or taking 
 
 - **Detecting idle agents** and nudging them with status check messages
 - **Monitoring PRs** for CI failures, merge conflicts, and review comments
-- **Nudging agents** to fix problems with their PRs
+- **Nudging draft PRs** — agents with draft PRs get nudged about CI failures, conflicts, and review comments so they can fix them autonomously
+- **Leaving non-draft PRs alone** — once a PR is marked ready for review, nudges stop; the human is in control
 - **Cleaning up** workers whose PRs get merged
 - **Notifying you** when a worker has been nudged too many times and needs human attention
 
 You don't need to babysit. The daemon handles the supervision loop.
+
+### Draft vs review
+
+The daemon treats draft and non-draft PRs differently:
+
+| PR state | STATE column | Nudges? | Rationale |
+|----------|-------------|---------|-----------|
+| Draft | `draft` (blue) | Yes — CI, conflicts, reviews, commits | Agent is still working, can act on problems |
+| Ready for review | `review` (cyan) | No | Human is reviewing, don't interrupt the agent |
+
+This means the typical agent workflow is: work → push → create draft PR → fix any CI/conflict issues → mark ready for review → human takes over. The daemon nudges through the draft phase and backs off once the PR is promoted.
 
 ### Nudge escalation
 
@@ -215,7 +229,9 @@ gh pr view --web
 
 ### Requesting changes
 
-If the PR needs work, leave review comments on GitHub. The daemon will detect unresolved comments and nudge the agent to address them. You don't need to manually tell the agent — the nudge includes the feedback.
+If the PR is still a draft, leave review comments on GitHub. The daemon will detect unresolved comments and nudge the agent to address them. You don't need to manually tell the agent — the nudge includes the feedback.
+
+Once the PR is marked ready for review, the daemon stops nudging. At that point, use `jig attach` to interact with the agent directly if you need changes.
 
 ### Approving and merging
 

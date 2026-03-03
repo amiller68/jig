@@ -81,6 +81,29 @@ Each spawn should include focused, specific context:
 - **Specific requirements** with enough detail for autonomous work
 - **Acceptance criteria** so the worker knows when it's done
 
+## Worker States
+
+The `STATE` column in `jig ps` reflects where each worker is in its lifecycle:
+
+| State | Color | Meaning |
+|-------|-------|---------|
+| `spawned` | blue | Just created, agent hasn't started yet |
+| `running` | green | Agent is actively using tools |
+| `idle` | yellow | Agent stopped, sitting at shell prompt |
+| `waiting` | magenta | Agent is waiting for user input |
+| `stalled` | red | No activity for 5+ minutes |
+| `draft` | blue | PR is open as draft — agent is nudged about CI/conflicts/reviews |
+| `review` | cyan | PR is ready for human review — no nudges |
+| `approved` | green | PR approved |
+| `merged` | green | PR merged |
+| `failed` | red | Worker failed |
+
+### Draft vs review
+
+Workers with **draft PRs** show `draft` and receive automatic nudges for CI failures, merge conflicts, and unresolved review comments. The agent can fix these autonomously.
+
+Workers with **non-draft PRs** show `review` and do not receive nudges — the PR is in human review. Health problems still appear in the HEALTH column for visibility.
+
 ## Tips
 
 - Run `/issues` first to understand the full scope before spawning
