@@ -313,10 +313,39 @@ pub struct WorktreeConfig {
 }
 
 /// Spawn configuration in jig.toml
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnConfig {
+    /// Auto-start Claude in spawned windows.
     #[serde(default)]
     pub auto: bool,
+    /// Whether the daemon should auto-spawn workers for eligible issues.
+    #[serde(default)]
+    pub auto_spawn: bool,
+    /// Max concurrent workers the daemon will auto-spawn (default 3).
+    #[serde(default = "default_max_concurrent_workers")]
+    pub max_concurrent_workers: usize,
+    /// Seconds between issue polls for auto-spawn (default 120).
+    #[serde(default = "default_auto_spawn_interval")]
+    pub auto_spawn_interval: u64,
+}
+
+fn default_max_concurrent_workers() -> usize {
+    3
+}
+
+fn default_auto_spawn_interval() -> u64 {
+    120
+}
+
+impl Default for SpawnConfig {
+    fn default() -> Self {
+        Self {
+            auto: false,
+            auto_spawn: false,
+            max_concurrent_workers: default_max_concurrent_workers(),
+            auto_spawn_interval: default_auto_spawn_interval(),
+        }
+    }
 }
 
 /// Agent configuration in jig.toml

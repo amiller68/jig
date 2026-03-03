@@ -31,6 +31,7 @@ query ListIssues($teamKey: String!, $filter: IssueFilter, $first: Int) {
       project { name }
       team { name }
       children { nodes { identifier } }
+      labels { nodes { name } }
       relations(filter: { type: { eq: "blocks" } }) {
         nodes {
           relatedIssue { identifier }
@@ -54,6 +55,7 @@ query GetIssue($identifier: String!) {
       project { name }
       team { name }
       children { nodes { identifier } }
+      labels { nodes { name } }
       relations(filter: { type: { eq: "blocks" } }) {
         nodes {
           relatedIssue { identifier }
@@ -105,6 +107,7 @@ struct RawIssue {
     project: Option<RawProject>,
     team: RawTeam,
     children: NodeList<RawChildRef>,
+    labels: NodeList<RawLabel>,
     relations: NodeList<RawRelation>,
 }
 
@@ -127,6 +130,11 @@ struct RawTeam {
 #[derive(Debug, Deserialize)]
 struct RawChildRef {
     identifier: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLabel {
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +201,12 @@ impl From<RawIssue> for Issue {
             _ => format!("# {}", raw.title),
         };
 
+        let auto = raw
+            .labels
+            .nodes
+            .iter()
+            .any(|l| l.name.eq_ignore_ascii_case("jig-auto"));
+
         Issue {
             id: raw.identifier,
             title: raw.title,
@@ -203,6 +217,7 @@ impl From<RawIssue> for Issue {
             body,
             source: raw.url,
             children,
+            auto,
         }
     }
 }

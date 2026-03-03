@@ -104,6 +104,8 @@ pub struct Issue {
     pub source: String,
     /// Child ticket IDs (for epic indices with a `## Tickets` table).
     pub children: Vec<String>,
+    /// Whether this issue is auto-spawnable by the daemon.
+    pub auto: bool,
 }
 
 /// Filter criteria for listing issues.
@@ -171,6 +173,7 @@ mod tests {
             body: String::new(),
             source: String::new(),
             children: vec![],
+            auto: false,
         };
 
         assert!(issue.matches(&IssueFilter::default()));

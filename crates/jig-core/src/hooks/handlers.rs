@@ -89,6 +89,7 @@ fn head_sha(repo_path: &Path) -> Option<String> {
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo_path)
+        .stdin(std::process::Stdio::null())
         .output()
         .ok()?;
 

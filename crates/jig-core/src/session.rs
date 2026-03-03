@@ -3,7 +3,7 @@
 //! Handles tmux session and window operations for worker management.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
 
@@ -11,17 +11,30 @@ use crate::error::{Error, Result};
 pub fn session_exists(session: &str) -> bool {
     Command::new("tmux")
         .args(["has-session", "-t", session])
+        .stdin(Stdio::null())
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
-/// Create a tmux session if it doesn't exist
+/// Create a tmux session if it doesn't exist.
+/// Sets a distinct prefix (Ctrl-a) so splits work when nested inside another tmux.
 pub fn ensure_session(session: &str) -> Result<()> {
     if !session_exists(session) {
         Command::new("tmux")
             .args(["new-session", "-d", "-s", session])
+            .stdin(Stdio::null())
             .output()?;
+
+        // Use Ctrl-a as prefix so it doesn't collide with an outer Ctrl-b session
+        let _ = Command::new("tmux")
+            .args(["set-option", "-t", session, "prefix", "C-a"])
+            .stdin(Stdio::null())
+            .output();
+        let _ = Command::new("tmux")
+            .args(["set-option", "-t", session, "mouse", "on"])
+            .stdin(Stdio::null())
+            .output();
     }
     Ok(())
 }
@@ -34,6 +47,7 @@ pub fn window_exists(session: &str, window: &str) -> bool {
 
     let output = Command::new("tmux")
         .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+        .stdin(Stdio::null())
         .output();
 
     match output {
@@ -59,6 +73,7 @@ pub fn create_window(session: &str, window: &str, dir: &Path) -> Result<()> {
             "-c",
             &dir.to_string_lossy(),
         ])
+        .stdin(Stdio::null())
         .output()?;
 
     Ok(())
@@ -74,6 +89,7 @@ pub fn send_keys(session: &str, window: &str, keys: &str) -> Result<()> {
             keys,
             "Enter",
         ])
+        .stdin(Stdio::null())
         .output()?;
 
     Ok(())
@@ -87,6 +103,7 @@ pub fn kill_window(session: &str, window: &str) -> Result<()> {
 
     Command::new("tmux")
         .args(["kill-window", "-t", &format!("{}:{}", session, window)])
+        .stdin(Stdio::null())
         .output()?;
 
     Ok(())
@@ -96,6 +113,7 @@ pub fn kill_window(session: &str, window: &str) -> Result<()> {
 pub fn select_window(session: &str, window: &str) -> Result<()> {
     Command::new("tmux")
         .args(["select-window", "-t", &format!("{}:{}", session, window)])
+        .stdin(Stdio::null())
         .output()?;
 
     Ok(())
@@ -141,6 +159,47 @@ pub fn attach(session: &str) -> Result<()> {
     Ok(())
 }
 
+/// Attach to a specific window without changing other clients' active window.
+#[cfg(unix)]
+pub fn attach_window(session: &str, window: &str) -> Result<()> {
+    if !session_exists(session) {
+        return Err(Error::TmuxSessionNotFound(session.to_string()));
+    }
+
+    use std::ffi::CString;
+
+    let target = format!("{}:{}", session, window);
+    let cmd = CString::new("tmux").unwrap();
+    let args: Vec<CString> = ["tmux", "attach", "-t", &target]
+        .iter()
+        .map(|a| CString::new(*a).unwrap())
+        .collect();
+    let args: Vec<&std::ffi::CStr> = args.iter().map(|a| a.as_c_str()).collect();
+
+    let err = nix::unistd::execvp(&cmd, &args);
+    Err(Error::Custom(format!("Failed to attach: {:?}", err)))
+}
+
+#[cfg(not(unix))]
+pub fn attach_window(session: &str, window: &str) -> Result<()> {
+    if !session_exists(session) {
+        return Err(Error::TmuxSessionNotFound(session.to_string()));
+    }
+
+    let target = format!("{}:{}", session, window);
+    let status = Command::new("tmux")
+        .args(["attach", "-t", &target])
+        .status()?;
+
+    if !status.success() {
+        return Err(Error::Custom(
+            "Failed to attach to tmux session".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Check if a pane is running a command (not at shell prompt)
 pub fn pane_is_running(session: &str, window: &str) -> bool {
     if !window_exists(session, window) {
@@ -155,6 +214,7 @@ pub fn pane_is_running(session: &str, window: &str) -> bool {
             "-F",
             "#{pane_current_command}",
         ])
+        .stdin(Stdio::null())
         .output();
 
     match output {
@@ -181,6 +241,7 @@ pub fn get_pane_command(session: &str, window: &str) -> Option<String> {
             "-F",
             "#{pane_current_command}",
         ])
+        .stdin(Stdio::null())
         .output()
         .ok()?;
 
@@ -200,6 +261,7 @@ pub fn list_windows(session: &str) -> Result<Vec<String>> {
 
     let output = Command::new("tmux")
         .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+        .stdin(Stdio::null())
         .output()?;
 
     let text = String::from_utf8_lossy(&output.stdout);

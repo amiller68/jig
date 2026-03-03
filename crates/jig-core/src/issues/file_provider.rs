@@ -70,6 +70,14 @@ impl IssueProvider for FileProvider {
         Ok(all.into_iter().filter(|i| i.matches(filter)).collect())
     }
 
+    fn list_spawnable(&self) -> Result<Vec<Issue>> {
+        let all = self.scan_all()?;
+        Ok(all
+            .into_iter()
+            .filter(|i| i.auto && i.status == IssueStatus::Planned)
+            .collect())
+    }
+
     fn get(&self, id: &str) -> Result<Option<Issue>> {
         if !self.issues_dir.is_dir() {
             return Ok(None);
@@ -148,6 +156,10 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
 
     let children = extract_children(&content, rel);
 
+    let auto = extract_field(&content, "Auto")
+        .map(|s| s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes"))
+        .unwrap_or(false);
+
     Ok(Issue {
         id,
         title,
@@ -158,6 +170,7 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         body: content,
         source: path.to_string_lossy().to_string(),
         children,
+        auto,
     })
 }
 
@@ -419,6 +432,7 @@ mod tests {
                 body: String::new(),
                 source: String::new(),
                 children: vec![],
+                auto: false,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -430,6 +444,7 @@ mod tests {
                 body: String::new(),
                 source: String::new(),
                 children: vec![],
+                auto: false,
             },
         ];
         sort_issues(&mut issues);

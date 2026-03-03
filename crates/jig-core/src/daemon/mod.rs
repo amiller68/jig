@@ -1,19 +1,28 @@
 //! Daemon loop — the conductor that ties event derivation, dispatch, and execution together.
 //!
 //! Runs a periodic loop:
-//! 1. Load repo registry → discover all workers
-//! 2. For each worker: read events → derive state → compare → dispatch actions
-//! 3. Execute actions (nudge via tmux, notify via hooks)
-//! 4. Save updated state
-//! 5. Sleep and repeat
+//! 1. Drain actor responses (non-blocking)
+//! 2. Trigger background sync if interval elapsed
+//! 3. For each worker: read events → derive state → compare → dispatch actions
+//! 4. Execute actions (nudge via tmux, notify via hooks)
+//! 5. Save updated state
+//! 6. Trigger issue poll for auto-spawn
+//! 7. Auto-spawn eligible workers
 
 mod discovery;
+pub mod github_actor;
+pub mod issue_actor;
+pub mod messages;
 mod pr;
+pub mod runtime;
+pub mod sync_actor;
 
 use std::collections::HashMap;
-use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::config::JigToml;
 use crate::context::RepoContext;
 use crate::dispatch::{dispatch_actions, Action};
 use crate::error::Result;
@@ -21,12 +30,33 @@ use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::global::{GlobalConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::execute_nudge;
-use crate::registry::RepoRegistry;
+use crate::registry::{RepoEntry, RepoRegistry};
+use crate::spawn::TaskStatus;
 use crate::templates::TemplateEngine;
 use crate::tmux::{TmuxClient, TmuxTarget};
+use crate::worker::WorkerStatus;
 
 use discovery::discover_workers;
 use pr::{make_github_client, PrMonitor};
+
+pub use messages::SpawnableIssue;
+pub use runtime::{DaemonRuntime, RuntimeConfig};
+
+/// Pre-computed display data for a worker, populated during tick so the render
+/// callback can format output without any subprocess calls or file I/O.
+#[derive(Debug, Clone)]
+pub struct WorkerDisplayInfo {
+    pub name: String,
+    pub branch: String,
+    pub tmux_status: TaskStatus,
+    pub worker_status: Option<WorkerStatus>,
+    pub nudge_count: u32,
+    pub commits_ahead: usize,
+    pub is_dirty: bool,
+    pub pr_url: Option<String>,
+    pub issue_ref: Option<String>,
+    pub pr_health: WorkerTickInfo,
+}
 
 /// Per-worker PR health info collected during a tick.
 #[derive(Debug, Clone, Default)]
@@ -48,6 +78,10 @@ pub struct DaemonConfig {
     pub once: bool,
     /// Tmux session prefix (default: "jig-").
     pub session_prefix: String,
+    /// Skip `git fetch` on each tick (unused with actors — kept for API compat).
+    pub skip_sync: bool,
+    /// If set, only process workers for this repo name.
+    pub repo_filter: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -56,6 +90,8 @@ impl Default for DaemonConfig {
             interval_seconds: 30,
             once: false,
             session_prefix: "jig-".to_string(),
+            skip_sync: false,
+            repo_filter: None,
         }
     }
 }
@@ -70,6 +106,10 @@ pub struct TickResult {
     pub errors: Vec<String>,
     /// Per-worker PR health info, keyed by "repo/worker".
     pub worker_info: HashMap<String, WorkerTickInfo>,
+    /// Issues auto-spawned this tick.
+    pub auto_spawned: Vec<String>,
+    /// Pre-computed display data for the render callback (zero I/O).
+    pub worker_display: Vec<WorkerDisplayInfo>,
 }
 
 /// The daemon orchestrator — holds references to shared infrastructure.
@@ -98,17 +138,155 @@ impl<'a> Daemon<'a> {
         }
     }
 
-    /// Execute a single tick of the daemon: check all workers and dispatch actions.
-    pub fn tick(&self) -> Result<TickResult> {
+    /// Look up the repo path from the registry by repo name.
+    fn find_repo_path<'r>(registry: &'r RepoRegistry, repo_name: &str) -> Option<&'r RepoEntry> {
+        registry.repos().iter().find(|e| {
+            e.path
+                .file_name()
+                .map(|n| n.to_string_lossy() == repo_name)
+                .unwrap_or(false)
+        })
+    }
+
+    /// Get tmux status for a worker (session:window alive check).
+    fn get_tmux_status(&self, repo_name: &str, worker_name: &str) -> TaskStatus {
+        let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+        let target = TmuxTarget::new(&session, worker_name);
+        if !self.tmux.has_session(&session) {
+            return TaskStatus::NoSession;
+        }
+        if !self.tmux.has_window(&target) {
+            return TaskStatus::NoWindow;
+        }
+        if self.tmux.pane_is_running(&target) {
+            TaskStatus::Running
+        } else {
+            TaskStatus::Exited
+        }
+    }
+
+    /// Execute a single tick of the daemon using actor-based runtime.
+    /// If `quit` is set, the tick will bail early between workers.
+    pub fn tick(&self, runtime: &mut DaemonRuntime, quit: &AtomicBool) -> Result<TickResult> {
         let mut result = TickResult::default();
+
+        // 1. Drain all pending actor responses (non-blocking)
+        runtime.drain_sync();
+        runtime.drain_github();
+        let spawnable = runtime.drain_issues();
 
         // Load current global state (previous worker states)
         let mut workers_state = WorkersState::load().unwrap_or_default();
 
         // Discover workers from repo registry
         let registry = RepoRegistry::load().unwrap_or_default();
-        self.sync_repos(&registry);
-        let worker_list = discover_workers(&registry);
+
+        // 2. Trigger background sync if interval elapsed
+        if !self.daemon_config.skip_sync {
+            runtime.maybe_trigger_sync(&registry);
+        }
+
+        let mut worker_list = discover_workers(&registry);
+
+        // Filter to single repo if configured
+        if let Some(ref filter) = self.daemon_config.repo_filter {
+            worker_list.retain(|(repo_name, _)| repo_name == filter);
+        }
+
+        tracing::debug!(count = worker_list.len(), "discovered workers");
+
+        // 3. Process each worker
+        for (repo_name, worker_name) in &worker_list {
+            if quit.load(Ordering::Relaxed) {
+                break;
+            }
+            result.workers_checked += 1;
+            let key = format!("{}/{}", repo_name, worker_name);
+
+            match self.process_worker(
+                repo_name,
+                worker_name,
+                &key,
+                &mut workers_state,
+                &registry,
+                runtime,
+            ) {
+                Ok((actions, nudges, notifs, worker_tick_info, display_info)) => {
+                    result.actions_dispatched += actions;
+                    result.nudges_sent += nudges;
+                    result.notifications_sent += notifs;
+                    result.worker_info.insert(key.clone(), worker_tick_info);
+                    result.worker_display.push(display_info);
+                }
+                Err(e) => {
+                    result.errors.push(format!("{}: {}", key, e));
+                }
+            }
+        }
+
+        // Filter out terminal workers and workers with no tmux session
+        result.worker_display.retain(|w| {
+            let is_terminal = w
+                .worker_status
+                .as_ref()
+                .map(|s| s.is_terminal())
+                .unwrap_or(false);
+            let tmux_dead = matches!(w.tmux_status, TaskStatus::NoSession | TaskStatus::NoWindow);
+            !is_terminal && !tmux_dead
+        });
+        result.worker_display.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Save updated state
+        workers_state.save().unwrap_or_else(|e| {
+            tracing::warn!("failed to save workers state: {}", e);
+        });
+
+        // 4. Trigger issue poll if auto-spawn enabled
+        let worker_names: Vec<String> = worker_list.iter().map(|(_, w)| w.clone()).collect();
+
+        // Find a repo root to use for issue polling (first registered repo)
+        if let Some(entry) = registry.repos().first() {
+            runtime.maybe_trigger_issue_poll(&entry.path, &worker_names);
+        }
+
+        // 5. Auto-spawn from drained spawnable issues
+        for issue in spawnable {
+            match self.auto_spawn_worker(&issue) {
+                Ok(()) => {
+                    tracing::info!(
+                        worker = %issue.worker_name,
+                        issue = %issue.issue_id,
+                        "auto-spawned worker"
+                    );
+                    result.auto_spawned.push(issue.worker_name.clone());
+                }
+                Err(e) => {
+                    result
+                        .errors
+                        .push(format!("auto-spawn {}: {}", issue.issue_id, e));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Execute a single tick without a runtime (legacy path for non-watch mode).
+    pub fn tick_once(&self) -> Result<TickResult> {
+        let mut result = TickResult::default();
+
+        let mut workers_state = WorkersState::load().unwrap_or_default();
+        let registry = RepoRegistry::load().unwrap_or_default();
+
+        if !self.daemon_config.skip_sync {
+            self.sync_repos(&registry);
+        }
+
+        let mut worker_list = discover_workers(&registry);
+
+        if let Some(ref filter) = self.daemon_config.repo_filter {
+            worker_list.retain(|(repo_name, _)| repo_name == filter);
+        }
 
         tracing::debug!(count = worker_list.len(), "discovered workers");
 
@@ -116,7 +294,13 @@ impl<'a> Daemon<'a> {
             result.workers_checked += 1;
             let key = format!("{}/{}", repo_name, worker_name);
 
-            match self.process_worker(repo_name, worker_name, &key, &mut workers_state, &registry) {
+            match self.process_worker_blocking(
+                repo_name,
+                worker_name,
+                &key,
+                &mut workers_state,
+                &registry,
+            ) {
                 Ok((actions, nudges, notifs, worker_tick_info)) => {
                     result.actions_dispatched += actions;
                     result.nudges_sent += nudges;
@@ -129,7 +313,6 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Save updated state
         workers_state.save().unwrap_or_else(|e| {
             tracing::warn!("failed to save workers state: {}", e);
         });
@@ -137,7 +320,7 @@ impl<'a> Daemon<'a> {
         Ok(result)
     }
 
-    /// Process a single worker: derive state, dispatch, execute.
+    /// Process a single worker using cached PR data from the runtime.
     fn process_worker(
         &self,
         repo_name: &str,
@@ -145,15 +328,171 @@ impl<'a> Daemon<'a> {
         key: &str,
         workers_state: &mut WorkersState,
         registry: &RepoRegistry,
-    ) -> Result<(usize, usize, usize, WorkerTickInfo)> {
-        // Read event log
+        runtime: &DaemonRuntime,
+    ) -> Result<(usize, usize, usize, WorkerTickInfo, WorkerDisplayInfo)> {
         let event_log = EventLog::for_worker(repo_name, worker_name)?;
         let events = event_log.read_all()?;
+        let new_state = WorkerState::reduce(&events, &self.config.health);
 
-        // Derive new state
+        let branch_name = events
+            .iter()
+            .find(|e| e.event_type == EventType::Spawn)
+            .and_then(|e| e.data.get("branch").and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| worker_name.to_string());
+
+        // Use cached GitHub data — request a check for next tick if needed
+        let mut worker_tick_info = WorkerTickInfo::default();
+
+        if let Some(cached) = runtime.get_cached_pr(key) {
+            worker_tick_info.has_pr = cached.pr_url.is_some();
+            if let Some(ref err) = cached.pr_error {
+                worker_tick_info.pr_error = Some(err.clone());
+            }
+            worker_tick_info.pr_checks = cached.pr_checks.clone();
+
+            // If PR was discovered by the actor but we don't have it in events, emit PrOpened
+            if cached.pr_url.is_some() && new_state.pr_url.is_none() {
+                if let Some(ref url) = cached.pr_url {
+                    let pr_number = url.rsplit('/').next().unwrap_or("0");
+                    let event = Event::new(EventType::PrOpened)
+                        .with_field("pr_url", url.as_str())
+                        .with_field("pr_number", pr_number);
+                    if let Err(e) = event_log.append(&event) {
+                        tracing::warn!(worker = key, error = %e, "failed to emit PrOpened event");
+                    }
+                }
+            }
+        }
+
+        // Request PR check for next tick if worker is active
+        if !new_state.status.is_terminal() {
+            runtime.request_pr_check(key, repo_name, &branch_name, new_state.pr_url.as_deref());
+        }
+
+        // Re-read state with potential PrOpened event
+        let events = event_log.read_all()?;
+        let new_state = WorkerState::reduce(&events, &self.config.health);
+
+        let old_state = workers_state
+            .get_worker(key)
+            .map(entry_to_worker_state)
+            .unwrap_or_default();
+
+        tracing::debug!(
+            worker = key,
+            old_status = old_state.status.as_str(),
+            new_status = new_state.status.as_str(),
+            "worker state"
+        );
+
+        let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
+
+        // Handle merged/closed PR from cached data
+        if let Some(cached) = runtime.get_cached_pr(key) {
+            if cached.pr_merged && self.config.github.auto_cleanup_merged {
+                actions.push(Action::Cleanup {
+                    worker_id: worker_name.to_string(),
+                });
+                actions.push(Action::Notify {
+                    worker_id: worker_name.to_string(),
+                    message: "PR merged, worker cleaned up".to_string(),
+                });
+            } else if cached.pr_closed {
+                actions.push(Action::Notify {
+                    worker_id: worker_name.to_string(),
+                    message: "PR closed without merge".to_string(),
+                });
+                if self.config.github.auto_cleanup_closed {
+                    actions.push(Action::Cleanup {
+                        worker_id: worker_name.to_string(),
+                    });
+                }
+            }
+        }
+
+        let action_count = actions.len();
+        let (nudge_count, notif_count) = self.execute_actions(
+            &actions,
+            repo_name,
+            &branch_name,
+            key,
+            &new_state,
+            &event_log,
+        );
+
+        // Update workers.json
+        workers_state.set_worker(
+            key,
+            WorkerEntry {
+                repo: repo_name.to_string(),
+                branch: worker_name.to_string(),
+                status: new_state.status.as_str().to_string(),
+                issue: new_state.issue_ref.clone(),
+                pr_url: new_state.pr_url.clone(),
+                started_at: new_state.started_at.unwrap_or(0),
+                last_event_at: new_state.last_event_at.unwrap_or(0),
+                nudge_counts: new_state.nudge_counts.clone(),
+            },
+        );
+
+        // Build display info — git checks are fast local ops
+        let tmux_status = self.get_tmux_status(repo_name, worker_name);
+        let (commits_ahead, is_dirty) = if let Some(entry) =
+            Self::find_repo_path(registry, repo_name)
+        {
+            let worktree_path = entry.path.join(crate::config::JIG_DIR).join(worker_name);
+            if worktree_path.exists() {
+                let base = RepoContext::resolve_base_branch_for(&entry.path)
+                    .unwrap_or_else(|_| "origin/main".to_string());
+                let ahead = crate::git::get_commits_ahead(&worktree_path, &base)
+                    .unwrap_or_default()
+                    .len();
+                let dirty = crate::git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+                (ahead, dirty)
+            } else {
+                (0, false)
+            }
+        } else {
+            (0, false)
+        };
+
+        let nudges_total: u32 = new_state.nudge_counts.values().sum();
+        let display_info = WorkerDisplayInfo {
+            name: worker_name.to_string(),
+            branch: branch_name.clone(),
+            tmux_status,
+            worker_status: Some(new_state.status),
+            nudge_count: nudges_total,
+            commits_ahead,
+            is_dirty,
+            pr_url: new_state.pr_url.clone(),
+            issue_ref: new_state.issue_ref.clone(),
+            pr_health: worker_tick_info.clone(),
+        };
+
+        Ok((
+            action_count,
+            nudge_count,
+            notif_count,
+            worker_tick_info,
+            display_info,
+        ))
+    }
+
+    /// Process a single worker with blocking I/O (legacy path for one-shot mode).
+    fn process_worker_blocking(
+        &self,
+        repo_name: &str,
+        worker_name: &str,
+        key: &str,
+        workers_state: &mut WorkersState,
+        registry: &RepoRegistry,
+    ) -> Result<(usize, usize, usize, WorkerTickInfo)> {
+        let event_log = EventLog::for_worker(repo_name, worker_name)?;
+        let events = event_log.read_all()?;
         let mut new_state = WorkerState::reduce(&events, &self.config.health);
 
-        // Extract the real branch name (with slashes) from the spawn event
         let branch_name = events
             .iter()
             .find(|e| e.event_type == EventType::Spawn)
@@ -173,7 +512,6 @@ impl<'a> Daemon<'a> {
                             tracing::warn!(worker = key, error = %e, "failed to emit PrOpened event");
                         } else {
                             tracing::info!(worker = key, pr_url = %pr_info.url, "discovered PR for branch");
-                            // Re-derive state with the new event included
                             if let Ok(updated_events) = event_log.read_all() {
                                 new_state =
                                     WorkerState::reduce(&updated_events, &self.config.health);
@@ -190,7 +528,6 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Get old state from workers.json
         let old_state = workers_state
             .get_worker(key)
             .map(entry_to_worker_state)
@@ -203,10 +540,9 @@ impl<'a> Daemon<'a> {
             "worker state"
         );
 
-        // Dispatch actions based on state transition
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
 
-        // Check PR lifecycle if worker has a PR URL and isn't already terminal
+        // Check PR lifecycle
         let mut worker_tick_info = WorkerTickInfo::default();
         if !new_state.status.is_terminal() {
             if let Some(pr_url) = &new_state.pr_url {
@@ -235,21 +571,54 @@ impl<'a> Daemon<'a> {
         }
 
         let action_count = actions.len();
+        let (nudge_count, notif_count) = self.execute_actions(
+            &actions,
+            repo_name,
+            &branch_name,
+            key,
+            &new_state,
+            &event_log,
+        );
+
+        workers_state.set_worker(
+            key,
+            WorkerEntry {
+                repo: repo_name.to_string(),
+                branch: worker_name.to_string(),
+                status: new_state.status.as_str().to_string(),
+                issue: new_state.issue_ref.clone(),
+                pr_url: new_state.pr_url.clone(),
+                started_at: new_state.started_at.unwrap_or(0),
+                last_event_at: new_state.last_event_at.unwrap_or(0),
+                nudge_counts: new_state.nudge_counts.clone(),
+            },
+        );
+
+        Ok((action_count, nudge_count, notif_count, worker_tick_info))
+    }
+
+    /// Execute dispatched actions, returning (nudge_count, notif_count).
+    fn execute_actions(
+        &self,
+        actions: &[Action],
+        repo_name: &str,
+        branch_name: &str,
+        key: &str,
+        new_state: &WorkerState,
+        event_log: &EventLog,
+    ) -> (usize, usize) {
         let mut nudge_count = 0;
         let mut notif_count = 0;
 
-        // Execute actions
-        for action in &actions {
+        for action in actions {
             match action {
                 Action::Nudge {
                     worker_id: _,
                     nudge_type,
                 } => {
-                    // Use branch_name (with slashes) for tmux window lookup,
-                    // since spawn creates windows with the real branch name
                     let target = TmuxTarget::new(
                         format!("{}{}", self.daemon_config.session_prefix, repo_name),
-                        branch_name.clone(),
+                        branch_name.to_string(),
                     );
 
                     if self.tmux.has_window(&target) {
@@ -268,11 +637,11 @@ impl<'a> Daemon<'a> {
                         if let Err(e) = execute_nudge(
                             &target,
                             *nudge_type,
-                            &new_state,
+                            new_state,
                             self.config,
                             self.engine,
                             self.tmux,
-                            &event_log,
+                            event_log,
                         ) {
                             tracing::warn!("nudge failed for {}: {}", key, e);
                         } else {
@@ -315,17 +684,15 @@ impl<'a> Daemon<'a> {
                 Action::Cleanup { worker_id } => {
                     let target = TmuxTarget::new(
                         format!("{}{}", self.daemon_config.session_prefix, repo_name),
-                        branch_name.clone(),
+                        branch_name.to_string(),
                     );
 
-                    // Kill tmux window if it exists
                     if self.tmux.has_window(&target) {
                         if let Err(e) = self.tmux.kill_window(&target) {
                             tracing::warn!("failed to kill window for {}: {}", worker_id, e);
                         }
                     }
 
-                    // Emit terminal event
                     let event = Event::new(EventType::Terminal).with_field("reason", "cleanup");
                     if let Err(e) = event_log.append(&event) {
                         tracing::warn!("failed to emit cleanup event for {}: {}", key, e);
@@ -336,25 +703,88 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Update workers.json with new state
-        workers_state.set_worker(
-            key,
-            WorkerEntry {
-                repo: repo_name.to_string(),
-                branch: worker_name.to_string(),
-                status: new_state.status.as_str().to_string(),
-                issue: new_state.issue_ref.clone(),
-                pr_url: new_state.pr_url.clone(),
-                started_at: new_state.started_at.unwrap_or(0),
-                last_event_at: new_state.last_event_at.unwrap_or(0),
-                nudge_counts: new_state.nudge_counts.clone(),
-            },
-        );
-
-        Ok((action_count, nudge_count, notif_count, worker_tick_info))
+        (nudge_count, notif_count)
     }
 
-    /// Fetch the configured base branch for each registered repo.
+    /// Auto-spawn a worker for an issue.
+    fn auto_spawn_worker(&self, issue: &SpawnableIssue) -> Result<()> {
+        use crate::config::JIG_DIR;
+
+        let repo_root = &issue.repo_root;
+        let git_common_dir = crate::git::get_git_common_dir_for(repo_root)?;
+        let worktrees_dir = repo_root.join(JIG_DIR);
+        let worktree_path = worktrees_dir.join(&issue.worker_name);
+
+        if worktree_path.exists() {
+            tracing::debug!(worker = %issue.worker_name, "worktree already exists, skipping");
+            return Ok(());
+        }
+
+        // Ensure .jig is gitignored
+        crate::git::ensure_worktrees_excluded(&git_common_dir)?;
+
+        // Create parent directories
+        if let Some(parent) = worktree_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Resolve base branch
+        let base_branch = RepoContext::resolve_base_branch_for(repo_root)
+            .unwrap_or_else(|_| "origin/main".to_string());
+
+        // Create the worktree
+        let branch = &issue.worker_name;
+        crate::git::create_worktree(&worktree_path, branch, &base_branch)?;
+
+        // Copy configured files
+        let copy_files = crate::config::get_copy_files(repo_root)?;
+        if !copy_files.is_empty() {
+            crate::config::copy_worktree_files(repo_root, &worktree_path, &copy_files)?;
+        }
+
+        // Run on-create hook
+        crate::config::run_on_create_hook_for_repo(repo_root, &worktree_path)?;
+
+        // Build repo context for registration
+        let repo_name = repo_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let session_name = format!("jig-{}", repo_name);
+        let repo_ctx = RepoContext {
+            repo_root: repo_root.clone(),
+            worktrees_dir,
+            git_common_dir,
+            base_branch: base_branch.clone(),
+            session_name,
+        };
+
+        // Register worker with issue context
+        let context = format!("{}\n\n{}", issue.issue_title, issue.issue_body);
+        crate::spawn::register(
+            &repo_ctx,
+            &issue.worker_name,
+            branch,
+            Some(&context),
+            Some(&issue.issue_id),
+        )?;
+
+        // Launch tmux window
+        let jig_toml = JigToml::load(repo_root)?.unwrap_or_default();
+        let auto_start = jig_toml.spawn.auto;
+
+        crate::spawn::launch_tmux_window(
+            &repo_ctx,
+            &issue.worker_name,
+            &worktree_path,
+            auto_start,
+            Some(&context),
+        )?;
+
+        Ok(())
+    }
+
+    /// Fetch the configured base branch for each registered repo (blocking).
     fn sync_repos(&self, registry: &RepoRegistry) {
         for entry in registry.repos() {
             if !entry.path.exists() {
@@ -364,9 +794,10 @@ impl<'a> Daemon<'a> {
                 .unwrap_or_else(|_| "origin/main".to_string());
             let (remote, branch) = base.split_once('/').unwrap_or(("origin", &base));
 
-            match Command::new("git")
+            match std::process::Command::new("git")
                 .args(["fetch", remote, branch])
                 .current_dir(&entry.path)
+                .stdin(std::process::Stdio::null())
                 .output()
             {
                 Ok(o) if o.status.success() => {
@@ -393,24 +824,32 @@ fn make_notifier(global_config: &GlobalConfig) -> Result<Notifier> {
     Ok(Notifier::new(global_config.notify.clone(), queue))
 }
 
-/// Run the daemon loop with a per-tick callback.
+/// Run the daemon loop with a per-tick callback and actor runtime.
 ///
 /// The callback receives each `TickResult` and returns `true` to continue or `false` to stop.
 /// The callback is responsible for any inter-tick delay (sleep, keypress polling, etc.).
-/// Returns after one pass if `config.once` is true.
-pub fn run_with<F>(daemon_config: &DaemonConfig, mut on_tick: F) -> Result<()>
+///
+/// A shared `quit` flag is provided so that external code (e.g. a key-polling thread)
+/// can signal the tick to bail early between workers.
+pub fn run_with<F>(
+    daemon_config: &DaemonConfig,
+    runtime_config: RuntimeConfig,
+    mut on_tick: F,
+) -> Result<Arc<AtomicBool>>
 where
-    F: FnMut(&TickResult) -> bool,
+    F: FnMut(&TickResult, &Arc<AtomicBool>) -> bool,
 {
     let global_config = GlobalConfig::load()?;
     let tmux = TmuxClient::new();
     let engine = TemplateEngine::new();
     let notifier = make_notifier(&global_config)?;
-
     let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
 
+    let mut runtime = DaemonRuntime::new(runtime_config);
+    let quit = Arc::new(AtomicBool::new(false));
+
     loop {
-        match daemon.tick() {
+        match daemon.tick(&mut runtime, &quit) {
             Ok(tick) => {
                 if tick.workers_checked > 0 || !tick.errors.is_empty() {
                     tracing::info!(
@@ -425,9 +864,12 @@ where
                 for err in &tick.errors {
                     tracing::warn!("worker error: {}", err);
                 }
-                let keep_going = on_tick(&tick);
+                if quit.load(Ordering::Relaxed) {
+                    return Ok(quit);
+                }
+                let keep_going = on_tick(&tick, &quit);
                 if daemon_config.once || !keep_going {
-                    return Ok(());
+                    return Ok(quit);
                 }
             }
             Err(e) => {
@@ -435,30 +877,50 @@ where
                 if daemon_config.once {
                     return Err(e);
                 }
-                // Sleep on error to avoid tight loop
+                if quit.load(Ordering::Relaxed) {
+                    return Ok(quit);
+                }
                 std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
             }
         }
     }
 }
 
-/// Run the daemon loop. Returns after one pass if `config.once` is true.
+/// Run the daemon loop (simple blocking mode). Returns after one pass if `config.once` is true.
 pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
-    run_with(daemon_config, |tick| {
-        // Print summary to stderr so it's visible without RUST_LOG
-        if tick.workers_checked > 0 || !tick.errors.is_empty() {
-            eprintln!(
-                "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
-                tick.workers_checked,
-                tick.actions_dispatched,
-                tick.nudges_sent,
-                tick.notifications_sent,
-                tick.errors.len(),
-            );
+    let global_config = GlobalConfig::load()?;
+    let tmux = TmuxClient::new();
+    let engine = TemplateEngine::new();
+    let notifier = make_notifier(&global_config)?;
+    let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
+
+    loop {
+        match daemon.tick_once() {
+            Ok(tick) => {
+                if tick.workers_checked > 0 || !tick.errors.is_empty() {
+                    eprintln!(
+                        "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
+                        tick.workers_checked,
+                        tick.actions_dispatched,
+                        tick.nudges_sent,
+                        tick.notifications_sent,
+                        tick.errors.len(),
+                    );
+                }
+                if daemon_config.once {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
+            }
+            Err(e) => {
+                tracing::error!("tick failed: {}", e);
+                if daemon_config.once {
+                    return Err(e);
+                }
+                std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
+            }
         }
-        std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
-        true // keep looping
-    })
+    }
 }
 
 /// Convert a WorkerEntry (from workers.json) back to a WorkerState for comparison.
@@ -516,5 +978,14 @@ mod tests {
         assert_eq!(result.workers_checked, 0);
         assert_eq!(result.actions_dispatched, 0);
         assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn runtime_config_defaults() {
+        let config = RuntimeConfig::default();
+        assert!(!config.auto_spawn);
+        assert_eq!(config.max_concurrent_workers, 3);
+        assert_eq!(config.auto_spawn_interval, 120);
+        assert_eq!(config.sync_interval, 60);
     }
 }

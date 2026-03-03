@@ -237,16 +237,15 @@ fn get_worker_status(session: &str, window: &str) -> TaskStatus {
 
 /// Attach to tmux session
 pub fn attach(repo: &RepoContext, name: Option<&str>) -> Result<()> {
-    // If a specific window is requested, select it first
     if let Some(window) = name {
         if !session::window_exists(&repo.session_name, window) {
             return Err(Error::WorkerNotFound(window.to_string()));
         }
-        session::select_window(&repo.session_name, window)?;
+        // Attach directly to session:window — doesn't change other clients' active window
+        session::attach_window(&repo.session_name, window)
+    } else {
+        session::attach(&repo.session_name)
     }
-
-    // Attach to session
-    session::attach(&repo.session_name)
 }
 
 /// Kill a worker's tmux window (without updating state)

@@ -1,0 +1,69 @@
+//! Message types for daemon actor channels.
+
+use std::path::PathBuf;
+
+/// Request sent to the sync actor to fetch repos.
+pub struct SyncRequest {
+    /// (repo_name, repo_path, base_branch)
+    pub repos: Vec<(String, PathBuf, String)>,
+}
+
+/// Response from the sync actor after completing git fetches.
+pub struct SyncComplete {
+    /// (repo_name, error_message) for repos that failed to sync.
+    pub errors: Vec<(String, String)>,
+}
+
+/// Request sent to the GitHub actor to check PR status for a worker.
+pub struct GitHubRequest {
+    /// Worker key ("repo/worker").
+    pub worker_key: String,
+    /// Repo name for looking up the GitHub client.
+    pub repo_name: String,
+    /// Branch name (with slashes) for the worker.
+    pub branch: String,
+    /// PR URL if already known.
+    pub pr_url: Option<String>,
+}
+
+/// Response from the GitHub actor for a single worker's PR check.
+#[derive(Debug, Clone)]
+pub struct GitHubResponse {
+    /// Worker key ("repo/worker").
+    pub worker_key: String,
+    /// Discovered or existing PR URL.
+    pub pr_url: Option<String>,
+    /// Per-check outcomes: (check_name, has_problem).
+    pub pr_checks: Vec<(String, bool)>,
+    /// Error message if the GitHub client failed.
+    pub pr_error: Option<String>,
+    /// Whether the PR was merged.
+    pub pr_merged: bool,
+    /// Whether the PR was closed (without merge).
+    pub pr_closed: bool,
+}
+
+/// Request sent to the issue actor to poll for auto-spawnable issues.
+pub struct IssueRequest {
+    /// Repo root path.
+    pub repo_root: PathBuf,
+    /// Worker names already active (to avoid re-spawning).
+    pub existing_workers: Vec<String>,
+    /// Max concurrent workers allowed.
+    pub max_concurrent_workers: usize,
+}
+
+/// An issue that is eligible for auto-spawning.
+#[derive(Debug, Clone)]
+pub struct SpawnableIssue {
+    /// Repo root path for spawning.
+    pub repo_root: PathBuf,
+    /// Issue identifier (e.g., "ENG-123" or "features/my-feature").
+    pub issue_id: String,
+    /// Issue title.
+    pub issue_title: String,
+    /// Issue body (markdown).
+    pub issue_body: String,
+    /// Derived worker name (e.g., "eng-123").
+    pub worker_name: String,
+}

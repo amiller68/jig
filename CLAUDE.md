@@ -25,7 +25,7 @@ crates/
 │   ├── notify/    # Notification queue and hook execution
 │   ├── templates/ # Handlebars template engine for nudges
 │   ├── global/    # Global config and state (~/.config/jig/)
-│   ├── daemon.rs  # Orchestrator loop (tick, discover, execute)
+│   ├── daemon/    # Orchestrator (tick, discover, actors, execute)
 │   ├── nudge.rs   # Nudge classification and delivery via tmux
 │   └── tmux.rs    # Type-safe tmux client
 └── jig-cli/       # CLI binary

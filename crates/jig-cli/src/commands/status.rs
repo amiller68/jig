@@ -3,7 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{OrchestratorState, WorkerStatus};
+use jig_core::OrchestratorState;
 
 use crate::op::{NoOutput, Op, OpContext};
 
@@ -61,7 +61,11 @@ fn show_worker_status(state: &OrchestratorState, name: &str) -> Result<(), Statu
     eprintln!("  {} {}", "Branch:".dimmed(), worker.branch);
     eprintln!("  {} {}", "Base:".dimmed(), worker.base_branch);
     eprintln!("  {} {}", "Path:".dimmed(), worker.worktree_path.display());
-    eprintln!("  {} {}", "Status:".dimmed(), format_status(&worker.status));
+    eprintln!(
+        "  {} {}",
+        "Status:".dimmed(),
+        crate::ui::format_worker_status_colored(&worker.status)
+    );
     eprintln!(
         "  {} {}:{}",
         "Session:".dimmed(),
@@ -115,25 +119,10 @@ fn show_all_workers(state: &OrchestratorState) {
     eprintln!();
 
     for worker in state.workers.values() {
-        let status_str = format_status(&worker.status);
+        let status_str = crate::ui::format_worker_status_colored(&worker.status);
         eprintln!("  {} {} {}", worker.name.cyan(), "→".dimmed(), status_str);
         if let Some(task) = &worker.task {
             eprintln!("    {}", task.description.dimmed());
         }
-    }
-}
-
-fn format_status(status: &WorkerStatus) -> String {
-    match status {
-        WorkerStatus::Spawned => "spawned".yellow().to_string(),
-        WorkerStatus::Running => "running".blue().to_string(),
-        WorkerStatus::Idle => "idle".dimmed().to_string(),
-        WorkerStatus::WaitingInput => "waiting input".magenta().to_string(),
-        WorkerStatus::Stalled => "stalled".red().to_string(),
-        WorkerStatus::WaitingReview => "waiting review".magenta().to_string(),
-        WorkerStatus::Approved => "approved".green().to_string(),
-        WorkerStatus::Merged => "merged".green().bold().to_string(),
-        WorkerStatus::Failed => "failed".red().to_string(),
-        WorkerStatus::Archived => "archived".dimmed().to_string(),
     }
 }

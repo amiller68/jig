@@ -1,77 +1,73 @@
-//! Worker discovery — scanning events directory for active workers.
+//! Worker discovery — scanning worktree directories for workers.
 
+use std::collections::HashSet;
+
+use crate::config::JIG_DIR;
 use crate::registry::RepoRegistry;
 
-/// Discover all workers by scanning the events directory.
+/// Discover all workers by scanning worktree directories in registered repos.
+///
+/// The source of truth is the `.jig/` directory in each repo — each subdirectory
+/// (recursively one level for `feature/foo` style names) is a worker.
 pub(crate) fn discover_workers(registry: &RepoRegistry) -> Vec<(String, String)> {
     let mut workers = vec![];
+    let mut seen = HashSet::new();
 
-    // Scan the events directory for worker event logs
-    let events_dir = match crate::global::global_state_dir() {
-        Ok(dir) => dir.join("events"),
-        Err(_) => return workers,
-    };
+    for entry in registry.repos() {
+        let repo_name = match entry.path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
 
-    if !events_dir.is_dir() {
-        return workers;
-    }
-
-    // Each subdirectory is named "<repo>-<worker>" and contains events.jsonl
-    let entries = match std::fs::read_dir(&events_dir) {
-        Ok(entries) => entries,
-        Err(_) => return workers,
-    };
-
-    // Build a set of known repo names from registry for matching
-    let repo_names: Vec<String> = registry
-        .repos()
-        .iter()
-        .filter_map(|entry| {
-            entry
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        })
-        .collect();
-
-    for entry in entries.flatten() {
-        let dir_name = entry.file_name().to_string_lossy().to_string();
-        let events_file = entry.path().join("events.jsonl");
-
-        if !events_file.exists() {
+        let jig_dir = entry.path.join(JIG_DIR);
+        if !jig_dir.is_dir() {
             continue;
         }
 
-        // Try to split "repo-worker" — match longest registered repo name prefix
-        if let Some((repo, worker)) = split_worker_dir(&dir_name, &repo_names) {
-            workers.push((repo, worker));
+        let entries = match std::fs::read_dir(&jig_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for child in entries.flatten() {
+            let name = child.file_name().to_string_lossy().to_string();
+
+            // Skip non-directories and hidden dirs
+            if !child.path().is_dir() || name.starts_with('.') {
+                continue;
+            }
+
+            // Check if this is a nested worker (e.g., feature/foo)
+            if has_git_worktree_marker(&child.path()) {
+                let key = format!("{}/{}", repo_name, name);
+                if seen.insert(key) {
+                    workers.push((repo_name.clone(), name));
+                }
+            } else {
+                // Scan one level deeper for grouped workers like feature/foo
+                if let Ok(sub_entries) = std::fs::read_dir(child.path()) {
+                    for sub in sub_entries.flatten() {
+                        let sub_name = sub.file_name().to_string_lossy().to_string();
+                        if !sub.path().is_dir() || sub_name.starts_with('.') {
+                            continue;
+                        }
+                        let worker_name = format!("{}/{}", name, sub_name);
+                        let key = format!("{}/{}", repo_name, worker_name);
+                        if seen.insert(key) {
+                            workers.push((repo_name.clone(), worker_name));
+                        }
+                    }
+                }
+            }
         }
     }
 
     workers
 }
 
-/// Split a directory name like "myrepo-feat-branch" into (repo, worker).
-/// Uses known repo names to find the correct split point.
-fn split_worker_dir(dir_name: &str, repo_names: &[String]) -> Option<(String, String)> {
-    // Try each known repo name as a prefix
-    for repo_name in repo_names {
-        let prefix = format!("{}-", repo_name);
-        if let Some(worker) = dir_name.strip_prefix(&prefix) {
-            if !worker.is_empty() {
-                return Some((repo_name.clone(), worker.to_string()));
-            }
-        }
-    }
-
-    // Fallback: split on first dash
-    let dash = dir_name.find('-')?;
-    let repo = &dir_name[..dash];
-    let worker = &dir_name[dash + 1..];
-    if worker.is_empty() {
-        return None;
-    }
-    Some((repo.to_string(), worker.to_string()))
+/// Check if a directory looks like a git worktree (has .git file or directory).
+fn has_git_worktree_marker(path: &std::path::Path) -> bool {
+    path.join(".git").exists()
 }
 
 #[cfg(test)]
@@ -79,33 +75,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn split_worker_dir_with_known_repo() {
-        let repos = vec!["myrepo".to_string(), "jig".to_string()];
-        let result = split_worker_dir("myrepo-feat-branch", &repos);
-        assert_eq!(
-            result,
-            Some(("myrepo".to_string(), "feat-branch".to_string()))
-        );
+    fn has_git_marker_detects_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".git"), "gitdir: /somewhere").unwrap();
+        assert!(has_git_worktree_marker(tmp.path()));
     }
 
     #[test]
-    fn split_worker_dir_fallback() {
-        let repos: Vec<String> = vec![];
-        let result = split_worker_dir("myrepo-feat", &repos);
-        assert_eq!(result, Some(("myrepo".to_string(), "feat".to_string())));
-    }
-
-    #[test]
-    fn split_worker_dir_no_dash() {
-        let repos: Vec<String> = vec![];
-        let result = split_worker_dir("nodash", &repos);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn split_worker_dir_prefers_known_repo() {
-        let repos = vec!["my-repo".to_string()];
-        let result = split_worker_dir("my-repo-feat", &repos);
-        assert_eq!(result, Some(("my-repo".to_string(), "feat".to_string())));
+    fn has_git_marker_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!has_git_worktree_marker(tmp.path()));
     }
 }

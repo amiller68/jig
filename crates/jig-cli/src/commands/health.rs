@@ -48,7 +48,7 @@ impl Op for Health {
 
         // Section 2: Repository — use Option to handle non-repo gracefully
         eprintln!();
-        let repo = ctx.repo.as_ref();
+        let repo = ctx.repos.first();
 
         match repo {
             Some(repo) => {

@@ -6,7 +6,7 @@
 //! - Nudging idle/stuck workers
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
 
@@ -46,6 +46,7 @@ impl TmuxClient {
     pub fn has_session(&self, session: &str) -> bool {
         Command::new("tmux")
             .args(["has-session", "-t", session])
+            .stdin(Stdio::null())
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -56,6 +57,7 @@ impl TmuxClient {
         if !self.has_session(session) {
             let output = Command::new("tmux")
                 .args(["new-session", "-d", "-s", session])
+                .stdin(Stdio::null())
                 .output()?;
             if !output.status.success() {
                 return Err(Error::Custom(format!(
@@ -82,6 +84,7 @@ impl TmuxClient {
                 "-F",
                 "#{window_name}",
             ])
+            .stdin(Stdio::null())
             .output();
 
         match output {
@@ -106,6 +109,7 @@ impl TmuxClient {
                 "-c",
                 &dir.to_string_lossy(),
             ])
+            .stdin(Stdio::null())
             .output()?;
         if !output.status.success() {
             return Err(Error::Custom(format!(
@@ -123,6 +127,7 @@ impl TmuxClient {
         }
         let output = Command::new("tmux")
             .args(["kill-window", "-t", &target.target_str()])
+            .stdin(Stdio::null())
             .output()?;
         if !output.status.success() {
             return Err(Error::Custom(format!(
@@ -140,6 +145,7 @@ impl TmuxClient {
         }
         let output = Command::new("tmux")
             .args(["kill-session", "-t", session])
+            .stdin(Stdio::null())
             .output()?;
         if !output.status.success() {
             return Err(Error::Custom(format!(
@@ -157,6 +163,7 @@ impl TmuxClient {
         }
         let output = Command::new("tmux")
             .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+            .stdin(Stdio::null())
             .output()?;
         let text = String::from_utf8_lossy(&output.stdout);
         Ok(text.lines().map(|s| s.to_string()).collect())
@@ -169,6 +176,7 @@ impl TmuxClient {
         let mut cmd = Command::new("tmux");
         cmd.args(["send-keys", "-t", &target.target_str()]);
         cmd.args(keys);
+        cmd.stdin(Stdio::null());
         let output = cmd.output()?;
         if !output.status.success() {
             return Err(Error::Custom(format!(
@@ -183,6 +191,7 @@ impl TmuxClient {
     pub fn send_keys_literal(&self, target: &TmuxTarget, text: &str) -> Result<()> {
         let output = Command::new("tmux")
             .args(["send-keys", "-t", &target.target_str(), "-l", text])
+            .stdin(Stdio::null())
             .output()?;
         if !output.status.success() {
             return Err(Error::Custom(format!(
@@ -233,6 +242,7 @@ impl TmuxClient {
                 "-F",
                 "#{pane_current_command}",
             ])
+            .stdin(Stdio::null())
             .output()
             .ok()?;
         let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();

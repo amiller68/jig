@@ -6,23 +6,38 @@
 use std::error::Error;
 use std::fmt::Display;
 
-/// Context passed to all operations
+/// Context passed to all operations.
+///
+/// Contains the resolved list of repos to operate on:
+/// - Without `-g`: just the current repo (if in one)
+/// - With `-g`: all registered repos
 pub struct OpContext {
-    /// Running in global mode (across all tracked repos)
+    /// Whether `-g` was passed.
     pub global: bool,
-    /// Repo context derived at startup (None if not in a git repo)
-    pub repo: Option<jig_core::RepoContext>,
+    /// Resolved repos to operate on.
+    pub repos: Vec<jig_core::RepoContext>,
 }
 
 impl OpContext {
     pub fn new(global: bool) -> Self {
-        let repo = jig_core::RepoContext::from_cwd().ok();
-        Self { global, repo }
+        let repos = if global {
+            let registry = jig_core::RepoRegistry::load().unwrap_or_default();
+            registry
+                .repos()
+                .iter()
+                .filter(|e| e.path.exists())
+                .filter_map(|e| jig_core::RepoContext::from_path(&e.path).ok())
+                .collect()
+        } else {
+            jig_core::RepoContext::from_cwd().ok().into_iter().collect()
+        };
+        Self { global, repos }
     }
 
-    /// Get a reference to the repo context, or error if not in a git repo.
+    /// Get the single repo context, or error if not in a git repo.
+    /// For commands that operate on one repo at a time.
     pub fn repo(&self) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
-        self.repo.as_ref().ok_or(jig_core::Error::NotInGitRepo)
+        self.repos.first().ok_or(jig_core::Error::NotInGitRepo)
     }
 }
 

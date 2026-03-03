@@ -46,7 +46,15 @@ jig/
 │   │       │   ├── types.rs        # Issue, IssueFilter, IssueStatus, IssuePriority
 │   │       │   ├── provider.rs     # IssueProvider trait
 │   │       │   └── file_provider.rs # FileProvider (reads issues/ markdown)
-│   │       ├── daemon.rs   # Daemon loop (tick, discover, execute)
+│   │       ├── daemon/     # Daemon orchestrator (tick, discover, execute)
+│   │       │   ├── mod.rs        # Daemon struct, tick loop, run_with
+│   │       │   ├── discovery.rs  # Worker discovery (worktree scanning)
+│   │       │   ├── pr.rs         # PR monitoring (GitHub actor integration)
+│   │       │   ├── runtime.rs    # DaemonRuntime (actor channels, config)
+│   │       │   ├── messages.rs   # Inter-actor message types
+│   │       │   ├── sync_actor.rs # Background git fetch actor
+│   │       │   ├── github_actor.rs # Background GitHub API actor
+│   │       │   └── issue_actor.rs  # Background issue polling actor
 │   │       ├── nudge.rs    # Nudge system (classify, build, execute)
 │   │       ├── tmux.rs     # Type-safe tmux client (TmuxClient, TmuxTarget)
 │   │       ├── github/     # GitHub integration via gh CLI
@@ -74,6 +82,7 @@ jig/
 │   │       ├── main.rs     # Entry point, error handling
 │   │       ├── cli.rs      # Clap argument definitions
 │   │       ├── op.rs       # Op trait and OpContext (holds RepoContext)
+│   │       ├── ui.rs       # Shared rendering (tables, colors, truncation)
 │   │       └── commands/   # One file per command
 │   │           ├── mod.rs
 │   │           ├── create.rs

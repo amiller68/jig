@@ -1,7 +1,7 @@
 //! GitHub client wrapping `gh` CLI.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
 
@@ -33,6 +33,7 @@ impl GitHubClient {
                 "-q",
                 ".nameWithOwner",
             ])
+            .stdin(Stdio::null())
             .output()?;
 
         if !output.status.success() {
@@ -61,6 +62,7 @@ impl GitHubClient {
                 ".nameWithOwner",
             ])
             .current_dir(repo_path)
+            .stdin(Stdio::null())
             .output()?;
 
         if !output.status.success() {
@@ -245,6 +247,7 @@ impl GitHubClient {
     pub fn is_available() -> bool {
         Command::new("gh")
             .args(["auth", "status"])
+            .stdin(Stdio::null())
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -254,6 +257,7 @@ impl GitHubClient {
     fn gh_api(&self, endpoint: &str) -> Result<String> {
         let output = Command::new("gh")
             .args(["api", endpoint, "--cache", "60s"])
+            .stdin(Stdio::null())
             .output()?;
 
         if !output.status.success() {

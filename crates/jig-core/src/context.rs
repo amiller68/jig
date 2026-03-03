@@ -29,6 +29,20 @@ impl RepoContext {
             .parent()
             .unwrap_or(&git_common_dir)
             .to_path_buf();
+        Self::build(repo_root, git_common_dir)
+    }
+
+    /// Derive full repo context from a specific path.
+    pub fn from_path(path: &std::path::Path) -> Result<Self> {
+        let git_common_dir = git::get_git_common_dir_for(path)?;
+        let repo_root = git_common_dir
+            .parent()
+            .unwrap_or(&git_common_dir)
+            .to_path_buf();
+        Self::build(repo_root, git_common_dir)
+    }
+
+    fn build(repo_root: PathBuf, git_common_dir: PathBuf) -> Result<Self> {
         let worktrees_dir = repo_root.join(JIG_DIR);
 
         let base_branch = Self::resolve_base_branch(&repo_root)?;
