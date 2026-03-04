@@ -76,7 +76,6 @@ eval "$(jig shell-init zsh)"
 | `jig which` | Show path to jig executable |
 | `jig daemon [--interval N] [--once]` | Run the orchestrator loop |
 | `jig ps --watch [N]` | Live dashboard (refresh every N seconds) |
-| `jig status` | Show worker event-derived status |
 | `jig hooks [--install\|--uninstall]` | Manage git/Claude hooks |
 | `jig repos` | List tracked repositories |
 | `jig health` | Show worker health and dependency status |

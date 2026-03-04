@@ -101,7 +101,6 @@ fn print_help() {
         "spawn".cyan()
     );
     eprintln!("  {}          Show status of spawned workers", "ps".cyan());
-    eprintln!("  {}      Show detailed worker status", "status".cyan());
     eprintln!("  {}      Attach to tmux session", "attach".cyan());
     eprintln!("  {}      Show diff for parent review", "review".cyan());
     eprintln!(

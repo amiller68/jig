@@ -54,8 +54,6 @@ crate::command_enum! {
     (Which, commands::Which),
     (Health, commands::Health),
     (Hooks, commands::Hooks),
-    (Status, commands::Status),
-
     #[command(name = "shell-init")]
     (ShellInit, commands::ShellInit),
 

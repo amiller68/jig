@@ -25,7 +25,7 @@ _jig() {
         prev="${COMP_WORDS[COMP_CWORD-1]}"
     }
 
-    local commands="create list open remove exit config spawn ps attach review merge kill init update version which health tui status shell-init shell-setup"
+    local commands="create list open remove exit config spawn ps attach review merge kill init update version which health tui shell-init shell-setup"
 
     # Get worktrees for completion
     _jig_worktrees() {
@@ -55,7 +55,7 @@ _jig() {
             COMPREPLY=($(compgen -W "$commands" -- "$cur"))
             return
             ;;
-        open|o|attach|review|merge|kill|status|remove|rm)
+        open|o|attach|review|merge|kill|remove|rm)
             COMPREPLY=($(compgen -W "$(_jig_worktrees)" -- "$cur"))
             return
             ;;
@@ -118,13 +118,13 @@ _jig() {
         'review:Show diff for review'
         'merge:Merge worktree'
         'kill:Kill tmux window'
+        'nuke:Nuke all workers'
         'init:Initialize repo'
         'update:Update jig'
         'version:Show version'
         'which:Show jig path'
         'health:Show status'
         'tui:Launch TUI'
-        'status:Worker status'
         'shell-init:Print shell init'
         'shell-setup:Configure shell'
     )
@@ -161,7 +161,7 @@ _jig() {
             ;;
         args)
             case $words[1] in
-                open|o|attach|review|merge|kill|status)
+                open|o|attach|review|merge|kill)
                     _jig_worktrees
                     ;;
                 remove|rm)
@@ -273,7 +273,6 @@ complete -c jig -n '__jig_needs_command' -a version -d 'Version'
 complete -c jig -n '__jig_needs_command' -a which -d 'Show path'
 complete -c jig -n '__jig_needs_command' -a health -d 'Health check'
 complete -c jig -n '__jig_needs_command' -a tui -d 'Launch TUI'
-complete -c jig -n '__jig_needs_command' -a status -d 'Worker status'
 complete -c jig -n '__jig_needs_command' -a shell-init -d 'Shell init'
 complete -c jig -n '__jig_needs_command' -a shell-setup -d 'Shell setup'
 
@@ -283,7 +282,6 @@ complete -c jig -n '__jig_using_command attach' -a '(__jig_worktrees)' -d 'Workt
 complete -c jig -n '__jig_using_command review' -a '(__jig_worktrees)' -d 'Worktree'
 complete -c jig -n '__jig_using_command merge' -a '(__jig_worktrees)' -d 'Worktree'
 complete -c jig -n '__jig_using_command kill' -a '(__jig_worktrees)' -d 'Worktree'
-complete -c jig -n '__jig_using_command status' -a '(__jig_worktrees)' -d 'Worktree'
 complete -c jig -n '__jig_using_command remove' -a '(__jig_worktrees)' -d 'Worktree'
 
 # Flags
