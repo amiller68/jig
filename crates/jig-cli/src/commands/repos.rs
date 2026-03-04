@@ -8,7 +8,7 @@ use comfy_table::{presets, Attribute, Cell, Color, ContentArrangement, Table};
 
 use jig_core::RepoRegistry;
 
-use crate::op::{Op, OpContext};
+use crate::op::{Op, RepoCtx};
 
 /// List tracked repositories
 #[derive(Args, Debug, Clone)]
@@ -36,7 +36,7 @@ impl Op for Repos {
     type Error = ReposError;
     type Output = ReposOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let registry = RepoRegistry::load()?;
         let entries: Vec<ReposListEntry> = registry
             .repos()

@@ -55,23 +55,6 @@ pub fn worker_state_str(status: &WorkerStatus) -> &'static str {
     }
 }
 
-/// Format WorkerStatus as a colored string (for `colored` crate / eprintln contexts).
-pub fn format_worker_status_colored(status: &WorkerStatus) -> String {
-    use colored::Colorize;
-    match status {
-        WorkerStatus::Spawned => "spawned".blue().to_string(),
-        WorkerStatus::Running => "running".green().to_string(),
-        WorkerStatus::Idle => "idle".yellow().to_string(),
-        WorkerStatus::WaitingInput => "waiting input".magenta().to_string(),
-        WorkerStatus::Stalled => "stalled".red().to_string(),
-        WorkerStatus::WaitingReview => "waiting review".cyan().to_string(),
-        WorkerStatus::Approved => "approved".green().to_string(),
-        WorkerStatus::Merged => "merged".green().bold().to_string(),
-        WorkerStatus::Failed => "failed".red().to_string(),
-        WorkerStatus::Archived => "archived".dimmed().to_string(),
-    }
-}
-
 /// Format PR health status for display.
 pub fn format_health(info: &WorkerTickInfo) -> (String, Color) {
     if !info.has_pr {

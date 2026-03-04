@@ -7,7 +7,7 @@ use std::path::Path;
 
 use jig_core::{adapter, git, terminal, Error, JigToml};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 // Embed templates at compile time from the templates/ directory
 const PROJECT_MD_TEMPLATE: &str = include_str!("../../../../templates/PROJECT.md");
@@ -73,7 +73,7 @@ impl Op for Init {
     type Error = InitError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         // Init needs get_base_repo() directly because RepoContext may not exist
         // (init is often the first jig command run in a repo)
         let repo_root = match ctx.repo() {

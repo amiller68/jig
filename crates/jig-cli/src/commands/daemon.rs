@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use jig_core::daemon::{self, DaemonConfig};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Run the daemon loop to monitor workers and dispatch actions
 #[derive(Args, Debug, Clone)]
@@ -29,7 +29,7 @@ impl Op for Daemon {
     type Error = DaemonError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let config = DaemonConfig {
             interval_seconds: self.interval,
             once: self.once,

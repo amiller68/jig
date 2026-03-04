@@ -3,7 +3,7 @@
 use clap::{Args, Subcommand};
 use colored::Colorize;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Manage hook integrations
 #[derive(Args, Debug, Clone)]
@@ -48,7 +48,7 @@ impl Op for Hooks {
     type Error = HooksError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         match &self.subcommand {
             HooksCommands::InstallClaude => {
                 let result = jig_core::hooks::install_claude_hooks()?;

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Marker comment to identify jig's shell integration block
 const MARKER_START: &str = "# >>> jig shell integration >>>";
@@ -87,7 +87,7 @@ impl Op for ShellSetup {
     type Error = ShellSetupError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let shell = detect_shell()?;
         let home = dirs::home_dir().ok_or(ShellSetupError::NoHomeDir)?;
         let config_path = shell.config_file(&home);

@@ -12,7 +12,7 @@ use jig_core::config::JigToml;
 use jig_core::global::GlobalConfig;
 use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
 
-use crate::op::{Op, OpContext};
+use crate::op::{GlobalCtx, Op, RepoCtx};
 
 /// Discover and browse issues
 #[derive(Args, Debug, Clone)]
@@ -60,47 +60,80 @@ pub enum IssuesOutput {
     Ids(Vec<String>),
 }
 
-impl Op for Issues {
-    type Error = IssuesError;
-    type Output = IssuesOutput;
-
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
-        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-        let global_config = GlobalConfig::load().unwrap_or_default();
-        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
-
-        // Single issue detail
-        if let Some(ref id) = self.id {
-            return match provider.get(id)? {
-                Some(issue) => Ok(IssuesOutput::Detail(issue)),
-                None => Err(IssuesError::Usage(format!("issue not found: {}", id))),
-            };
-        }
-
-        // Build filter
-        let filter = IssueFilter {
+impl Issues {
+    fn filter(&self) -> IssueFilter {
+        IssueFilter {
             status: self.status.as_deref().and_then(IssueStatus::from_str_loose),
             priority: self
                 .priority
                 .as_deref()
                 .and_then(IssuePriority::from_str_loose),
             category: self.category.clone(),
-        };
+        }
+    }
 
-        let issues = provider.list(&filter)?;
-
+    fn finish(&self, all_issues: Vec<CoreIssue>) -> Result<IssuesOutput, IssuesError> {
         if self.ids {
-            let ids: Vec<String> = issues.into_iter().map(|i| i.id).collect();
+            let ids: Vec<String> = all_issues.into_iter().map(|i| i.id).collect();
             return Ok(IssuesOutput::Ids(ids));
         }
 
         if self.interactive {
-            run_interactive(&issues)?;
+            run_interactive(&all_issues)?;
             return Ok(IssuesOutput::Interactive);
         }
 
-        Ok(IssuesOutput::Table(issues))
+        Ok(IssuesOutput::Table(all_issues))
+    }
+}
+
+impl Op for Issues {
+    type Error = IssuesError;
+    type Output = IssuesOutput;
+
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo()?;
+        let global_config = GlobalConfig::load().unwrap_or_default();
+        let filter = self.filter();
+
+        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+
+        if let Some(ref id) = self.id {
+            let issue = provider
+                .get(id)?
+                .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
+            return Ok(IssuesOutput::Detail(issue));
+        }
+
+        let all_issues = provider.list(&filter)?;
+        self.finish(all_issues)
+    }
+
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        let global_config = GlobalConfig::load().unwrap_or_default();
+        let filter = self.filter();
+
+        let mut all_issues = Vec::new();
+        for repo in &ctx.repos {
+            let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+
+            if let Some(ref id) = self.id {
+                if let Some(issue) = provider.get(id)? {
+                    return Ok(IssuesOutput::Detail(issue));
+                }
+                continue;
+            }
+
+            all_issues.extend(provider.list(&filter)?);
+        }
+
+        if let Some(id) = &self.id {
+            return Err(IssuesError::Usage(format!("issue not found: {}", id)));
+        }
+
+        self.finish(all_issues)
     }
 }
 

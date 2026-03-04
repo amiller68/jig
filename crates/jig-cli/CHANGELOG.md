@@ -221,7 +221,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      - Supports --dry-run flag to preview changes
    
    - Rewrite shell completions with dynamic worktree completion
-     - `jig open/attach/review/merge/kill/status <TAB>` shows actual worktrees
+     - `jig open/attach/review/merge/kill <TAB>` shows actual worktrees
      - Context-aware completions for all subcommands
      - Simplified zsh completion using _arguments -C
    
@@ -527,7 +527,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adds eval line with markers for easy identification
 - Places integration after PATH setup when possible
 - Supports --dry-run flag to preview changes
-- `jig open/attach/review/merge/kill/status <TAB>` shows actual worktrees
+- `jig open/attach/review/merge/kill <TAB>` shows actual worktrees
 - Context-aware completions for all subcommands
 - Simplified zsh completion using _arguments -C
 - Add quick setup section for shell-setup command

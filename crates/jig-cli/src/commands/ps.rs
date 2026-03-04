@@ -12,7 +12,7 @@ use crossterm::terminal::{self, disable_raw_mode};
 use jig_core::config::JigToml;
 use jig_core::daemon::{DaemonConfig, RuntimeConfig, TickResult};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
 
 /// Show status of spawned sessions
@@ -41,31 +41,32 @@ impl Op for Ps {
     type Error = PsError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
+        let repo_filter = repo
+            .repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string());
+        let runtime_config = self.build_runtime_config(&repo.repo_root);
+        self.execute_ps(repo_filter, runtime_config)
+    }
 
+    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        self.execute_ps(None, RuntimeConfig::default())
+    }
+}
+
+impl Ps {
+    fn execute_ps(
+        &self,
+        repo_filter: Option<String>,
+        runtime_config: RuntimeConfig,
+    ) -> Result<NoOutput, PsError> {
         if let Some(interval) = self.watch {
             let interval = if interval == 0 { 2 } else { interval };
-            let runtime_config = self.build_runtime_config(&repo.repo_root);
-            let repo_filter = if ctx.global {
-                None
-            } else {
-                repo.repo_root
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-            };
             run_watch(interval, runtime_config, repo_filter);
             return Ok(NoOutput);
         }
-
-        // Non-watch: single daemon tick to get WorkerDisplayInfo
-        let repo_filter = if ctx.global {
-            None
-        } else {
-            repo.repo_root
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        };
 
         let daemon_config = DaemonConfig {
             once: true,
@@ -73,7 +74,6 @@ impl Op for Ps {
             repo_filter,
             ..Default::default()
         };
-        let runtime_config = RuntimeConfig::default();
 
         let mut display = vec![];
         jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
@@ -90,9 +90,7 @@ impl Op for Ps {
 
         Ok(NoOutput)
     }
-}
 
-impl Ps {
     /// Build RuntimeConfig from CLI flags + jig.toml defaults.
     fn build_runtime_config(&self, repo_root: &std::path::Path) -> RuntimeConfig {
         let jig_toml = JigToml::load(repo_root).ok().flatten().unwrap_or_default();

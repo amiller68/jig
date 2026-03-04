@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use jig_core::{git, spawn, Error};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Merge reviewed worktree into current branch
 #[derive(Args, Debug, Clone)]
@@ -24,7 +24,7 @@ impl Op for Merge {
     type Error = MergeError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         let worktree_path = repo.worktrees_dir.join(&self.name);
 

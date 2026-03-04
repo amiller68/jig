@@ -4,7 +4,7 @@ use clap::Args;
 
 use jig_core::spawn;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Attach to tmux session
 #[derive(Args, Debug, Clone)]
@@ -23,7 +23,7 @@ impl Op for Attach {
     type Error = AttachError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         spawn::attach(repo, self.name.as_deref())?;
         Ok(NoOutput)

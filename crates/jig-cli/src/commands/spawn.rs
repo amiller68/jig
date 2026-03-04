@@ -7,7 +7,7 @@ use jig_core::global::GlobalConfig;
 use jig_core::issues;
 use jig_core::{git, spawn, terminal, Error, JigToml};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Create worktree and launch Claude in tmux
 #[derive(Args, Debug, Clone)]
@@ -44,7 +44,7 @@ impl Op for Spawn {
     type Error = SpawnError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
 
         // Check for tmux

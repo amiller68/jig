@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use clap::Args;
 use colored::Colorize;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 const GITHUB_REPO: &str = "amiller68/jig";
 const INSTALL_SCRIPT_URL: &str = "https://raw.githubusercontent.com/amiller68/jig/main/install.sh";
@@ -56,7 +56,7 @@ impl Op for Update {
     type Error = UpdateError;
     type Output = NoOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let install_method = detect_installation()?;
         let current_version = env!("CARGO_PKG_VERSION");
 

@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use jig_core::{git, Error};
 
-use crate::op::{Op, OpContext};
+use crate::op::{Op, RepoCtx};
 
 /// Show diff for parent review
 #[derive(Args, Debug, Clone)]
@@ -41,7 +41,7 @@ impl Op for Review {
     type Error = ReviewError;
     type Output = ReviewOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         let worktree_path = repo.worktrees_dir.join(&self.name);
 

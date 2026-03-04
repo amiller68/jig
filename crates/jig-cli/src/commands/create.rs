@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use jig_core::{config, git, Error};
 
-use crate::op::{Op, OpContext};
+use crate::op::{Op, RepoCtx};
 
 /// Create a new worktree
 #[derive(Args, Debug, Clone)]
@@ -60,7 +60,7 @@ impl Op for Create {
     type Error = CreateError;
     type Output = CreateOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         let worktree_path = repo.worktrees_dir.join(&self.name);
 

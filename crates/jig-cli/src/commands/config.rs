@@ -6,7 +6,7 @@ use colored::Colorize;
 use jig_core::config::{self, ConfigDisplay};
 use jig_core::Error as CoreError;
 
-use crate::op::{Op, OpContext};
+use crate::op::{Op, RepoCtx};
 
 /// Manage configuration
 #[derive(Args, Debug, Clone)]
@@ -72,7 +72,7 @@ impl Op for Config {
     type Error = ConfigError;
     type Output = ConfigOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         if self.list {
             return show_list();
         }
@@ -91,7 +91,7 @@ impl Op for Config {
     }
 }
 
-fn show_config(ctx: &OpContext) -> Result<ConfigOutput, ConfigError> {
+fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     let repo = ctx.repo()?;
     let display = ConfigDisplay::load(&repo.repo_root)?;
 
@@ -142,7 +142,7 @@ fn show_list() -> Result<ConfigOutput, ConfigError> {
 }
 
 fn handle_base(
-    ctx: &OpContext,
+    ctx: &RepoCtx,
     branch: Option<&str>,
     global: bool,
     unset: bool,
@@ -196,7 +196,7 @@ fn handle_base(
 }
 
 fn handle_on_create(
-    ctx: &OpContext,
+    ctx: &RepoCtx,
     command: Option<&str>,
     unset: bool,
 ) -> Result<ConfigOutput, ConfigError> {
