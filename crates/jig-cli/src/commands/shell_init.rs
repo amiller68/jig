@@ -2,7 +2,7 @@
 
 use clap::Args;
 
-use crate::op::{Op, OpContext};
+use crate::op::{Op, RepoCtx};
 
 const BASH_INIT: &str = r#"
 # jig shell integration for bash
@@ -327,7 +327,7 @@ impl Op for ShellInit {
     type Error = ShellInitError;
     type Output = ShellInitOutput;
 
-    fn execute(&self, _ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let init_code = match self.shell.to_lowercase().as_str() {
             "bash" => BASH_INIT,
             "zsh" => ZSH_INIT,

@@ -7,7 +7,7 @@ use std::path::Path;
 
 use jig_core::{git, Error, RepoContext};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 
 /// Remove worktree(s)
 #[derive(Args, Debug, Clone)]
@@ -34,8 +34,19 @@ impl Op for Remove {
     type Error = RemoveError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
+        self.remove_from_repo(repo)
+    }
+
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        let repo = ctx.repo_for_worktree(&self.pattern)?;
+        self.remove_from_repo(repo)
+    }
+}
+
+impl Remove {
+    fn remove_from_repo(&self, repo: &RepoContext) -> Result<NoOutput, RemoveError> {
         let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
 
         // Find matching worktrees

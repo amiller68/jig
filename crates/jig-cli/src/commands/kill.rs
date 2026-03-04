@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use jig_core::spawn;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 
 /// Kill a running tmux window
 #[derive(Args, Debug, Clone)]
@@ -31,14 +31,13 @@ impl Op for Kill {
     type Error = KillError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
 
         if self.all {
             let tasks = spawn::list_tasks(repo)?;
             if tasks.is_empty() {
                 eprintln!("{}", "No workers to kill.".dimmed());
-                return Ok(NoOutput);
             }
             for task in &tasks {
                 let _ = spawn::kill_window(repo, &task.name);
@@ -49,11 +48,35 @@ impl Op for Kill {
         }
 
         let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
-
         spawn::kill_window(repo, name)?;
         spawn::unregister(repo, name)?;
         eprintln!("{} Killed '{}'", "✓".green(), name.cyan());
+        Ok(NoOutput)
+    }
 
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        if self.all {
+            let mut killed = 0;
+            for repo in &ctx.repos {
+                let tasks = spawn::list_tasks(repo)?;
+                for task in &tasks {
+                    let _ = spawn::kill_window(repo, &task.name);
+                    spawn::unregister(repo, &task.name)?;
+                    eprintln!("{} Killed '{}'", "✓".green(), task.name.cyan());
+                    killed += 1;
+                }
+            }
+            if killed == 0 {
+                eprintln!("{}", "No workers to kill.".dimmed());
+            }
+            return Ok(NoOutput);
+        }
+
+        let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
+        let repo = ctx.repo_for_worktree(name)?;
+        spawn::kill_window(repo, name)?;
+        spawn::unregister(repo, name)?;
+        eprintln!("{} Killed '{}'", "✓".green(), name.cyan());
         Ok(NoOutput)
     }
 }

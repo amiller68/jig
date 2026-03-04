@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use jig_core::{git, Error};
 
-use crate::op::{Op, OpContext};
+use crate::op::{Op, RepoCtx};
 
 /// Exit current worktree and remove it
 #[derive(Args, Debug, Clone)]
@@ -38,7 +38,7 @@ impl Op for Exit {
     type Error = ExitError;
     type Output = ExitOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
 
         // Check if we're in a worktree

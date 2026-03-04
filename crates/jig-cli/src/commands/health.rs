@@ -6,7 +6,7 @@ use colored::Colorize;
 use jig_core::config::{Config, JigToml};
 use jig_core::terminal;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 const EXPECTED_SKILLS: &[&str] = &["jig", "check", "draft", "issues", "review"];
 
@@ -26,7 +26,7 @@ impl Op for Health {
     type Error = HealthError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let version = env!("CARGO_PKG_VERSION");
         let mut all_passed = true;
 
@@ -48,7 +48,7 @@ impl Op for Health {
 
         // Section 2: Repository — use Option to handle non-repo gracefully
         eprintln!();
-        let repo = ctx.repos.first();
+        let repo = ctx.repo.as_ref();
 
         match repo {
             Some(repo) => {

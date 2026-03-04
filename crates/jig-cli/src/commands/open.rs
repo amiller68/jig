@@ -4,9 +4,9 @@ use clap::Args;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use jig_core::{git, terminal, Error};
+use jig_core::{git, terminal, Error, RepoContext};
 
-use crate::op::{Op, OpContext};
+use crate::op::{GlobalCtx, Op, RepoCtx};
 
 /// Open/cd into a worktree
 #[derive(Args, Debug, Clone)]
@@ -49,9 +49,23 @@ impl Op for Open {
     type Error = OpenError;
     type Output = OpenOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
+        self.open_in_repo(repo)
+    }
 
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        let repo = if let Some(name) = self.name.as_deref() {
+            ctx.repo_for_worktree(name)?
+        } else {
+            ctx.repos.first().ok_or(Error::NotInGitRepo)?
+        };
+        self.open_in_repo(repo)
+    }
+}
+
+impl Open {
+    fn open_in_repo(&self, repo: &RepoContext) -> Result<OpenOutput, OpenError> {
         if self.all {
             // Open all worktrees in new tabs
             let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;

@@ -12,7 +12,7 @@ use crossterm::terminal::{self, disable_raw_mode};
 use jig_core::config::JigToml;
 use jig_core::daemon::{DaemonConfig, RuntimeConfig, TickResult};
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
 
 /// Show status of spawned sessions
@@ -41,36 +41,56 @@ impl Op for Ps {
     type Error = PsError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
+        let repo_filter = repo
+            .repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string());
 
         if let Some(interval) = self.watch {
             let interval = if interval == 0 { 2 } else { interval };
             let runtime_config = self.build_runtime_config(&repo.repo_root);
-            let repo_filter = if ctx.global {
-                None
-            } else {
-                repo.repo_root
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-            };
             run_watch(interval, runtime_config, repo_filter);
             return Ok(NoOutput);
         }
-
-        // Non-watch: single daemon tick to get WorkerDisplayInfo
-        let repo_filter = if ctx.global {
-            None
-        } else {
-            repo.repo_root
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        };
 
         let daemon_config = DaemonConfig {
             once: true,
             skip_sync: true,
             repo_filter,
+            ..Default::default()
+        };
+        let runtime_config = RuntimeConfig::default();
+
+        let mut display = vec![];
+        jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
+            display.clone_from(&tick.worker_display);
+            false
+        })?;
+
+        if display.is_empty() {
+            eprintln!("No spawned sessions");
+        } else {
+            let table = ui::render_worker_table(&display, false);
+            eprintln!("{table}");
+        }
+
+        Ok(NoOutput)
+    }
+
+    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        if let Some(interval) = self.watch {
+            let interval = if interval == 0 { 2 } else { interval };
+            let runtime_config = RuntimeConfig::default();
+            run_watch(interval, runtime_config, None);
+            return Ok(NoOutput);
+        }
+
+        let daemon_config = DaemonConfig {
+            once: true,
+            skip_sync: true,
+            repo_filter: None,
             ..Default::default()
         };
         let runtime_config = RuntimeConfig::default();

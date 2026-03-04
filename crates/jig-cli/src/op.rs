@@ -6,47 +6,54 @@
 use std::error::Error;
 use std::fmt::Display;
 
-/// Context passed to all operations.
-///
-/// Contains the resolved list of repos to operate on:
-/// - Without `-g`: just the current repo (if in one)
-/// - With `-g`: all registered repos
-pub struct OpContext {
-    /// Whether `-g` was passed.
-    pub global: bool,
-    /// Resolved repos to operate on.
+/// Single-repo context (no -g). Current repo if available.
+pub struct RepoCtx {
+    pub repo: Option<jig_core::RepoContext>,
+}
+
+impl RepoCtx {
+    /// Get the repo context, or error if not in a git repo.
+    pub fn repo(&self) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
+        self.repo.as_ref().ok_or(jig_core::Error::NotInGitRepo)
+    }
+}
+
+/// Global context (-g). All registered repos.
+pub struct GlobalCtx {
     pub repos: Vec<jig_core::RepoContext>,
 }
 
-impl OpContext {
-    pub fn new(global: bool) -> Self {
-        let repos = if global {
-            let registry = jig_core::RepoRegistry::load().unwrap_or_default();
-            registry
-                .repos()
-                .iter()
-                .filter(|e| e.path.exists())
-                .filter_map(|e| jig_core::RepoContext::from_path(&e.path).ok())
-                .collect()
-        } else {
-            jig_core::RepoContext::from_cwd().ok().into_iter().collect()
-        };
-        Self { global, repos }
-    }
-
-    /// Get the single repo context, or error if not in a git repo.
-    /// For commands that operate on one repo at a time.
-    pub fn repo(&self) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
-        self.repos.first().ok_or(jig_core::Error::NotInGitRepo)
+impl GlobalCtx {
+    /// Find the repo that contains a worktree with the given name.
+    pub fn repo_for_worktree(
+        &self,
+        name: &str,
+    ) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
+        for repo in &self.repos {
+            let path = repo.worktrees_dir.join(name);
+            if path.exists() {
+                return Ok(repo);
+            }
+        }
+        Err(jig_core::Error::WorktreeNotFound(name.to_string()))
     }
 }
 
-/// Trait for CLI operations
+/// Trait for CLI operations.
+///
+/// Commands implement `run` for single-repo mode and optionally override
+/// `run_global` for `-g` mode. The default `run_global` rejects with an
+/// error message and exits.
 pub trait Op {
     type Error: Error + Send + Sync + 'static;
     type Output: Display;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error>;
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error>;
+
+    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        eprintln!("error: this command does not support -g/--global");
+        std::process::exit(1);
+    }
 }
 
 /// Unit output for commands that only produce stderr
@@ -97,11 +104,23 @@ macro_rules! command_enum {
             type Output = OpOutput;
             type Error = OpError;
 
-            fn execute(&self, ctx: &$crate::op::OpContext) -> Result<Self::Output, Self::Error> {
+            fn run(&self, ctx: &$crate::op::RepoCtx) -> Result<Self::Output, Self::Error> {
                 match self {
                     $(
                         Command::$variant(op) => {
-                            op.execute(ctx)
+                            op.run(ctx)
+                                .map(OpOutput::$variant)
+                                .map_err(OpError::$variant)
+                        },
+                    )*
+                }
+            }
+
+            fn run_global(&self, ctx: &$crate::op::GlobalCtx) -> Result<Self::Output, Self::Error> {
+                match self {
+                    $(
+                        Command::$variant(op) => {
+                            op.run_global(ctx)
                                 .map(OpOutput::$variant)
                                 .map_err(OpError::$variant)
                         },

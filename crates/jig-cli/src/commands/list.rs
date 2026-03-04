@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use jig_core::git;
 
-use crate::op::{Op, OpContext};
+use crate::op::{GlobalCtx, Op, RepoCtx};
 
 /// List worktrees
 #[derive(Args, Debug, Clone)]
@@ -38,31 +38,44 @@ impl Op for List {
     type Error = ListError;
     type Output = ListOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         if self.all {
-            // Show all git worktrees including base repo
-            let worktrees = git::list_all_worktrees()?;
-
-            for (path, branch) in &worktrees {
-                let branch_display = if branch.is_empty() {
-                    "(detached)".dimmed().to_string()
-                } else {
-                    branch.cyan().to_string()
-                };
-                eprintln!("{} {}", path.display(), branch_display);
-            }
-            // Don't output to stdout for --all mode
-            Ok(ListOutput(vec![]))
-        } else {
-            // Show only .jig/
-            let repo = ctx.repo()?;
-            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
-
-            if worktrees.is_empty() && !ctx.global {
-                eprintln!("No worktrees found");
-            }
-
-            Ok(ListOutput(worktrees))
+            return self.list_all_git_worktrees();
         }
+
+        let repo = ctx.repo()?;
+        let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
+        if worktrees.is_empty() {
+            eprintln!("No worktrees found");
+        }
+        Ok(ListOutput(worktrees))
+    }
+
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        if self.all {
+            return self.list_all_git_worktrees();
+        }
+
+        let mut all_worktrees = Vec::new();
+        for repo in &ctx.repos {
+            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
+            all_worktrees.extend(worktrees);
+        }
+        Ok(ListOutput(all_worktrees))
+    }
+}
+
+impl List {
+    fn list_all_git_worktrees(&self) -> Result<ListOutput, ListError> {
+        let worktrees = git::list_all_worktrees()?;
+        for (path, branch) in &worktrees {
+            let branch_display = if branch.is_empty() {
+                "(detached)".dimmed().to_string()
+            } else {
+                branch.cyan().to_string()
+            };
+            eprintln!("{} {}", path.display(), branch_display);
+        }
+        Ok(ListOutput(vec![]))
     }
 }

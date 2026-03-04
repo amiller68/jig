@@ -11,7 +11,7 @@ use clap::Parser;
 use colored::Colorize;
 
 use cli::Cli;
-use op::{Op, OpContext};
+use op::{GlobalCtx, Op, RepoCtx};
 
 fn main() {
     // Initialize tracing
@@ -34,30 +34,42 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Best-effort global directory setup
     let _ = jig_core::ensure_global_dirs();
 
-    // Build context — resolves the repos list based on -g flag
-    let ctx = OpContext::new(cli.global);
-
-    // Best-effort auto-registration and pruning of current repo
-    if let Some(repo) = ctx.repos.first() {
-        if let Ok(mut registry) = jig_core::RepoRegistry::load() {
-            let _ = registry.register(repo.repo_root.clone());
-            let pruned = registry.prune();
-            if cli.verbose && !pruned.is_empty() {
-                for p in &pruned {
-                    eprintln!("{} {}", "pruned:".dimmed(), p.display());
-                }
-            }
-            let _ = registry.save();
-        }
-    }
-
     match cli.command {
         None => {
             print_help();
             Ok(())
         }
         Some(ref command) => {
-            let output = command.execute(&ctx)?;
+            let output = if cli.global {
+                let registry = jig_core::RepoRegistry::load().unwrap_or_default();
+                let repos: Vec<_> = registry
+                    .repos()
+                    .iter()
+                    .filter(|e| e.path.exists())
+                    .filter_map(|e| jig_core::RepoContext::from_path(&e.path).ok())
+                    .collect();
+                let ctx = GlobalCtx { repos };
+                command.run_global(&ctx)?
+            } else {
+                let repo = jig_core::RepoContext::from_cwd().ok();
+
+                // Best-effort auto-registration and pruning of current repo
+                if let Some(ref repo) = repo {
+                    if let Ok(mut registry) = jig_core::RepoRegistry::load() {
+                        let _ = registry.register(repo.repo_root.clone());
+                        let pruned = registry.prune();
+                        if cli.verbose && !pruned.is_empty() {
+                            for p in &pruned {
+                                eprintln!("{} {}", "pruned:".dimmed(), p.display());
+                            }
+                        }
+                        let _ = registry.save();
+                    }
+                }
+
+                let ctx = RepoCtx { repo };
+                command.run(&ctx)?
+            };
             let output_str = output.to_string();
             if !output_str.is_empty() {
                 println!("{}", output_str);

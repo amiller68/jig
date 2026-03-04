@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use jig_core::OrchestratorState;
 
-use crate::op::{NoOutput, Op, OpContext};
+use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 
 /// Show detailed worker status
 #[derive(Args, Debug, Clone)]
@@ -26,7 +26,7 @@ impl Op for Status {
     type Error = StatusError;
     type Output = NoOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         let state = match OrchestratorState::load(&repo.repo_root)? {
             Some(state) => state,
@@ -44,6 +44,36 @@ impl Op for Status {
             None => show_all_workers(&state),
         }
 
+        Ok(NoOutput)
+    }
+
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        if let Some(ref name) = self.name {
+            // Find the repo that has this worker
+            for repo in &ctx.repos {
+                if let Some(state) = OrchestratorState::load(&repo.repo_root)? {
+                    if state.workers.values().any(|w| w.name == *name) {
+                        show_worker_status(&state, name)?;
+                        return Ok(NoOutput);
+                    }
+                }
+            }
+            return Err(StatusError::WorkerNotFound(name.clone()));
+        }
+
+        // Show workers across all repos
+        let mut found_any = false;
+        for repo in &ctx.repos {
+            if let Some(state) = OrchestratorState::load(&repo.repo_root)? {
+                if !state.workers.is_empty() {
+                    found_any = true;
+                    show_all_workers(&state);
+                }
+            }
+        }
+        if !found_any {
+            eprintln!("{}", "No active workers".dimmed());
+        }
         Ok(NoOutput)
     }
 }
