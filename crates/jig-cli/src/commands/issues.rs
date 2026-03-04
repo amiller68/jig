@@ -129,11 +129,8 @@ impl Op for Issues {
             all_issues.extend(provider.list(&filter)?);
         }
 
-        if self.id.is_some() {
-            return Err(IssuesError::Usage(format!(
-                "issue not found: {}",
-                self.id.as_ref().unwrap()
-            )));
+        if let Some(id) = &self.id {
+            return Err(IssuesError::Usage(format!("issue not found: {}", id)));
         }
 
         self.finish(all_issues)
