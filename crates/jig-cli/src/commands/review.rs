@@ -3,9 +3,9 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{git, Error, RepoContext};
+use jig_core::{git, Error};
 
-use crate::op::{GlobalCtx, Op, RepoCtx};
+use crate::op::{Op, RepoCtx};
 
 /// Show diff for parent review
 #[derive(Args, Debug, Clone)]
@@ -43,17 +43,6 @@ impl Op for Review {
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
-        self.review_in_repo(repo)
-    }
-
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo_for_worktree(&self.name)?;
-        self.review_in_repo(repo)
-    }
-}
-
-impl Review {
-    fn review_in_repo(&self, repo: &RepoContext) -> Result<ReviewOutput, ReviewError> {
         let worktree_path = repo.worktrees_dir.join(&self.name);
 
         if !worktree_path.exists() {

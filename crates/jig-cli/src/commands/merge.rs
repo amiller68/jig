@@ -3,9 +3,9 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{git, spawn, Error, RepoContext};
+use jig_core::{git, spawn, Error};
 
-use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
+use crate::op::{NoOutput, Op, RepoCtx};
 
 /// Merge reviewed worktree into current branch
 #[derive(Args, Debug, Clone)]
@@ -26,17 +26,6 @@ impl Op for Merge {
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
-        self.merge_in_repo(repo)
-    }
-
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo_for_worktree(&self.name)?;
-        self.merge_in_repo(repo)
-    }
-}
-
-impl Merge {
-    fn merge_in_repo(&self, repo: &RepoContext) -> Result<NoOutput, MergeError> {
         let worktree_path = repo.worktrees_dir.join(&self.name);
 
         if !worktree_path.exists() {
