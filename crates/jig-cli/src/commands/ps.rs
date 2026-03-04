@@ -47,10 +47,23 @@ impl Op for Ps {
             .repo_root
             .file_name()
             .map(|n| n.to_string_lossy().to_string());
+        let runtime_config = self.build_runtime_config(&repo.repo_root);
+        self.execute_ps(repo_filter, runtime_config)
+    }
 
+    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        self.execute_ps(None, RuntimeConfig::default())
+    }
+}
+
+impl Ps {
+    fn execute_ps(
+        &self,
+        repo_filter: Option<String>,
+        runtime_config: RuntimeConfig,
+    ) -> Result<NoOutput, PsError> {
         if let Some(interval) = self.watch {
             let interval = if interval == 0 { 2 } else { interval };
-            let runtime_config = self.build_runtime_config(&repo.repo_root);
             run_watch(interval, runtime_config, repo_filter);
             return Ok(NoOutput);
         }
@@ -61,7 +74,6 @@ impl Op for Ps {
             repo_filter,
             ..Default::default()
         };
-        let runtime_config = RuntimeConfig::default();
 
         let mut display = vec![];
         jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
@@ -79,40 +91,6 @@ impl Op for Ps {
         Ok(NoOutput)
     }
 
-    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        if let Some(interval) = self.watch {
-            let interval = if interval == 0 { 2 } else { interval };
-            let runtime_config = RuntimeConfig::default();
-            run_watch(interval, runtime_config, None);
-            return Ok(NoOutput);
-        }
-
-        let daemon_config = DaemonConfig {
-            once: true,
-            skip_sync: true,
-            repo_filter: None,
-            ..Default::default()
-        };
-        let runtime_config = RuntimeConfig::default();
-
-        let mut display = vec![];
-        jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
-            display.clone_from(&tick.worker_display);
-            false
-        })?;
-
-        if display.is_empty() {
-            eprintln!("No spawned sessions");
-        } else {
-            let table = ui::render_worker_table(&display, false);
-            eprintln!("{table}");
-        }
-
-        Ok(NoOutput)
-    }
-}
-
-impl Ps {
     /// Build RuntimeConfig from CLI flags + jig.toml defaults.
     fn build_runtime_config(&self, repo_root: &std::path::Path) -> RuntimeConfig {
         let jig_toml = JigToml::load(repo_root).ok().flatten().unwrap_or_default();
