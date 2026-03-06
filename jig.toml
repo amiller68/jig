@@ -7,6 +7,9 @@ base = "origin/main"
 # Spawn configuration
 [spawn]
 auto = true
+autoSpawn = true
+maxConcurrentWorkers = 3
+autoSpawnInterval = 30
 
 # Agent configuration
 [agent]
