@@ -37,7 +37,12 @@ fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
         }
     };
 
-    let provider = match crate::issues::make_provider(&req.repo_root, &jig_toml, &global_config) {
+    let provider = match crate::issues::make_provider_with_ref(
+        &req.repo_root,
+        &jig_toml,
+        &global_config,
+        &req.base_branch,
+    ) {
         Ok(p) => p,
         Err(e) => {
             tracing::debug!(error = %e, "failed to create issue provider");

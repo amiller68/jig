@@ -49,6 +49,8 @@ pub struct GitHubResponse {
 pub struct IssueRequest {
     /// Repo root path.
     pub repo_root: PathBuf,
+    /// Base branch ref (e.g. "origin/main") for reading issues from remote.
+    pub base_branch: String,
     /// Worker names already active (to avoid re-spawning).
     pub existing_workers: Vec<String>,
     /// Max concurrent workers allowed.

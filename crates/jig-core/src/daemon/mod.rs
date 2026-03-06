@@ -248,7 +248,9 @@ impl<'a> Daemon<'a> {
 
         // Find a repo root to use for issue polling (first registered repo)
         if let Some(entry) = registry.repos().first() {
-            runtime.maybe_trigger_issue_poll(&entry.path, &worker_names);
+            let base = RepoContext::resolve_base_branch_for(&entry.path)
+                .unwrap_or_else(|_| "origin/main".to_string());
+            runtime.maybe_trigger_issue_poll(&entry.path, &base, &worker_names);
         }
 
         // 5. Auto-spawn from drained spawnable issues

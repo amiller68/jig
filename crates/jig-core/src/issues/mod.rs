@@ -25,11 +25,32 @@ use crate::global::GlobalConfig;
 ///
 /// When `provider = "linear"`, requires an `[issues.linear]` section in
 /// `jig.toml` and a matching profile in the global config. Otherwise
-/// falls back to the file-based provider.
+/// falls back to the file-based provider reading from the working tree.
 pub fn make_provider(
     repo_root: &Path,
     jig_toml: &JigToml,
     global_config: &GlobalConfig,
+) -> Result<Box<dyn IssueProvider>> {
+    make_provider_inner(repo_root, jig_toml, global_config, None)
+}
+
+/// Like `make_provider`, but reads file-based issues from the given git ref
+/// (e.g. `"origin/main"`) instead of the working tree. This keeps issue
+/// discovery in sync with the remote after a `git fetch`.
+pub fn make_provider_with_ref(
+    repo_root: &Path,
+    jig_toml: &JigToml,
+    global_config: &GlobalConfig,
+    git_ref: &str,
+) -> Result<Box<dyn IssueProvider>> {
+    make_provider_inner(repo_root, jig_toml, global_config, Some(git_ref))
+}
+
+fn make_provider_inner(
+    repo_root: &Path,
+    jig_toml: &JigToml,
+    global_config: &GlobalConfig,
+    git_ref: Option<&str>,
 ) -> Result<Box<dyn IssueProvider>> {
     match jig_toml.issues.provider.as_str() {
         "linear" => {
@@ -43,7 +64,13 @@ pub fn make_provider(
         }
         _ => {
             let issues_dir = repo_root.join(&jig_toml.issues.directory);
-            Ok(Box::new(FileProvider::new(&issues_dir)))
+            let provider = FileProvider::new(&issues_dir);
+            let provider = if let Some(git_ref) = git_ref {
+                provider.with_git_ref(repo_root, git_ref, &jig_toml.issues.directory)
+            } else {
+                provider
+            };
+            Ok(Box::new(provider))
         }
     }
 }

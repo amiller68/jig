@@ -43,8 +43,8 @@ pub use global::{
     WorkersState,
 };
 pub use issues::{
-    make_provider, FileProvider, Issue, IssueFilter, IssuePriority, IssueProvider, IssueStatus,
-    LinearProvider,
+    make_provider, make_provider_with_ref, FileProvider, Issue, IssueFilter, IssuePriority,
+    IssueProvider, IssueStatus, LinearProvider,
 };
 pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;

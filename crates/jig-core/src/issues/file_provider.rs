@@ -2,8 +2,14 @@
 //!
 //! Walks the `issues/` directory, parses `**Key:** Value` frontmatter from
 //! markdown files, and returns structured `Issue` values.
+//!
+//! When a `git_ref` is configured, reads files from that ref (e.g.
+//! `origin/main`) via `git ls-tree` / `git show` instead of the working tree.
+//! This keeps issue discovery up-to-date with the remote without requiring a
+//! local pull.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use crate::error::Result;
 
@@ -14,17 +20,56 @@ use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus};
 pub struct FileProvider {
     /// Root directory containing issue files (e.g. `<repo>/issues`).
     issues_dir: PathBuf,
+    /// If set, read files from this git ref instead of the working tree.
+    git_ref: Option<GitRefSource>,
+}
+
+/// Configuration for reading issues from a git ref.
+struct GitRefSource {
+    /// Repository root (for running git commands).
+    repo_root: PathBuf,
+    /// Git ref to read from (e.g. "origin/main").
+    git_ref: String,
+    /// Issues directory relative to repo root (e.g. "issues").
+    rel_dir: String,
 }
 
 impl FileProvider {
     pub fn new(issues_dir: impl Into<PathBuf>) -> Self {
         Self {
             issues_dir: issues_dir.into(),
+            git_ref: None,
         }
+    }
+
+    /// Configure this provider to read from a git ref instead of the working tree.
+    pub fn with_git_ref(
+        mut self,
+        repo_root: impl Into<PathBuf>,
+        git_ref: impl Into<String>,
+        rel_dir: impl Into<String>,
+    ) -> Self {
+        self.git_ref = Some(GitRefSource {
+            repo_root: repo_root.into(),
+            git_ref: git_ref.into(),
+            rel_dir: rel_dir.into(),
+        });
+        self
     }
 
     /// Scan all markdown files and parse them into issues.
     fn scan_all(&self) -> Result<Vec<Issue>> {
+        let mut issues = if let Some(ref src) = self.git_ref {
+            self.scan_all_from_ref(src)?
+        } else {
+            self.scan_all_from_disk()?
+        };
+        sort_issues(&mut issues);
+        Ok(issues)
+    }
+
+    /// Scan issues from the working tree (original behavior).
+    fn scan_all_from_disk(&self) -> Result<Vec<Issue>> {
         if !self.issues_dir.is_dir() {
             return Ok(Vec::new());
         }
@@ -55,7 +100,34 @@ impl FileProvider {
             }
         }
 
-        sort_issues(&mut issues);
+        Ok(issues)
+    }
+
+    /// Scan issues from a git ref using `git ls-tree` and `git show`.
+    fn scan_all_from_ref(&self, src: &GitRefSource) -> Result<Vec<Issue>> {
+        let files = git_ls_tree(&src.repo_root, &src.git_ref, &src.rel_dir)?;
+
+        let mut issues = Vec::new();
+        for rel_path in &files {
+            if should_skip(Path::new(rel_path)) {
+                continue;
+            }
+            let blob_path = format!("{}:{}/{}", src.git_ref, src.rel_dir, rel_path);
+            let content = match git_show(&src.repo_root, &blob_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::debug!("skipping {}: {}", rel_path, e);
+                    continue;
+                }
+            };
+            match parse_issue_content(rel_path, &content) {
+                Ok(issue) => issues.push(issue),
+                Err(e) => {
+                    tracing::debug!("skipping {}: {}", rel_path, e);
+                }
+            }
+        }
+
         Ok(issues)
     }
 }
@@ -79,6 +151,20 @@ impl IssueProvider for FileProvider {
     }
 
     fn get(&self, id: &str) -> Result<Option<Issue>> {
+        if let Some(ref src) = self.git_ref {
+            // Try with and without .md extension
+            for rel_path in &[format!("{}.md", id), id.to_string()] {
+                if !rel_path.ends_with(".md") {
+                    continue;
+                }
+                let blob_path = format!("{}:{}/{}", src.git_ref, src.rel_dir, rel_path);
+                if let Ok(content) = git_show(&src.repo_root, &blob_path) {
+                    return parse_issue_content(rel_path, &content).map(Some);
+                }
+            }
+            return Ok(None);
+        }
+
         if !self.issues_dir.is_dir() {
             return Ok(None);
         }
@@ -95,6 +181,99 @@ impl IssueProvider for FileProvider {
 
         Ok(None)
     }
+}
+
+/// List `.md` files under a directory in a git ref.
+/// Returns paths relative to `dir` (e.g. "features/my-feature.md").
+fn git_ls_tree(repo_root: &Path, git_ref: &str, dir: &str) -> Result<Vec<String>> {
+    let tree_path = format!("{}:{}", git_ref, dir);
+    let output = Command::new("git")
+        .args(["ls-tree", "-r", "--name-only", &tree_path])
+        .current_dir(repo_root)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()?;
+
+    if !output.status.success() {
+        // Ref or dir doesn't exist — not an error, just no issues
+        tracing::debug!(
+            "git ls-tree failed for {} (ref may not exist yet)",
+            tree_path
+        );
+        return Ok(Vec::new());
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .filter(|l| l.ends_with(".md"))
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Read a file from a git ref via `git show <blob_path>`.
+fn git_show(repo_root: &Path, blob_path: &str) -> Result<String> {
+    let output = Command::new("git")
+        .args(["show", blob_path])
+        .current_dir(repo_root)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()?;
+
+    if !output.status.success() {
+        return Err(crate::error::Error::Custom(format!(
+            "git show {} failed",
+            blob_path
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Parse issue content from a string (used for git-ref-based reading).
+/// `rel_path` is relative to the issues directory (e.g. "features/my-feature.md").
+fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
+    let rel = Path::new(rel_path);
+    let id = rel.with_extension("").to_string_lossy().replace('\\', "/");
+
+    let title = extract_title(content).unwrap_or_else(|| id.clone());
+
+    let status = extract_field(content, "Status")
+        .and_then(|s| IssueStatus::from_str_loose(&s))
+        .unwrap_or(IssueStatus::Planned);
+
+    let priority =
+        extract_field(content, "Priority").and_then(|s| IssuePriority::from_str_loose(&s));
+
+    let category = extract_field(content, "Category").or_else(|| infer_category(rel));
+
+    let depends_on = extract_field(content, "Depends-On")
+        .map(|s| {
+            s.split(',')
+                .map(|d| d.trim().to_string())
+                .filter(|d| !d.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let children = extract_children(content, rel);
+
+    let auto = extract_field(content, "Auto")
+        .map(|s| s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes"))
+        .unwrap_or(false);
+
+    Ok(Issue {
+        id,
+        title,
+        status,
+        priority,
+        category,
+        depends_on,
+        body: content.to_string(),
+        source: rel_path.to_string(),
+        children,
+        auto,
+    })
 }
 
 /// Check if a file should be skipped during scanning.

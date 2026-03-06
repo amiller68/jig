@@ -173,6 +173,7 @@ impl DaemonRuntime {
     pub fn maybe_trigger_issue_poll(
         &mut self,
         repo_root: &std::path::Path,
+        base_branch: &str,
         existing_workers: &[String],
     ) {
         if !self.config.auto_spawn {
@@ -187,6 +188,7 @@ impl DaemonRuntime {
 
         let req = IssueRequest {
             repo_root: repo_root.to_path_buf(),
+            base_branch: base_branch.to_string(),
             existing_workers: existing_workers.to_vec(),
             max_concurrent_workers: self.config.max_concurrent_workers,
         };
