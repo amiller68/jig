@@ -27,6 +27,7 @@ use crate::context::RepoContext;
 use crate::dispatch::{dispatch_actions, Action};
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
+use crate::git;
 use crate::global::{GlobalConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::{execute_nudge, NudgeType};
@@ -110,6 +111,8 @@ pub struct TickResult {
     pub worker_info: HashMap<String, WorkerTickInfo>,
     /// Issues auto-spawned this tick.
     pub auto_spawned: Vec<String>,
+    /// Workers pruned (worktree removed) this tick.
+    pub pruned: Vec<String>,
     /// Pre-computed display data for the render callback (zero I/O).
     pub worker_display: Vec<WorkerDisplayInfo>,
 }
@@ -226,6 +229,29 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        // Collect stale workers for pruning (terminal + tmux dead)
+        let stale_workers: Vec<(String, String)> = result
+            .worker_display
+            .iter()
+            .filter(|w| {
+                let is_terminal = w
+                    .worker_status
+                    .as_ref()
+                    .map(|s| s.is_terminal())
+                    .unwrap_or(false);
+                let tmux_dead =
+                    matches!(w.tmux_status, TaskStatus::NoSession | TaskStatus::NoWindow);
+                is_terminal && tmux_dead
+            })
+            .filter_map(|w| {
+                // Find the repo name from the worker list
+                worker_list
+                    .iter()
+                    .find(|(_, wn)| *wn == w.name)
+                    .map(|(rn, _)| (rn.clone(), w.name.clone()))
+            })
+            .collect();
+
         // Filter out terminal workers and workers with no tmux session
         result.worker_display.retain(|w| {
             let is_terminal = w
@@ -242,6 +268,30 @@ impl<'a> Daemon<'a> {
         workers_state.save().unwrap_or_else(|e| {
             tracing::warn!("failed to save workers state: {}", e);
         });
+
+        // Periodically prune stale worktrees
+        if runtime.should_prune() && !stale_workers.is_empty() {
+            for (repo_name, worker_name) in &stale_workers {
+                let key = format!("{}/{}", repo_name, worker_name);
+                match self.prune_worker(repo_name, worker_name, &registry, &mut workers_state) {
+                    Ok(()) => {
+                        tracing::info!(worker = %key, "pruned stale worktree");
+                        result.pruned.push(key);
+                    }
+                    Err(e) => {
+                        result.errors.push(format!("prune {}: {}", key, e));
+                    }
+                }
+            }
+            if !result.pruned.is_empty() {
+                workers_state.save().unwrap_or_else(|e| {
+                    tracing::warn!("failed to save workers state after prune: {}", e);
+                });
+            }
+            runtime.mark_pruned();
+        } else if runtime.should_prune() {
+            runtime.mark_pruned();
+        }
 
         // 4. Trigger issue poll if auto-spawn enabled
         let worker_names: Vec<String> = worker_list.iter().map(|(_, w)| w.clone()).collect();
@@ -824,6 +874,46 @@ impl<'a> Daemon<'a> {
         Ok(())
     }
 
+    /// Prune a stale worker: remove its git worktree, event logs, and global state entry.
+    fn prune_worker(
+        &self,
+        repo_name: &str,
+        worker_name: &str,
+        registry: &RepoRegistry,
+        workers_state: &mut WorkersState,
+    ) -> Result<()> {
+        let entry = Self::find_repo_path(registry, repo_name)
+            .ok_or_else(|| crate::error::Error::NotInGitRepo)?;
+
+        let worktrees_dir = entry.path.join(crate::config::JIG_DIR);
+        let worktree_path = worktrees_dir.join(worker_name);
+
+        // Remove the git worktree (force — it's already terminal)
+        if worktree_path.exists() {
+            if let Err(e) = git::remove_worktree(&worktree_path, true) {
+                tracing::warn!(worker = worker_name, error = %e, "git worktree remove failed, removing directory");
+                let _ = std::fs::remove_dir_all(&worktree_path);
+            }
+            // Clean up empty parent dirs (for nested paths like feature/foo)
+            cleanup_empty_parents(&worktree_path, &worktrees_dir);
+        }
+
+        // Remove event logs
+        if let Ok(events_dir) = crate::global::global_state_dir().map(|d| d.join("events")) {
+            let sanitized = format!("{}-{}", repo_name, worker_name.replace('/', "-"));
+            let event_dir = events_dir.join(&sanitized);
+            if event_dir.is_dir() {
+                let _ = std::fs::remove_dir_all(&event_dir);
+            }
+        }
+
+        // Remove global state entry
+        let key = format!("{}/{}", repo_name, worker_name);
+        workers_state.remove_worker(&key);
+
+        Ok(())
+    }
+
     /// Fetch the configured base branch for each registered repo (blocking).
     fn sync_repos(&self, registry: &RepoRegistry) {
         for entry in registry.repos() {
@@ -855,6 +945,30 @@ impl<'a> Daemon<'a> {
                 }
             }
         }
+    }
+}
+
+/// Remove empty parent directories up to (but not including) the stop directory.
+fn cleanup_empty_parents(path: &std::path::Path, stop_at: &std::path::Path) {
+    let mut parent = path.parent();
+    while let Some(p) = parent {
+        if p == stop_at
+            || p.file_name()
+                .map(|n| n == crate::config::JIG_DIR)
+                .unwrap_or(false)
+        {
+            break;
+        }
+        match p.read_dir() {
+            Ok(mut entries) => {
+                if entries.next().is_some() {
+                    break; // not empty
+                }
+                let _ = std::fs::remove_dir(p);
+            }
+            Err(_) => break,
+        }
+        parent = p.parent();
     }
 }
 

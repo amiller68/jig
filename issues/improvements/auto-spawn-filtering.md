@@ -14,6 +14,8 @@ Make the daemon's auto-spawn smarter. Today it spawns any issue with `auto=true`
 - `issue_actor.rs` calls `provider.list_spawnable()` which returns `auto=true` + `status=Planned`
 - Respects `max_concurrent_workers` budget
 - Skips issues that already have a worker
+- Issue files are read from the git ref (`origin/main`), not the working tree
+- Config (`jig.toml`) is read from the local working tree
 
 **What's missing:**
 - No priority threshold (spawns Low issues just as eagerly as Urgent)
@@ -25,21 +27,23 @@ Make the daemon's auto-spawn smarter. Today it spawns any issue with `auto=true`
 
 ### Config (`jig.toml`)
 
+Note: all serde field names are **snake_case** in TOML.
+
 ```toml
 [spawn]
-autoSpawn = true
-maxConcurrentWorkers = 5
+auto_spawn = true
+max_concurrent_workers = 5
 
 # NEW: auto-spawn filters
 [spawn.filter]
 # Only auto-spawn issues at or above this priority (default: none, spawn all)
-minPriority = "High"
+min_priority = "High"
 
 # Only auto-spawn issues with ALL of these labels (Linear labels, file provider tags)
 labels = ["backend", "jig-auto"]
 
 # Only auto-spawn unassigned issues (default: true)
-unassignedOnly = true
+unassigned_only = true
 ```
 
 ### SpawnConfig changes
@@ -119,11 +123,12 @@ fn apply_spawn_filter(issues: Vec<Issue>, filter: &SpawnFilter) -> Vec<Issue> {
 
 ### IssueRequest changes
 
-The `IssueRequest` message needs to carry the filter:
+The `IssueRequest` message already carries `base_branch` for git-ref reading. It also needs the filter:
 
 ```rust
 pub struct IssueRequest {
     pub repo_root: PathBuf,
+    pub base_branch: String,
     pub existing_workers: Vec<String>,
     pub max_concurrent_workers: usize,
     pub spawn_filter: SpawnFilter,  // NEW
@@ -133,13 +138,13 @@ pub struct IssueRequest {
 ## Acceptance Criteria
 
 - [ ] `SpawnFilter` struct in config with `min_priority`, `labels`, `unassigned_only`
-- [ ] `jig.toml` `[spawn.filter]` section parsed
+- [ ] `jig.toml` `[spawn.filter]` section parsed (snake_case field names)
 - [ ] Issue actor applies filter before returning spawnable issues
 - [ ] Linear provider fetches assignee
 - [ ] File provider parses `**Assigned-To:**`
-- [ ] Priority threshold: `minPriority = "High"` skips Medium and Low
+- [ ] Priority threshold: `min_priority = "High"` skips Medium and Low
 - [ ] Label filter: `labels = ["backend"]` only spawns issues with that label
-- [ ] Assignee filter: `unassignedOnly = true` skips assigned issues
+- [ ] Assignee filter: `unassigned_only = true` skips assigned issues
 - [ ] Existing behavior unchanged when no filter configured (backwards compatible)
 
 ## Depends On

@@ -21,6 +21,8 @@ pub struct RuntimeConfig {
     pub auto_spawn_interval: u64,
     /// Seconds between git syncs.
     pub sync_interval: u64,
+    /// Seconds between prune checks for stale worktrees.
+    pub prune_interval: u64,
 }
 
 impl Default for RuntimeConfig {
@@ -30,6 +32,7 @@ impl Default for RuntimeConfig {
             max_concurrent_workers: 3,
             auto_spawn_interval: 120,
             sync_interval: 60,
+            prune_interval: 120,
         }
     }
 }
@@ -52,6 +55,9 @@ pub struct DaemonRuntime {
     issue_rx: flume::Receiver<Vec<SpawnableIssue>>,
     issue_pending: bool,
     last_issue_poll: Instant,
+
+    // Prune tracking
+    last_prune: Instant,
 
     config: RuntimeConfig,
 
@@ -91,6 +97,8 @@ impl DaemonRuntime {
             issue_rx: issue_resp_rx,
             issue_pending: false,
             last_issue_poll: past - std::time::Duration::from_secs(config.auto_spawn_interval + 1),
+
+            last_prune: past - std::time::Duration::from_secs(config.prune_interval + 1),
 
             config,
             _handles: vec![sync_handle, gh_handle, issue_handle],
@@ -212,6 +220,16 @@ impl DaemonRuntime {
             }
             Err(_) => vec![],
         }
+    }
+
+    /// Check if it's time to prune stale worktrees.
+    pub fn should_prune(&self) -> bool {
+        self.last_prune.elapsed().as_secs() >= self.config.prune_interval
+    }
+
+    /// Mark that a prune cycle just completed.
+    pub fn mark_pruned(&mut self) {
+        self.last_prune = Instant::now();
     }
 
     /// Get runtime config reference.

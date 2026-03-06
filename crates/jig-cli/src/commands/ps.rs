@@ -106,6 +106,7 @@ impl Ps {
             max_concurrent_workers,
             auto_spawn_interval: spawn_config.auto_spawn_interval,
             sync_interval: 60,
+            prune_interval: 120,
         }
     }
 }
@@ -165,6 +166,10 @@ fn format_tick_log(tick: &TickResult) -> Vec<String> {
 
     for spawned in &tick.auto_spawned {
         lines.push(format!("[{}]   auto-spawned: {}", now, spawned));
+    }
+
+    for pruned in &tick.pruned {
+        lines.push(format!("[{}]   pruned: {}", now, pruned));
     }
 
     for err in &tick.errors {
@@ -344,6 +349,9 @@ fn format_tick_status(tick: &Option<&TickResult>) -> String {
     }
     if !tick.auto_spawned.is_empty() {
         parts.push(format!("{} spawned", tick.auto_spawned.len()));
+    }
+    if !tick.pruned.is_empty() {
+        parts.push(format!("{} pruned", tick.pruned.len()));
     }
     if parts.is_empty() {
         String::new()
