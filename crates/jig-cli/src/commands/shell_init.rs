@@ -25,7 +25,7 @@ _jig() {
         prev="${COMP_WORDS[COMP_CWORD-1]}"
     }
 
-    local commands="create list open remove exit config spawn ps attach review merge kill init update version which health tui shell-init shell-setup"
+    local commands="create list open remove exit config spawn ps attach review merge kill issues init update version which health tui shell-init shell-setup"
 
     # Get worktrees for completion
     _jig_worktrees() {
@@ -64,6 +64,10 @@ _jig() {
             COMPREPLY=($(compgen -W "$(_jig_worktrees)" -- "$cur"))
             return
             ;;
+        issues)
+            COMPREPLY=($(compgen -W "$(_jig_issues)" -- "$cur"))
+            return
+            ;;
         shell-init)
             COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur"))
             return
@@ -83,6 +87,7 @@ _jig() {
             exit) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             init) COMPREPLY=($(compgen -W "-f --force --backup --audit" -- "$cur")) ;;
             spawn) COMPREPLY=($(compgen -W "-c --context -b --base -I --issue --auto" -- "$cur")) ;;
+            issues) COMPREPLY=($(compgen -W "-s --status -p --priority -c --category -i --interactive --ids" -- "$cur")) ;;
             review) COMPREPLY=($(compgen -W "--full" -- "$cur")) ;;
             shell-setup) COMPREPLY=($(compgen -W "--dry-run" -- "$cur")) ;;
             *) COMPREPLY=($(compgen -W "-o --no-hooks -h --help" -- "$cur")) ;;
@@ -124,6 +129,7 @@ _jig() {
         'merge:Merge worktree'
         'kill:Kill tmux window'
         'nuke:Nuke all workers'
+        'issues:Browse issues'
         'init:Initialize repo'
         'update:Update jig'
         'version:Show version'
@@ -187,6 +193,19 @@ _jig() {
                     ;;
                 list|ls)
                     _arguments '--all[Show all]' '-p[Plain output]' '--plain[Plain output]'
+                    ;;
+                issues)
+                    _arguments \
+                        '-s[Status]:status:(planned in-progress complete blocked)' \
+                        '--status=[Status]:status:(planned in-progress complete blocked)' \
+                        '-p[Priority]:priority:(urgent high medium low)' \
+                        '--priority=[Priority]:priority:(urgent high medium low)' \
+                        '-c[Category]:category:' \
+                        '--category=[Category]:category:' \
+                        '-i[Interactive]' \
+                        '--interactive[Interactive]' \
+                        '--ids[IDs only]' \
+                        '1:issue:_jig_issues'
                     ;;
                 config)
                     local -a config_cmds
@@ -279,6 +298,7 @@ complete -c jig -n '__jig_needs_command' -a attach -d 'Attach session'
 complete -c jig -n '__jig_needs_command' -a review -d 'Review diff'
 complete -c jig -n '__jig_needs_command' -a merge -d 'Merge worktree'
 complete -c jig -n '__jig_needs_command' -a kill -d 'Kill session'
+complete -c jig -n '__jig_needs_command' -a issues -d 'Browse issues'
 complete -c jig -n '__jig_needs_command' -a init -d 'Initialize'
 complete -c jig -n '__jig_needs_command' -a update -d 'Update jig'
 complete -c jig -n '__jig_needs_command' -a version -d 'Version'
@@ -307,6 +327,12 @@ complete -c jig -n '__jig_using_command spawn' -l auto -d 'Auto-start'
 complete -c jig -n '__jig_using_command shell-init' -a 'bash zsh fish' -d 'Shell'
 complete -c jig -n '__jig_using_command shell-setup' -l dry-run -d 'Dry run'
 complete -c jig -n '__jig_using_command create' -l base -s b -a '(__jig_branches)' -d 'Base branch'
+complete -c jig -n '__jig_using_command issues' -a '(__jig_issues)' -d 'Issue'
+complete -c jig -n '__jig_using_command issues' -l status -s s -a 'planned in-progress complete blocked' -d 'Status'
+complete -c jig -n '__jig_using_command issues' -l priority -s p -a 'urgent high medium low' -d 'Priority'
+complete -c jig -n '__jig_using_command issues' -l category -s c -d 'Category'
+complete -c jig -n '__jig_using_command issues' -l interactive -s i -d 'Interactive'
+complete -c jig -n '__jig_using_command issues' -l ids -d 'IDs only'
 complete -c jig -n '__jig_using_command config' -a 'base on-create show' -d 'Config cmd'
 "#;
 
