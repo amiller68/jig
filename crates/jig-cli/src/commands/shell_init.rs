@@ -29,7 +29,12 @@ _jig() {
 
     # Get worktrees for completion
     _jig_worktrees() {
-        command jig list 2>/dev/null
+        local wts
+        wts=$(command jig list --plain 2>/dev/null)
+        if [ -z "$wts" ]; then
+            wts=$(command jig list -gp 2>/dev/null | sed -n 's/^  //p')
+        fi
+        echo "$wts"
     }
 
     # Get issue IDs for completion
@@ -72,7 +77,7 @@ _jig() {
     if [[ "$cur" == -* ]]; then
         case "${COMP_WORDS[1]}" in
             create|c) COMPREPLY=($(compgen -W "-o -b --base --no-hooks" -- "$cur")) ;;
-            list|ls) COMPREPLY=($(compgen -W "--all" -- "$cur")) ;;
+            list|ls) COMPREPLY=($(compgen -W "--all -p --plain" -- "$cur")) ;;
             open|o) COMPREPLY=($(compgen -W "--all" -- "$cur")) ;;
             remove|rm) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             exit) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
@@ -131,7 +136,10 @@ _jig() {
 
     _jig_worktrees() {
         local -a wts
-        wts=(${(f)"$(command jig list 2>/dev/null)"})
+        wts=(${(f)"$(command jig list --plain 2>/dev/null)"})
+        if (( ${#wts} == 0 )); then
+            wts=(${(f)"$(command jig list -gp 2>/dev/null | sed -n 's/^  //p')"})
+        fi
         _describe 'worktree' wts
     }
 
@@ -178,7 +186,7 @@ _jig() {
                         '2:branch:'
                     ;;
                 list|ls)
-                    _arguments '--all[Show all]'
+                    _arguments '--all[Show all]' '-p[Plain output]' '--plain[Plain output]'
                     ;;
                 config)
                     local -a config_cmds
@@ -232,7 +240,11 @@ end
 
 # Completions
 function __jig_worktrees
-    command jig list 2>/dev/null
+    set -l wts (command jig list --plain 2>/dev/null)
+    if test -z "$wts"
+        set wts (command jig list -gp 2>/dev/null | sed -n 's/^  //p')
+    end
+    echo $wts
 end
 
 function __jig_issues
