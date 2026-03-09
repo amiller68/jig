@@ -64,10 +64,16 @@ This scaffolds:
     └── chores/
 ```
 
-To also have the agent audit the codebase and populate the skeleton docs automatically:
+To also have the agent audit the codebase and populate the skeleton docs automatically, `--audit` launches the agent in a `jig-init` tmux session:
 
 ```bash
 jig init claude --audit
+```
+
+You can pass extra instructions to guide the audit:
+
+```bash
+jig init claude --audit "We use pnpm, not npm. The API is actix-web."
 ```
 
 For existing repos with customized docs, back up first so the agent can use them as reference:
@@ -75,6 +81,8 @@ For existing repos with customized docs, back up first so the agent can use them
 ```bash
 jig init claude --force --backup --audit
 ```
+
+Attach to the audit session with `tmux attach -t jig-init`.
 
 ## Configuration
 

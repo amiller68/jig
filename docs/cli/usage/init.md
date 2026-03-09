@@ -71,12 +71,18 @@ Instead of manually filling in the skeleton docs, let the agent do it:
 jig init --audit
 ```
 
-This runs init as normal, then launches the configured agent in your terminal with a prompt to audit the codebase and populate all the skeleton documentation files with project-specific content.
+This runs init as normal, then launches the configured agent in a `jig-init` tmux session with a prompt to audit the codebase and populate all the skeleton documentation files with project-specific content. Attach with `tmux attach -t jig-init`.
+
+You can pass extra instructions to customize the audit:
+
+```bash
+jig init claude --audit "We use pnpm, not npm. The API is a Rust actix-web server."
+```
 
 Combine with `--backup` to give the agent your existing files as reference:
 
 ```bash
-jig init --force --backup --audit
+jig init claude --force --backup --audit
 ```
 
 This backs up existing files to `.backup/`, writes fresh templates, then launches the agent with instructions to cannibalize content from the backup files as a starting point.
@@ -166,6 +172,6 @@ Convention for file-based issue tracking in `issues/`. If you use Linear, Jira, 
 |------|-------------|
 | `--force` | Overwrite existing files |
 | `--backup` | Save existing files to `.backup/` before overwriting |
-| `--audit` | Launch the agent to audit the codebase and populate docs |
+| `--audit [INSTRUCTIONS]` | Launch the agent in tmux to audit and populate docs. Optionally pass extra instructions. |
 
 Flags combine: `jig init --force --backup --audit` writes fresh templates, backs up your old files, and launches the agent to populate everything using your existing content as reference.
