@@ -1,8 +1,9 @@
 # Fix Conventional Commit Regex Warnings
 
-**Status:** Planned  
-**Priority:** Low  
+**Status:** Planned
+**Priority:** Low
 **Category:** Bugs
+**Auto:** true
 
 ## Objective
 

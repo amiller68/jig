@@ -3,6 +3,8 @@
 **Status:** Planned
 **Priority:** High
 **Category:** Improvements
+**Auto:** true
+**Depends-On:** improvements/labels-and-tags
 
 ## Objective
 
