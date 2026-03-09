@@ -12,7 +12,7 @@ jig is built around five pillars: **worktrees**, **documentation**, **issues**, 
 
 Git worktrees are the foundation. Each worktree is an isolated checkout of your repository with its own working directory and branch.
 
-```
+```text
 main (your orchestration session)
  └── feature-auth/      # Agent working on auth
  └── fix-pagination/    # Agent fixing pagination bug
@@ -41,7 +41,7 @@ Agents need context. The more discoverable and well-organized your documentation
 
 jig scaffolds a `docs/` structure:
 
-```
+```text
 docs/
 ├── index.md           # Documentation hub
 ├── PATTERNS.md        # Coding conventions
@@ -61,25 +61,28 @@ Plus a `CLAUDE.md` (or agent-specific config) at the repo root with:
 
 Well-scoped tickets are the input to agent work. jig supports file-based issue tracking in `issues/` and can also pull issues directly from [Linear](/appendix/linear-integration):
 
-```
+```text
 issues/
-├── _template.md
-├── 001-implement-auth.md
-├── 002-fix-pagination.md
-└── 003-add-tests.md
+├── README.md
+├── _templates/
+├── features/
+│   └── jwt-auth.md
+├── bugs/
+│   └── fix-pagination.md
+└── chores/
+    └── add-tests.md
 ```
 
-Each issue has frontmatter:
+Each issue uses markdown-bold metadata:
 
 ```markdown
----
-id: 001
-title: Implement JWT authentication
-status: ready
-priority: 2
----
+# Implement JWT authentication
 
-## Description
+**Status:** Planned
+**Priority:** High
+**Category:** features
+
+## Objective
 
 Add JWT-based authentication to the API.
 
@@ -91,11 +94,10 @@ Add JWT-based authentication to the API.
 ```
 
 **Status values:**
-- `draft` — Not ready
-- `ready` — Can be picked up
-- `in_progress` — Being worked on
-- `review` — Done, needs review
-- `done` — Complete
+- `Planned` — Ready to be picked up
+- `In Progress` — Being worked on
+- `Complete` — Done
+- `Blocked` — Waiting on something
 
 The discipline of writing detailed issue descriptions pays dividends. Agents work better with clear scope, explicit acceptance criteria, and relevant context.
 
@@ -152,7 +154,7 @@ jig ships with safe defaults for getting a project up and running, but is extens
 
 Skills are prompt templates that agents can invoke. They live in `.claude/skills/` and encode workflows, integrations, and conventions specific to your team.
 
-```
+```text
 .claude/skills/
 ├── issues/      # How to work with issues
 ├── review/      # Code review workflow

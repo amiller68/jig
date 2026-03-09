@@ -12,7 +12,7 @@ This page walks through a real session: writing issues, spawning agents, monitor
 
 ## The loop
 
-```
+```text
 Think → Write tickets → Spawn agents → Monitor → Review → Merge → Repeat
 ```
 
@@ -26,7 +26,7 @@ Good tickets are the input. Whether you use file-based issues or Linear, the pat
 
 ```bash
 # Create from template
-cp issues/_template.md issues/features/jwt-auth.md
+cp issues/_templates/feature.md issues/features/jwt-auth.md
 ```
 
 ```markdown
@@ -134,17 +134,17 @@ jig ps -w
 
 This starts the live watch display:
 
-```
+<pre class="terminal-output">
 jig ps --watch — 4 workers  (every 2s)
 
-WORKER                STATE    COMMITS  PR     HEALTH  ISSUE
-● jwt-auth            running        2  -      -       ENG-123
-● pagination          running        0  -      -       ENG-124
-● test-coverage       draft          3  #42    ci      ENG-125
-● error-pages         review         5  #43    ok      ENG-126
+WORKER              STATE    COMMITS  PR     HEALTH  ISSUE
+● jwt-auth          running        2  -      -       ENG-123
+● pagination        running        0  -      -       ENG-124
+● test-coverage     draft          3  #42    ci      ENG-125
+● error-pages       review         5  #43    ok      ENG-126
 
-                                                [l]ogs  [q]uit
-```
+                                              [l]ogs  [q]uit
+</pre>
 
 At a glance you can see:
 
@@ -168,12 +168,12 @@ You're now watching the agent work in real time. Read its output, see its tool c
 
 Press `l` in watch mode to see what the daemon is actually doing:
 
-```
+<pre class="terminal-output">
 [14:32:05] tick: 3 workers, 1 action, 1 nudge, 0 errors
 [14:32:05]   myrepo/jwt-auth PR: -
 [14:32:05]   myrepo/test-coverage PR: ci
 [14:32:35] tick: 3 workers, 0 actions, 0 nudges, 0 errors
-```
+</pre>
 
 This is useful for understanding why a worker got nudged or when a PR was discovered.
 

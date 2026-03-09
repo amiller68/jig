@@ -46,17 +46,22 @@ jig init
 
 This scaffolds:
 
-```
+```text
 .
-├── jig.toml              # jig configuration
-├── CLAUDE.md             # Agent instructions (if using Claude Code)
+├── jig.toml
+├── CLAUDE.md
 ├── docs/
 │   ├── index.md
 │   ├── PATTERNS.md
 │   ├── CONTRIBUTING.md
-│   └── ...
+│   ├── SUCCESS_CRITERIA.md
+│   └── PROJECT_LAYOUT.md
 └── issues/
-    └── _template.md
+    ├── README.md
+    ├── _templates/
+    ├── features/
+    ├── bugs/
+    └── chores/
 ```
 
 ## Configuration
@@ -65,11 +70,9 @@ Edit `jig.toml` to customize:
 
 ```toml
 [worktree]
-dir = ".worktrees"        # Where worktrees are created
-base_branch = "main"      # Branch to base worktrees on
-
-[worktree.copy]
-paths = [".env.local"]    # Gitignored files to copy into worktrees
+# base = "origin/main"
+# on_create = "npm install"
+# copy = [".env"]
 ```
 
 ## Your first spawn
@@ -77,7 +80,7 @@ paths = [".env.local"]    # Gitignored files to copy into worktrees
 1. **Create an issue:**
 
 ```bash
-cp issues/_template.md issues/001-hello-world.md
+cp issues/_templates/feature.md issues/features/hello-world.md
 ```
 
 Edit it with a clear description and acceptance criteria.
@@ -91,7 +94,9 @@ jig spawn hello-world --context "Complete the task in issues/001-hello-world.md"
 3. **Monitor:**
 
 ```bash
-jig list                  # See all worktrees
+jig ps                    # See all workers and their status
+jig ps -w                 # Live watch mode (updates every 2s)
+jig ps -g                 # Global mode — workers across all repos
 jig attach hello-world    # Attach to the agent's tmux session
 ```
 
@@ -105,16 +110,53 @@ jig remove hello-world    # Clean up
 
 ## Commands reference
 
+### Worktree management
+
+| Command | Description |
+|---------|-------------|
+| `jig create <name>` | Create a worktree |
+| `jig list` | List all worktrees |
+| `jig open <name>` | Open a worktree directory |
+| `jig remove <name>` | Remove a worktree |
+| `jig exit` | Remove current worktree (run from inside one) |
+
+### Sessions
+
+| Command | Description |
+|---------|-------------|
+| `jig spawn <name>` | Create worktree + launch agent session |
+| `jig ps` | Show worker status dashboard |
+| `jig ps -w` | Live watch mode (updates every 2s) |
+| `jig ps -g` | Global mode — workers across all repos |
+| `jig attach <name>` | Attach to agent's tmux session |
+| `jig kill <name>` | Kill a worker's tmux session |
+| `jig nuke <name>` | Kill session + remove worktree |
+
+### Review & merge
+
+| Command | Description |
+|---------|-------------|
+| `jig review <name>` | Show diff for review |
+| `jig merge <name>` | Merge worktree branch |
+
+### Configuration
+
 | Command | Description |
 |---------|-------------|
 | `jig init` | Initialize jig in a repository |
-| `jig create <name>` | Create a worktree |
-| `jig spawn <name>` | Create worktree + launch agent |
-| `jig list` | List all worktrees |
-| `jig attach <name>` | Attach to agent's tmux session |
-| `jig review <name>` | Show diff for review |
-| `jig merge <name>` | Merge worktree branch |
-| `jig remove <name>` | Remove worktree |
+| `jig config` | View/edit configuration |
+| `jig repos` | List registered repos |
+| `jig issues` | Browse and manage issues |
+
+### System
+
+| Command | Description |
+|---------|-------------|
+| `jig daemon` | Run the background daemon |
+| `jig health` | Check system health |
+| `jig hooks` | Manage git/agent hooks |
+| `jig shell-init <shell>` | Print shell integration script |
+| `jig shell-setup` | Interactive shell setup |
 
 ## Next steps
 

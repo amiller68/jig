@@ -48,7 +48,7 @@ jig init
 jig spawn feature-auth --context "Implement JWT authentication"
 
 # Check on your workers
-jig list
+jig ps
 
 # Review and merge when done
 jig review feature-auth

@@ -13,7 +13,7 @@ This page explains how it all works: spawn, the event system, the daemon tick lo
 
 ## The big picture
 
-```
+```text
 You write a ticket
   → jig spawn launches an agent in a tmux window
     → Agent works autonomously (commits, pushes, opens PR)
@@ -64,7 +64,7 @@ When you spawn a worker, jig:
 
 ## The event system
 
-Every worker has a JSONL event log at `~/.config/jig/events/<repo>-<worker>/events.jsonl`. Events are appended by git hooks (post-commit, post-merge) and by the daemon itself.
+Every worker has a JSONL event log at `~/.config/jig/state/events/<repo>-<worker>/events.jsonl`. Events are appended by git hooks (post-commit, post-merge) and by the daemon itself.
 
 ### Event types
 
@@ -104,7 +104,7 @@ The silence check is key: if no events arrive for `silence_threshold_seconds` (d
 The daemon runs a periodic loop (default every 30 seconds). Each tick:
 
 1. **Sync repos** — `git fetch` the base branch for each registered repo
-2. **Discover workers** — Scan `~/.config/jig/events/` for active event logs
+2. **Discover workers** — Scan `~/.config/jig/state/events/` for active event logs
 3. **For each worker:**
    - Read the event log and derive current state
    - Discover PRs if not already known (via `gh pr list`)
@@ -146,7 +146,7 @@ The nudge templates are Handlebars and can be overridden per-repo by placing cus
 
 ### Example: idle nudge
 
-```
+```text
 STATUS CHECK: You've been idle for a while (nudge 2/3).
 
 You have uncommitted changes but no PR yet. What's blocking you?
@@ -158,7 +158,7 @@ You have uncommitted changes but no PR yet. What's blocking you?
 
 ### Example: CI nudge
 
-```
+```text
 CI is failing on your PR (nudge 1/3).
 
 Fix these issues:
@@ -196,6 +196,15 @@ The daemon also handles terminal PR states:
 - **Merged** — If `github.auto_cleanup_merged` is true (default), kills the tmux window and emits a `Terminal` event. Sends a notification.
 - **Closed without merge** — Sends a notification. If `github.auto_cleanup_closed` is true, also cleans up.
 
+### Auto-pruning
+
+When a PR is merged or closed, the daemon automatically prunes the associated worker:
+
+- **Triggers** — PR merged or PR closed (depending on config)
+- **What gets cleaned up** — The git worktree, event logs, and worker state are all removed
+- **Safe on uncommitted changes** — Pruning will not remove a worktree with uncommitted changes; it skips the worker and logs a warning
+- **Recovery scan** — On startup, the daemon scans for PRs that were merged or closed while the daemon was offline and prunes their stale workers
+
 ### PR discovery
 
 Workers don't need to tell jig about their PR. The daemon proactively checks GitHub for PRs matching the worker's branch name. When found, it emits a `PrOpened` event and the worker transitions to `review` status.
@@ -204,29 +213,27 @@ Workers don't need to tell jig about their PR. The daemon proactively checks Git
 
 `jig ps --watch` shows a live table updated every tick:
 
-```
+<pre class="terminal-output">
 jig ps --watch — 3 workers  (every 2s)
 
-NAME            TMUX  STATE    ISSUE       BRANCH           COMMITS  DIRTY  NUDGES  PR    HEALTH
-feature-auth    ●     running  jwt-auth    feature-auth           3    -       -     #42   ok
-fix-pagination  ●     stalled  fix-page    fix-pagination         1    ●       2     #43   ci conflicts
-add-tests       ○     idle     add-tests   add-tests              0    -       -     -     -
+WORKER              STATE    COMMITS  PR     HEALTH  ISSUE
+● feature-auth      running        3  #42    ok      jwt-auth
+● fix-pagination    stalled       1*  #43    ci      fix-page
+○ add-tests         idle           -  -      -       add-tests
 
-                                                                              [l]ogs  [q]uit
-```
+                                              [l]ogs  [q]uit
+</pre>
 
 Column meanings:
 
 | Column | Description |
 |--------|-------------|
-| **TMUX** | Is the tmux window alive? `●` running, `○` exited, `✗` missing |
+| **WORKER** | Worker name with tmux indicator: `●` running, `○` exited |
 | **STATE** | Derived worker status from the event stream |
-| **ISSUE** | Linked issue reference |
-| **COMMITS** | Commits ahead of base branch |
-| **DIRTY** | Uncommitted changes in the worktree |
-| **NUDGES** | Total nudges sent across all types |
+| **COMMITS** | Commits ahead of base branch (`*` = uncommitted changes) |
 | **PR** | PR number if one exists |
-| **HEALTH** | PR check results: `ok` (all green), problem names in red, `?` if GitHub unavailable, `-` if no PR |
+| **HEALTH** | PR check results: `ok` (all green), problem names in red, `-` if no PR |
+| **ISSUE** | Linked issue reference |
 
 The HEALTH column gives you at-a-glance visibility into what's wrong with each worker's PR, independent of whether nudges have fired.
 
@@ -234,7 +241,7 @@ The HEALTH column gives you at-a-glance visibility into what's wrong with each w
 
 Press `l` in watch mode to switch to the log view. This shows timestamped daemon activity — which nudges fired, PR check results, errors — so you can see what the daemon is actually doing:
 
-```
+<pre class="terminal-output">
 jig ps --watch — logs  (every 2s)
 
 [14:32:05] tick: 3 workers, 1 action, 1 nudge, 0 errors
@@ -245,7 +252,7 @@ jig ps --watch — logs  (every 2s)
 [14:32:35]   myrepo/fix-pagination PR: ok
 
                                                     [t]able  [q]uit
-```
+</pre>
 
 Press `t` or `l` again to switch back to the table. Press `q` to quit cleanly.
 
@@ -274,7 +281,7 @@ exec = "notify-send 'jig' '$MESSAGE'"  # shell command for notifications
 |------|---------|
 | `~/.config/jig/config.toml` | Global daemon configuration |
 | `~/.config/jig/workers.json` | Last-known state of all workers (for diff-based dispatch) |
-| `~/.config/jig/events/<repo>-<worker>/events.jsonl` | Per-worker event stream |
+| `~/.config/jig/state/events/<repo>-<worker>/events.jsonl` | Per-worker event stream |
 | `~/.config/jig/notifications.jsonl` | Notification log |
 
 ## Putting it all together
@@ -314,7 +321,7 @@ The daemon handles the supervision loop that used to require manual checking, cr
 
 Override any built-in template by placing a file in your repo's `.jig/templates/` directory:
 
-```
+```text
 .jig/templates/
 ├── nudge-idle.hbs
 ├── nudge-ci.hbs
