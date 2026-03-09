@@ -29,6 +29,6 @@ exclude:
 
 # Branding
 brand:
-  primary_color: "#33ff33"    # phosphor green
-  accent_color: "#00cccc"     # terminal cyan
+  primary_color: "#fabd2f"    # gruvbox yellow
+  accent_color: "#8ec07c"     # gruvbox aqua
   tagline: "Multiply yourself."
