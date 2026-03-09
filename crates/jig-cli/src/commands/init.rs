@@ -5,7 +5,7 @@ use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
-use jig_core::{adapter, git, terminal, Error, JigToml};
+use jig_core::{adapter, git, session, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 
@@ -54,9 +54,9 @@ pub struct Init {
     #[arg(long)]
     pub backup: bool,
 
-    /// Print audit prompt after init
-    #[arg(long)]
-    pub audit: bool,
+    /// Launch agent to audit and populate docs. Optionally pass extra instructions.
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    pub audit: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -295,22 +295,40 @@ type = "{}"
         eprintln!();
         eprintln!("{} Initialization complete", "✓".green().bold());
 
-        if self.audit {
-            print_audit_prompt(adapter);
+        if let Some(ref extra) = self.audit {
+            let extra = if extra.is_empty() { None } else { Some(extra.as_str()) };
+            launch_audit(&repo_root, adapter, self.backup, extra)?;
         }
 
         Ok(NoOutput)
     }
 }
 
-/// Generate audit prompt with adapter-specific file paths
-fn audit_prompt(adapter: &adapter::AgentAdapter) -> String {
+/// Generate audit prompt with adapter-specific file paths.
+/// When `has_backup` is true, adds instructions to reference `.backup/` files.
+/// When `extra` is provided, appends it as additional instructions.
+fn audit_prompt(adapter: &adapter::AgentAdapter, has_backup: bool, extra: Option<&str>) -> String {
+    let backup_section = if has_backup {
+        "\n\n## Reference material\n\n\
+         Existing files were backed up to `.backup/` before this initialization. \
+         Use these as a jumping-off point — cannibalize content, conventions, and \
+         project-specific details from the backup files to populate the new skeletons. \
+         Don't copy blindly; adapt the content to fit the new structure."
+    } else {
+        ""
+    };
+
+    let extra_section = match extra {
+        Some(text) => format!("\n\n## Additional instructions\n\n{text}"),
+        None => String::new(),
+    };
+
     format!(
-        r#"Audit this codebase and populate the skeleton documentation files with project-specific content.
+        r#"Audit this codebase and populate the skeleton documentation files with project-specific content.{backup_section}
 
 ## Files to populate
 
-1. **{}** — Fill in:
+1. **{project_file}** — Fill in:
    - One-line project description
    - Quick Reference commands (build, test, lint, run)
    - Project structure overview
@@ -344,12 +362,13 @@ fn audit_prompt(adapter: &adapter::AgentAdapter) -> String {
    - Commit message conventions used
    - Any project-specific contribution rules
 
-7. **Skills** — Review each skill in {}/  and update if needed:
+7. **Skills** — Review each skill in {skills_dir}/ and update if needed:
    - /check — Update with project-specific check commands
    - /review — Ensure review criteria match project conventions
 
-Remove HTML comment placeholders as you fill in actual content. Commit when done."#,
-        adapter.project_file, adapter.skills_dir
+Remove HTML comment placeholders as you fill in actual content. Commit when done.{extra_section}"#,
+        project_file = adapter.project_file,
+        skills_dir = adapter.skills_dir,
     )
 }
 
@@ -360,15 +379,36 @@ fn get_settings_content(adapter: &adapter::AgentAdapter) -> &'static str {
     }
 }
 
-/// Print the audit prompt for an adapter
-fn print_audit_prompt(adapter: &adapter::AgentAdapter) {
+/// Launch the agent with the audit prompt in a tmux session.
+fn launch_audit(
+    repo_root: &Path,
+    adapter: &adapter::AgentAdapter,
+    has_backup: bool,
+    extra: Option<&str>,
+) -> Result<(), InitError> {
+    let prompt = audit_prompt(adapter, has_backup, extra);
+    let cmd = adapter::build_spawn_command(adapter, Some(&prompt), true);
+
+    let session_name = "jig-init";
+    let window_name = repo_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("init");
+
+    session::create_window(session_name, window_name, repo_root)?;
+    session::send_keys(session_name, window_name, &cmd)?;
+
     eprintln!();
     eprintln!(
-        "{} Run this to audit and populate documentation:",
-        "→".cyan()
+        "{} Audit launched in tmux session {}:{}",
+        "→".cyan(),
+        session_name,
+        window_name
     );
     eprintln!();
-    eprintln!("  {} \"{}\"", adapter.command, audit_prompt(adapter));
+    eprintln!("  Attach with: {} -t {}", "tmux attach".bold(), session_name);
+
+    Ok(())
 }
 
 /// Install git hooks and agent-specific hooks (idempotent).

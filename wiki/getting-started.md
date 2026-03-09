@@ -41,7 +41,7 @@ cargo install --path crates/jig-cli
 In your project root:
 
 ```bash
-jig init
+jig init claude
 ```
 
 This scaffolds:
@@ -62,6 +62,18 @@ This scaffolds:
     ├── features/
     ├── bugs/
     └── chores/
+```
+
+To also have the agent audit the codebase and populate the skeleton docs automatically:
+
+```bash
+jig init claude --audit
+```
+
+For existing repos with customized docs, back up first so the agent can use them as reference:
+
+```bash
+jig init claude --force --backup --audit
 ```
 
 ## Configuration

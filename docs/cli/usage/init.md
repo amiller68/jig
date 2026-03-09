@@ -63,6 +63,24 @@ After verifying the result, remove the backup:
 rm -rf .jig-backup/
 ```
 
+## Auditing with `--audit`
+
+Instead of manually filling in the skeleton docs, let the agent do it:
+
+```bash
+jig init --audit
+```
+
+This runs init as normal, then launches the configured agent in your terminal with a prompt to audit the codebase and populate all the skeleton documentation files with project-specific content.
+
+Combine with `--backup` to give the agent your existing files as reference:
+
+```bash
+jig init --force --backup --audit
+```
+
+This backs up existing files to `.backup/`, writes fresh templates, then launches the agent with instructions to cannibalize content from the backup files as a starting point.
+
 ## Iterating After Init
 
 `jig init` is a first pass. The generated docs and skills are a starting point — you should iterate on them to match how your team actually works.
@@ -147,6 +165,7 @@ Convention for file-based issue tracking in `issues/`. If you use Linear, Jira, 
 | Flag | Description |
 |------|-------------|
 | `--force` | Overwrite existing files |
-| `--backup` | Save existing files to `.jig-backup/` before overwriting |
+| `--backup` | Save existing files to `.backup/` before overwriting |
+| `--audit` | Launch the agent to audit the codebase and populate docs |
 
-Flags combine: `jig init --force --backup` is the recommended way to apply template updates.
+Flags combine: `jig init --force --backup --audit` writes fresh templates, backs up your old files, and launches the agent to populate everything using your existing content as reference.
