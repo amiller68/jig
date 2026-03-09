@@ -72,6 +72,11 @@ impl IssueProvider for LinearProvider {
             filter.priority.as_ref(),
         )?;
 
+        // Client-side label filtering (all specified labels must match).
+        if !filter.labels.is_empty() {
+            issues.retain(|i| i.matches(filter));
+        }
+
         // Sort by priority then id, consistent with FileProvider.
         issues.sort_by(|a, b| {
             let pa = a.priority.as_ref().map(|p| p.clone() as u8).unwrap_or(99);

@@ -259,6 +259,15 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
 
     let children = extract_children(content, rel);
 
+    let labels = extract_field(content, "Labels")
+        .map(|s| {
+            s.split(',')
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let auto = extract_field(content, "Auto")
         .map(|s| s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes"))
         .unwrap_or(false);
@@ -274,6 +283,7 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         source: rel_path.to_string(),
         children,
         auto,
+        labels,
     })
 }
 
@@ -336,6 +346,15 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
 
     let children = extract_children(&content, rel);
 
+    let labels = extract_field(&content, "Labels")
+        .map(|s| {
+            s.split(',')
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let auto = extract_field(&content, "Auto")
         .map(|s| s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes"))
         .unwrap_or(false);
@@ -351,6 +370,7 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         source: path.to_string_lossy().to_string(),
         children,
         auto,
+        labels,
     })
 }
 
@@ -687,6 +707,7 @@ mod tests {
                 source: String::new(),
                 children: vec![],
                 auto: false,
+                labels: vec![],
             },
             Issue {
                 id: "a-urgent".into(),
@@ -699,6 +720,7 @@ mod tests {
                 source: String::new(),
                 children: vec![],
                 auto: false,
+                labels: vec![],
             },
         ];
         sort_issues(&mut issues);

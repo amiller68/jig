@@ -87,7 +87,7 @@ _jig() {
             exit) COMPREPLY=($(compgen -W "-f --force" -- "$cur")) ;;
             init) COMPREPLY=($(compgen -W "-f --force --backup --audit" -- "$cur")) ;;
             spawn) COMPREPLY=($(compgen -W "-c --context -b --base -I --issue --auto" -- "$cur")) ;;
-            issues) COMPREPLY=($(compgen -W "-s --status -p --priority -c --category -i --interactive --ids" -- "$cur")) ;;
+            issues) COMPREPLY=($(compgen -W "-s --status -p --priority -c --category -l --label -i --interactive --ids" -- "$cur")) ;;
             review) COMPREPLY=($(compgen -W "--full" -- "$cur")) ;;
             shell-setup) COMPREPLY=($(compgen -W "--dry-run" -- "$cur")) ;;
             *) COMPREPLY=($(compgen -W "-o --no-hooks -h --help" -- "$cur")) ;;
@@ -202,6 +202,8 @@ _jig() {
                         '--priority=[Priority]:priority:(urgent high medium low)' \
                         '-c[Category]:category:' \
                         '--category=[Category]:category:' \
+                        '*-l[Label]:label:' \
+                        '*--label=[Label]:label:' \
                         '-i[Interactive]' \
                         '--interactive[Interactive]' \
                         '--ids[IDs only]' \
@@ -331,6 +333,7 @@ complete -c jig -n '__jig_using_command issues' -a '(__jig_issues)' -d 'Issue'
 complete -c jig -n '__jig_using_command issues' -l status -s s -a 'planned in-progress complete blocked' -d 'Status'
 complete -c jig -n '__jig_using_command issues' -l priority -s p -a 'urgent high medium low' -d 'Priority'
 complete -c jig -n '__jig_using_command issues' -l category -s c -d 'Category'
+complete -c jig -n '__jig_using_command issues' -l label -s l -d 'Label'
 complete -c jig -n '__jig_using_command issues' -l interactive -s i -d 'Interactive'
 complete -c jig -n '__jig_using_command issues' -l ids -d 'IDs only'
 complete -c jig -n '__jig_using_command config' -a 'base on-create show' -d 'Config cmd'

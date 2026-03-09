@@ -34,6 +34,10 @@ pub struct Issues {
     #[arg(short, long)]
     pub category: Option<String>,
 
+    /// Filter by label (can specify multiple; all must match)
+    #[arg(short, long)]
+    pub label: Vec<String>,
+
     /// Show only issues with unresolved dependencies
     #[arg(long)]
     pub blocked: bool,
@@ -78,6 +82,7 @@ impl Issues {
                 .as_deref()
                 .and_then(IssuePriority::from_str_loose),
             category: self.category.clone(),
+            labels: self.label.clone(),
         }
     }
 

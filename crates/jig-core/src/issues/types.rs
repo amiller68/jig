@@ -106,6 +106,8 @@ pub struct Issue {
     pub children: Vec<String>,
     /// Whether this issue is auto-spawnable by the daemon.
     pub auto: bool,
+    /// Labels/tags attached to this issue.
+    pub labels: Vec<String>,
 }
 
 /// Filter criteria for listing issues.
@@ -114,6 +116,8 @@ pub struct IssueFilter {
     pub status: Option<IssueStatus>,
     pub priority: Option<IssuePriority>,
     pub category: Option<String>,
+    /// Filter by labels (all must match).
+    pub labels: Vec<String>,
 }
 
 impl Issue {
@@ -131,6 +135,11 @@ impl Issue {
         }
         if let Some(ref category) = filter.category {
             if self.category.as_deref() != Some(category.as_str()) {
+                return false;
+            }
+        }
+        for label in &filter.labels {
+            if !self.labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
                 return false;
             }
         }
@@ -174,6 +183,7 @@ mod tests {
             source: String::new(),
             children: vec![],
             auto: false,
+            labels: vec![],
         };
 
         assert!(issue.matches(&IssueFilter::default()));

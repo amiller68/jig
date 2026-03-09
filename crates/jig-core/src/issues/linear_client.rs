@@ -201,11 +201,9 @@ impl From<RawIssue> for Issue {
             _ => format!("# {}", raw.title),
         };
 
-        let auto = raw
-            .labels
-            .nodes
-            .iter()
-            .any(|l| l.name.eq_ignore_ascii_case("jig-auto"));
+        let labels: Vec<String> = raw.labels.nodes.into_iter().map(|l| l.name).collect();
+
+        let auto = labels.iter().any(|l| l.eq_ignore_ascii_case("jig-auto"));
 
         Issue {
             id: raw.identifier,
@@ -218,6 +216,7 @@ impl From<RawIssue> for Issue {
             source: raw.url,
             children,
             auto,
+            labels,
         }
     }
 }
