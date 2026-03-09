@@ -229,22 +229,14 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Collect stale workers for pruning (terminal + tmux dead)
+        // Collect stale workers for pruning: tmux session/window gone entirely.
+        // This catches workers that exited without a Terminal event (e.g. agent
+        // finished but no PR was opened, so no PR lifecycle cleanup fired).
         let stale_workers: Vec<(String, String)> = result
             .worker_display
             .iter()
-            .filter(|w| {
-                let is_terminal = w
-                    .worker_status
-                    .as_ref()
-                    .map(|s| s.is_terminal())
-                    .unwrap_or(false);
-                let tmux_dead =
-                    matches!(w.tmux_status, TaskStatus::NoSession | TaskStatus::NoWindow);
-                is_terminal && tmux_dead
-            })
+            .filter(|w| matches!(w.tmux_status, TaskStatus::NoSession | TaskStatus::NoWindow))
             .filter_map(|w| {
-                // Find the repo name from the worker list
                 worker_list
                     .iter()
                     .find(|(_, wn)| *wn == w.name)
