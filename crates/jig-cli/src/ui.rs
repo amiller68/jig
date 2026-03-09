@@ -84,6 +84,96 @@ pub fn format_health(info: &WorkerTickInfo) -> (String, Color) {
     }
 }
 
+/// Build a row of cells for a single worker.
+fn worker_row(w: &WorkerDisplayInfo) -> Vec<Cell> {
+    let tmux_indicator = match w.tmux_status {
+        TaskStatus::Running => "●",
+        TaskStatus::Exited => "○",
+        TaskStatus::NoSession | TaskStatus::NoWindow => "✗",
+    };
+    let tmux_color = match w.tmux_status {
+        TaskStatus::Running => Color::Green,
+        TaskStatus::Exited => Color::Yellow,
+        TaskStatus::NoSession | TaskStatus::NoWindow => Color::DarkGrey,
+    };
+
+    let (state_text, state_color) = match w.worker_status {
+        Some(ref status) if *status == WorkerStatus::WaitingReview && w.is_draft => {
+            ("draft", Color::Blue)
+        }
+        Some(ref status) => (worker_state_str(status), worker_state_color(status)),
+        None => ("-", Color::DarkGrey),
+    };
+
+    let dirty_marker = if w.is_dirty { "*" } else { "" };
+    let commits = if w.commits_ahead > 0 || w.is_dirty {
+        format!("{}{}", w.commits_ahead, dirty_marker)
+    } else {
+        "-".to_string()
+    };
+    let commit_color = if w.is_dirty {
+        Color::Yellow
+    } else if w.commits_ahead > 0 {
+        Color::White
+    } else {
+        Color::DarkGrey
+    };
+
+    let pr = w
+        .pr_url
+        .as_ref()
+        .map(|url| {
+            url.rsplit('/')
+                .next()
+                .map(|n| format!("#{}", n))
+                .unwrap_or_else(|| "yes".to_string())
+        })
+        .unwrap_or_else(|| "-".to_string());
+    let pr_color = if pr == "-" {
+        Color::DarkGrey
+    } else {
+        Color::Cyan
+    };
+
+    let issue = w
+        .issue_ref
+        .as_deref()
+        .map(|id| truncate(id.rsplit('/').next().unwrap_or(id), 16))
+        .unwrap_or_else(|| "-".to_string());
+    let issue_color = if issue == "-" {
+        Color::DarkGrey
+    } else {
+        Color::White
+    };
+
+    let (health_text, health_color) = format_health(&w.pr_health);
+
+    let name = format!("{} {}", tmux_indicator, truncate(&w.name, NAME_MAX));
+
+    vec![
+        Cell::new(&name).fg(tmux_color),
+        Cell::new(state_text).fg(state_color),
+        Cell::new(&commits)
+            .fg(commit_color)
+            .set_alignment(CellAlignment::Right),
+        Cell::new(&pr).fg(pr_color),
+        Cell::new(&health_text).fg(health_color),
+        Cell::new(&issue).fg(issue_color),
+    ]
+}
+
+/// Standard table header cells.
+fn table_header() -> Vec<Cell> {
+    vec![
+        Cell::new("WORKER").add_attribute(Attribute::Bold),
+        Cell::new("STATE").add_attribute(Attribute::Bold),
+        Cell::new("COMMITS").add_attribute(Attribute::Bold),
+        Cell::new("PR").add_attribute(Attribute::Bold),
+        Cell::new("HEALTH").add_attribute(Attribute::Bold),
+        Cell::new("ISSUE").add_attribute(Attribute::Bold),
+    ]
+}
+
 /// Render a worker table from display info.
 ///
 /// `borders`: true uses UTF8_BORDERS_ONLY (watch mode), false uses NOTHING (non-watch).
@@ -97,91 +187,58 @@ pub fn render_worker_table(workers: &[WorkerDisplayInfo], borders: bool) -> Tabl
     table
         .load_preset(preset)
         .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec![
-            Cell::new("WORKER").add_attribute(Attribute::Bold),
-            Cell::new("STATE").add_attribute(Attribute::Bold),
-            Cell::new("COMMITS").add_attribute(Attribute::Bold),
-            Cell::new("PR").add_attribute(Attribute::Bold),
-            Cell::new("HEALTH").add_attribute(Attribute::Bold),
-            Cell::new("ISSUE").add_attribute(Attribute::Bold),
-        ]);
+        .set_header(table_header());
 
     for w in workers {
-        let tmux_indicator = match w.tmux_status {
-            TaskStatus::Running => "●",
-            TaskStatus::Exited => "○",
-            TaskStatus::NoSession | TaskStatus::NoWindow => "✗",
-        };
-        let tmux_color = match w.tmux_status {
-            TaskStatus::Running => Color::Green,
-            TaskStatus::Exited => Color::Yellow,
-            TaskStatus::NoSession | TaskStatus::NoWindow => Color::DarkGrey,
-        };
-
-        let (state_text, state_color) = match w.worker_status {
-            Some(ref status) if *status == WorkerStatus::WaitingReview && w.is_draft => {
-                ("draft", Color::Blue)
-            }
-            Some(ref status) => (worker_state_str(status), worker_state_color(status)),
-            None => ("-", Color::DarkGrey),
-        };
-
-        let dirty_marker = if w.is_dirty { "*" } else { "" };
-        let commits = if w.commits_ahead > 0 || w.is_dirty {
-            format!("{}{}", w.commits_ahead, dirty_marker)
-        } else {
-            "-".to_string()
-        };
-        let commit_color = if w.is_dirty {
-            Color::Yellow
-        } else if w.commits_ahead > 0 {
-            Color::White
-        } else {
-            Color::DarkGrey
-        };
-
-        let pr = w
-            .pr_url
-            .as_ref()
-            .map(|url| {
-                url.rsplit('/')
-                    .next()
-                    .map(|n| format!("#{}", n))
-                    .unwrap_or_else(|| "yes".to_string())
-            })
-            .unwrap_or_else(|| "-".to_string());
-        let pr_color = if pr == "-" {
-            Color::DarkGrey
-        } else {
-            Color::Cyan
-        };
-
-        let issue = w
-            .issue_ref
-            .as_deref()
-            .map(|id| truncate(id.rsplit('/').next().unwrap_or(id), 16))
-            .unwrap_or_else(|| "-".to_string());
-        let issue_color = if issue == "-" {
-            Color::DarkGrey
-        } else {
-            Color::White
-        };
-
-        let (health_text, health_color) = format_health(&w.pr_health);
-
-        let name = format!("{} {}", tmux_indicator, truncate(&w.name, NAME_MAX));
-
-        table.add_row(vec![
-            Cell::new(&name).fg(tmux_color),
-            Cell::new(state_text).fg(state_color),
-            Cell::new(&commits)
-                .fg(commit_color)
-                .set_alignment(CellAlignment::Right),
-            Cell::new(&pr).fg(pr_color),
-            Cell::new(&health_text).fg(health_color),
-            Cell::new(&issue).fg(issue_color),
-        ]);
+        table.add_row(worker_row(w));
     }
 
     table
+}
+
+/// Render workers grouped by repo, with bold repo headers.
+///
+/// Returns a formatted string with separate tables per repo.
+pub fn render_worker_table_grouped(workers: &[WorkerDisplayInfo], borders: bool) -> String {
+    // Collect unique repos in order of appearance
+    let mut repos: Vec<String> = Vec::new();
+    for w in workers {
+        if !repos.contains(&w.repo) {
+            repos.push(w.repo.clone());
+        }
+    }
+
+    let preset = if borders {
+        presets::UTF8_BORDERS_ONLY
+    } else {
+        presets::NOTHING
+    };
+
+    let mut sections: Vec<String> = Vec::new();
+
+    for repo in &repos {
+        let repo_workers: Vec<&WorkerDisplayInfo> =
+            workers.iter().filter(|w| &w.repo == repo).collect();
+
+        let mut table = Table::new();
+        table
+            .load_preset(preset)
+            .set_content_arrangement(ContentArrangement::Dynamic)
+            .set_header(table_header());
+
+        for w in &repo_workers {
+            table.add_row(worker_row(w));
+        }
+
+        // Bold repo name header, then indented table
+        let table_str = table.to_string();
+        let indented: String = table_str
+            .lines()
+            .map(|line| format!("  {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("\x1B[1m{}\x1B[0m\n{}", repo, indented));
+    }
+
+    sections.join("\n\n")
 }
