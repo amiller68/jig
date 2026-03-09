@@ -1,72 +1,170 @@
 //! Git operations
 //!
-//! Low-level git operations using shell commands.
+//! Git operations using the git2 (libgit2) library.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use crate::config::JIG_DIR;
 use crate::error::{Error, Result};
 use crate::worker::DiffStats;
 
-/// Get the root directory of the git repository
-pub fn get_repo_root() -> Result<PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .stdin(Stdio::null())
-        .output()?;
+/// Open a repository by discovering from the current directory.
+fn discover_repo() -> Result<git2::Repository> {
+    git2::Repository::discover(".").map_err(|_| Error::NotInGitRepo)
+}
 
-    if !output.status.success() {
-        return Err(Error::NotInGitRepo);
+/// Open a repository at a specific path.
+fn open_repo(path: &Path) -> Result<git2::Repository> {
+    git2::Repository::open(path).map_err(|e| Error::Git(e.message().to_string()))
+}
+
+/// Resolve a revspec string to a commit.
+fn resolve_to_commit<'repo>(
+    repo: &'repo git2::Repository,
+    spec: &str,
+) -> Result<git2::Commit<'repo>> {
+    let obj = repo
+        .revparse_single(spec)
+        .map_err(|e| Error::BranchNotFound(format!("{}: {}", spec, e.message())))?;
+    obj.peel(git2::ObjectType::Commit)?
+        .into_commit()
+        .map_err(|_| Error::Git(format!("'{}' is not a commit", spec)))
+}
+
+/// Build a diff between a base branch and HEAD for a repo at `path`.
+fn make_diff<'repo>(repo: &'repo git2::Repository, base_branch: &str) -> Result<git2::Diff<'repo>> {
+    let base_commit = resolve_to_commit(repo, base_branch)?;
+    let base_tree = base_commit.tree()?;
+
+    let head = repo.head()?;
+    let head_commit = head
+        .peel(git2::ObjectType::Commit)?
+        .into_commit()
+        .map_err(|_| Error::Git("HEAD is not a commit".to_string()))?;
+    let head_tree = head_commit.tree()?;
+
+    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
+    Ok(diff)
+}
+
+/// Find a valid start-point commit for creating a new branch.
+fn find_valid_start_point<'repo>(
+    repo: &'repo git2::Repository,
+    base_branch: &str,
+) -> Result<git2::Commit<'repo>> {
+    // revparse_single handles refs/heads/*, refs/remotes/*, SHAs, etc.
+    if let Ok(obj) = repo.revparse_single(base_branch) {
+        if let Ok(commit) = obj.peel(git2::ObjectType::Commit).and_then(|o| {
+            o.into_commit()
+                .map_err(|_| git2::Error::from_str("not a commit"))
+        }) {
+            return Ok(commit);
+        }
     }
 
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(PathBuf::from(path))
+    // Try with origin/ prefix if not already prefixed
+    if !base_branch.starts_with("origin/") {
+        if let Ok(obj) = repo.revparse_single(&format!("origin/{}", base_branch)) {
+            if let Ok(commit) = obj.peel(git2::ObjectType::Commit).and_then(|o| {
+                o.into_commit()
+                    .map_err(|_| git2::Error::from_str("not a commit"))
+            }) {
+                return Ok(commit);
+            }
+        }
+    }
+
+    // Fall back to HEAD
+    let head = repo
+        .head()
+        .map_err(|_| Error::BranchNotFound(base_branch.to_string()))?;
+    head.peel(git2::ObjectType::Commit)?
+        .into_commit()
+        .map_err(|_| Error::BranchNotFound(base_branch.to_string()))
+}
+
+/// Check if a branch exists (local or remote).
+fn branch_exists_impl(repo: &git2::Repository, branch: &str) -> Result<bool> {
+    let branch = branch.strip_prefix("origin/").unwrap_or(branch);
+
+    // Check local branch
+    if repo.find_branch(branch, git2::BranchType::Local).is_ok() {
+        return Ok(true);
+    }
+
+    // Check remote branch
+    if repo
+        .find_branch(&format!("origin/{}", branch), git2::BranchType::Remote)
+        .is_ok()
+    {
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+/// Prune stale (invalid) worktree registrations.
+fn prune_stale_worktrees(repo: &git2::Repository) {
+    if let Ok(wt_names) = repo.worktrees() {
+        for i in 0..wt_names.len() {
+            if let Some(name) = wt_names.get(i) {
+                if let Ok(wt) = repo.find_worktree(name) {
+                    if wt.validate().is_err() {
+                        let mut opts = git2::WorktreePruneOptions::new();
+                        let _ = wt.prune(Some(&mut opts));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Find the worktree name that corresponds to a given filesystem path.
+fn find_worktree_name_for_path(repo: &git2::Repository, path: &Path) -> Result<String> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    let wt_names = repo.worktrees()?;
+    for i in 0..wt_names.len() {
+        if let Some(name) = wt_names.get(i) {
+            if let Ok(wt) = repo.find_worktree(name) {
+                let wt_path = wt.path().to_path_buf();
+                let wt_canonical = wt_path.canonicalize().unwrap_or(wt_path);
+                if wt_canonical == canonical {
+                    return Ok(name.to_string());
+                }
+            }
+        }
+    }
+
+    Err(Error::Git(format!(
+        "no worktree found for path: {}",
+        path.display()
+    )))
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Get the root directory of the git repository
+pub fn get_repo_root() -> Result<PathBuf> {
+    let repo = discover_repo()?;
+    repo.workdir()
+        .map(|p| p.to_path_buf())
+        .ok_or(Error::NotInGitRepo)
 }
 
 /// Get the common git directory (handles worktrees correctly)
 pub fn get_git_common_dir() -> Result<PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--git-common-dir"])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(Error::NotInGitRepo);
-    }
-
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let path = PathBuf::from(path);
-
-    // Resolve to absolute path
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Ok(std::env::current_dir()?.join(path).canonicalize()?)
-    }
+    let repo = discover_repo()?;
+    Ok(repo.commondir().to_path_buf())
 }
 
 /// Get the common git directory for a specific repo path.
 pub fn get_git_common_dir_for(repo_root: &Path) -> Result<PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--git-common-dir"])
-        .current_dir(repo_root)
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(Error::NotInGitRepo);
-    }
-
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let path = PathBuf::from(path);
-
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Ok(repo_root.join(path).canonicalize()?)
-    }
+    let repo = open_repo(repo_root)?;
+    Ok(repo.commondir().to_path_buf())
 }
 
 /// Get the base repository directory (even when in a worktree)
@@ -162,37 +260,39 @@ fn find_worktrees_recursive(
 
 /// List all git worktrees (including base repo)
 pub fn list_all_worktrees() -> Result<Vec<(PathBuf, String)>> {
-    let output = Command::new("git")
-        .args(["worktree", "list", "--porcelain"])
-        .stdin(Stdio::null())
-        .output()?;
+    let repo = discover_repo()?;
+    let mut worktrees = Vec::new();
 
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
+    // Add main worktree
+    if let Some(workdir) = repo.workdir() {
+        let branch = repo
+            .head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s.to_string()))
+            .unwrap_or_default();
+        worktrees.push((workdir.to_path_buf(), branch));
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut worktrees = Vec::new();
-    let mut current_path: Option<PathBuf> = None;
-    let mut current_branch = String::new();
-
-    for line in text.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            current_path = Some(PathBuf::from(path));
-        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
-            current_branch = branch.to_string();
-        } else if line.is_empty() {
-            if let Some(path) = current_path.take() {
-                worktrees.push((path, std::mem::take(&mut current_branch)));
+    // Add linked worktrees
+    if let Ok(wt_names) = repo.worktrees() {
+        for i in 0..wt_names.len() {
+            if let Some(name) = wt_names.get(i) {
+                if let Ok(wt) = repo.find_worktree(name) {
+                    let wt_path = wt.path().to_path_buf();
+                    // Open repo at worktree path to get its branch
+                    let branch = if let Ok(wt_repo) = git2::Repository::open(&wt_path) {
+                        wt_repo
+                            .head()
+                            .ok()
+                            .and_then(|h| h.shorthand().map(|s| s.to_string()))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    worktrees.push((wt_path, branch));
+                }
             }
         }
-    }
-
-    // Handle last entry
-    if let Some(path) = current_path {
-        worktrees.push((path, current_branch));
     }
 
     Ok(worktrees)
@@ -200,280 +300,178 @@ pub fn list_all_worktrees() -> Result<Vec<(PathBuf, String)>> {
 
 /// Check if a branch exists
 pub fn branch_exists(branch: &str) -> Result<bool> {
-    // Handle remote branches
-    let branch = branch.strip_prefix("origin/").unwrap_or(branch);
-
-    let output = Command::new("git")
-        .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch)])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if output.status.success() {
-        return Ok(true);
-    }
-
-    // Check remote branches
-    let output = Command::new("git")
-        .args([
-            "rev-parse",
-            "--verify",
-            &format!("refs/remotes/origin/{}", branch),
-        ])
-        .stdin(Stdio::null())
-        .output()?;
-
-    Ok(output.status.success())
+    let repo = discover_repo()?;
+    branch_exists_impl(&repo, branch)
 }
 
 /// Get the current branch name
 pub fn get_current_branch() -> Result<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(Error::Git("Failed to get current branch".to_string()));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let repo = discover_repo()?;
+    let head = repo
+        .head()
+        .map_err(|_| Error::Git("Failed to get current branch".to_string()))?;
+    head.shorthand()
+        .map(|s| s.to_string())
+        .ok_or_else(|| Error::Git("HEAD is not a symbolic reference".to_string()))
 }
 
 /// Create a git worktree
 pub fn create_worktree(path: &Path, branch: &str, base_branch: &str) -> Result<()> {
-    // Clean up stale worktree registrations (e.g. directory removed but git
-    // still tracks the entry). Without this, `git worktree add` fails with
-    // "missing but already registered worktree".
-    let _ = Command::new("git")
-        .args(["worktree", "prune"])
-        .stdin(Stdio::null())
-        .output();
+    let repo = discover_repo()?;
 
-    // Check if branch exists
-    let branch_exists_already = branch_exists(branch)?;
+    // Clean up stale worktree registrations
+    prune_stale_worktrees(&repo);
 
-    let output = if branch_exists_already {
-        Command::new("git")
-            .args(["worktree", "add", &path.to_string_lossy(), branch])
-            .stdin(Stdio::null())
-            .output()?
+    let exists = branch_exists_impl(&repo, branch)?;
+
+    // Worktree name: use last path component (matches git default behavior)
+    let wt_name = path
+        .file_name()
+        .ok_or_else(|| Error::InvalidPath(path.to_path_buf()))?
+        .to_string_lossy()
+        .to_string();
+
+    if exists {
+        let branch_ref = repo
+            .find_branch(branch, git2::BranchType::Local)
+            .map_err(|e| Error::Git(e.message().to_string()))?;
+        let reference = branch_ref.into_reference();
+        let mut opts = git2::WorktreeAddOptions::new();
+        opts.reference(Some(&reference));
+        repo.worktree(&wt_name, path, Some(&opts))?;
     } else {
         // Create new branch from base
-        let start_point = find_valid_start_point(base_branch)?;
+        let start_commit = find_valid_start_point(&repo, base_branch)?;
+        let new_branch = repo.branch(branch, &start_commit, false)?;
+        let reference = new_branch.into_reference();
+        let mut opts = git2::WorktreeAddOptions::new();
+        opts.reference(Some(&reference));
+        repo.worktree(&wt_name, path, Some(&opts))?;
 
-        Command::new("git")
-            .args([
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                &path.to_string_lossy(),
-                &start_point,
-            ])
-            .stdin(Stdio::null())
-            .output()?
-    };
-
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
-    }
-
-    // Set up push tracking for new branches
-    if !branch_exists_already {
-        Command::new("git")
-            .args([
-                "-C",
-                &path.to_string_lossy(),
-                "config",
-                "push.autoSetupRemote",
-                "true",
-            ])
-            .stdin(Stdio::null())
-            .output()?;
+        // Set up push tracking for new branches
+        let wt_repo = open_repo(path)?;
+        if let Ok(mut config) = wt_repo.config() {
+            let _ = config.set_bool("push.autoSetupRemote", true);
+        }
     }
 
     Ok(())
 }
 
-/// Find a valid start point for creating a new branch
-fn find_valid_start_point(base_branch: &str) -> Result<String> {
-    // Try the base branch as-is first
-    let output = Command::new("git")
-        .args(["rev-parse", "--verify", base_branch])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if output.status.success() {
-        return Ok(base_branch.to_string());
-    }
-
-    // Try with origin/ prefix
-    if !base_branch.starts_with("origin/") {
-        let with_origin = format!("origin/{}", base_branch);
-        let output = Command::new("git")
-            .args(["rev-parse", "--verify", &with_origin])
-            .stdin(Stdio::null())
-            .output()?;
-
-        if output.status.success() {
-            return Ok(with_origin);
-        }
-    }
-
-    // Try refs/heads/ prefix
-    let with_refs = format!("refs/heads/{}", base_branch);
-    let output = Command::new("git")
-        .args(["rev-parse", "--verify", &with_refs])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if output.status.success() {
-        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(sha);
-    }
-
-    // Try refs/remotes/ prefix
-    let with_remotes = if base_branch.starts_with("origin/") {
-        format!("refs/remotes/{}", base_branch)
-    } else {
-        format!("refs/remotes/origin/{}", base_branch)
-    };
-    let output = Command::new("git")
-        .args(["rev-parse", "--verify", &with_remotes])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if output.status.success() {
-        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(sha);
-    }
-
-    // Fall back to current HEAD commit
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if output.status.success() {
-        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(sha);
-    }
-
-    Err(Error::BranchNotFound(base_branch.to_string()))
-}
-
 /// Remove a git worktree
 pub fn remove_worktree(path: &Path, force: bool) -> Result<()> {
-    let path_str = path.to_string_lossy();
-    let mut args = vec!["worktree", "remove"];
+    // If not forcing, check for uncommitted changes first
+    if !force && path.exists() && has_uncommitted_changes(path)? {
+        return Err(Error::UncommittedChanges);
+    }
+
+    // We need the main repo to manipulate worktrees.
+    // Open the worktree repo to find the common dir, then open the main repo.
+    let repo = if path.exists() {
+        let wt_repo = open_repo(path)?;
+        let commondir = wt_repo.commondir().to_path_buf();
+        let main_workdir = commondir.parent().unwrap_or(&commondir);
+        open_repo(main_workdir)?
+    } else {
+        discover_repo()?
+    };
+
+    let wt_name = find_worktree_name_for_path(&repo, path)?;
+    let wt = repo
+        .find_worktree(&wt_name)
+        .map_err(|e| Error::Git(e.message().to_string()))?;
+
+    let mut opts = git2::WorktreePruneOptions::new();
+    opts.valid(true); // prune even if valid
+    opts.working_tree(true); // remove the working directory
     if force {
-        args.push("--force");
+        opts.locked(true);
     }
-    args.push(&path_str);
 
-    let output = Command::new("git")
-        .args(&args)
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if stderr.contains("contains modified or untracked files") {
-            return Err(Error::UncommittedChanges);
-        }
-        return Err(Error::Git(stderr));
-    }
+    wt.prune(Some(&mut opts))
+        .map_err(|e| Error::Git(e.message().to_string()))?;
 
     Ok(())
 }
 
 /// Check if worktree has uncommitted changes
 pub fn has_uncommitted_changes(path: &Path) -> Result<bool> {
-    let output = Command::new("git")
-        .args(["-C", &path.to_string_lossy(), "status", "--porcelain"])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
-    }
-
-    Ok(!output.stdout.is_empty())
+    let repo = open_repo(path)?;
+    let statuses = repo.statuses(Some(
+        git2::StatusOptions::new()
+            .include_untracked(true)
+            .recurse_untracked_dirs(true),
+    ))?;
+    Ok(!statuses.is_empty())
 }
 
 /// Get commits ahead of base branch
 pub fn get_commits_ahead(path: &Path, base_branch: &str) -> Result<Vec<String>> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &path.to_string_lossy(),
-            "log",
-            &format!("{}..HEAD", base_branch),
-            "--oneline",
-        ])
-        .stdin(Stdio::null())
-        .output()?;
+    let repo = open_repo(path)?;
 
-    if !output.status.success() {
-        return Ok(Vec::new());
+    let base_oid = match repo.revparse_single(base_branch) {
+        Ok(obj) => match obj.peel(git2::ObjectType::Commit) {
+            Ok(c) => c.id(),
+            Err(_) => return Ok(Vec::new()),
+        },
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let head_oid = match repo.head() {
+        Ok(h) => match h.target() {
+            Some(oid) => oid,
+            None => return Ok(Vec::new()),
+        },
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push(head_oid)?;
+    revwalk.hide(base_oid)?;
+    revwalk.set_sorting(git2::Sort::TOPOLOGICAL)?;
+
+    let mut commits = Vec::new();
+    for oid_result in revwalk {
+        let oid = oid_result?;
+        let commit = repo.find_commit(oid)?;
+        let short_id = &oid.to_string()[..7];
+        let summary = commit.summary().unwrap_or("");
+        commits.push(format!("{} {}", short_id, summary));
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text.lines().map(|s| s.to_string()).collect())
+    Ok(commits)
 }
 
-/// Get diff stat for a worktree
+/// Get diff stat for a worktree (formatted string like `git diff --stat`)
 pub fn get_diff_stat(path: &Path, base_branch: &str) -> Result<String> {
-    let output = Command::new("git")
-        .args(["-C", &path.to_string_lossy(), "diff", "--stat", base_branch])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let repo = open_repo(path)?;
+    let diff = make_diff(&repo, base_branch)?;
+    let stats = diff.stats()?;
+    let buf = stats.to_buf(git2::DiffStatsFormat::FULL, 80)?;
+    Ok(std::str::from_utf8(&buf).unwrap_or("").to_string())
 }
 
 /// Get diff stats as structured data
 pub fn get_diff_stats(path: &Path, base_branch: &str) -> Result<DiffStats> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &path.to_string_lossy(),
-            "diff",
-            "--numstat",
-            base_branch,
-        ])
-        .stdin(Stdio::null())
-        .output()?;
+    let repo = open_repo(path)?;
+    let diff = make_diff(&repo, base_branch)?;
 
-    if !output.status.success() {
-        return Ok(DiffStats::default());
-    }
-
-    let text = String::from_utf8_lossy(&output.stdout);
     let mut stats = DiffStats::default();
+    let num_deltas = diff.deltas().len();
 
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 3 {
-            let insertions: usize = parts[0].parse().unwrap_or(0);
-            let deletions: usize = parts[1].parse().unwrap_or(0);
-            let path = parts[2].to_string();
+    for i in 0..num_deltas {
+        if let Some(patch) = git2::Patch::from_diff(&diff, i)? {
+            let (_, insertions, deletions) = patch.line_stats()?;
+            let file_path = diff
+                .get_delta(i)
+                .and_then(|d| d.new_file().path().map(|p| p.to_string_lossy().to_string()))
+                .unwrap_or_default();
 
             stats.files_changed += 1;
             stats.insertions += insertions;
             stats.deletions += deletions;
             stats.files.push(crate::worker::FileDiff {
-                path,
+                path: file_path,
                 insertions,
                 deletions,
             });
@@ -485,56 +483,95 @@ pub fn get_diff_stats(path: &Path, base_branch: &str) -> Result<DiffStats> {
 
 /// Get full diff for a worktree
 pub fn get_diff(path: &Path, base_branch: &str) -> Result<String> {
-    let output = Command::new("git")
-        .args(["-C", &path.to_string_lossy(), "diff", base_branch])
-        .stdin(Stdio::null())
-        .output()?;
+    let repo = open_repo(path)?;
+    let diff = make_diff(&repo, base_branch)?;
 
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let mut output = Vec::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        match origin {
+            '+' | '-' | ' ' => output.push(origin as u8),
+            _ => {}
+        }
+        output.extend_from_slice(line.content());
+        true
+    })?;
+    Ok(String::from_utf8_lossy(&output).to_string())
 }
 
 /// Merge a branch into the current branch
 pub fn merge_branch(branch: &str) -> Result<()> {
-    let output = Command::new("git")
-        .args(["merge", branch, "--no-edit"])
-        .stdin(Stdio::null())
-        .output()?;
+    let repo = discover_repo()?;
 
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
+    // Find the branch reference
+    let branch_ref = repo
+        .find_branch(branch, git2::BranchType::Local)
+        .or_else(|_| repo.find_branch(&format!("origin/{}", branch), git2::BranchType::Remote))
+        .map_err(|_| Error::BranchNotFound(branch.to_string()))?;
+
+    let annotated = repo.reference_to_annotated_commit(&branch_ref.into_reference())?;
+    let (analysis, _) = repo.merge_analysis(&[&annotated])?;
+
+    if analysis.is_up_to_date() {
+        return Ok(());
     }
 
-    Ok(())
+    if analysis.is_fast_forward() {
+        let target_oid = annotated.id();
+        let mut reference = repo.head()?;
+        reference.set_target(target_oid, &format!("merge {}: Fast-forward", branch))?;
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+        return Ok(());
+    }
+
+    if analysis.is_normal() {
+        repo.merge(&[&annotated], None, None)?;
+
+        let mut index = repo.index()?;
+        if index.has_conflicts() {
+            repo.cleanup_state()?;
+            return Err(Error::Git(format!(
+                "Merge conflict with branch '{}'",
+                branch
+            )));
+        }
+
+        let tree_oid = index.write_tree()?;
+        let tree = repo.find_tree(tree_oid)?;
+        let head_commit = repo
+            .head()?
+            .peel(git2::ObjectType::Commit)?
+            .into_commit()
+            .map_err(|_| Error::Git("HEAD is not a commit".to_string()))?;
+        let merge_commit = repo.find_commit(annotated.id())?;
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("jig", "jig@localhost"))?;
+
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            &format!("Merge branch '{}'", branch),
+            &tree,
+            &[&head_commit, &merge_commit],
+        )?;
+        repo.cleanup_state()?;
+        return Ok(());
+    }
+
+    Err(Error::Git(format!("Cannot merge branch '{}'", branch)))
 }
 
 /// Get worktree branch
 pub fn get_worktree_branch(path: &Path) -> Result<String> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &path.to_string_lossy(),
-            "rev-parse",
-            "--abbrev-ref",
-            "HEAD",
-        ])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(Error::Git(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let repo = open_repo(path)?;
+    let head = repo
+        .head()
+        .map_err(|_| Error::Git("Failed to get worktree branch".to_string()))?;
+    head.shorthand()
+        .map(|s| s.to_string())
+        .ok_or_else(|| Error::Git("HEAD is not a symbolic reference".to_string()))
 }
 
 /// Ensure jig directory is in git exclude
