@@ -52,6 +52,7 @@ Each spawned worker gets its own worktree and runs autonomously.
 
 ```bash
 jig ps                    # See status of all workers
+jig ps -g                 # Global view — workers grouped by repo
 jig attach                # Open tmux session to watch progress
 jig attach auth-jwt       # Jump to a specific worker
 jig review auth-jwt       # Review the diff when done
@@ -66,6 +67,7 @@ jig remove auth-jwt       # Clean up the worktree
 |---------|-------------|
 | `jig spawn <name> --context "..." --auto` | Spawn autonomous worker |
 | `jig ps` | Check worker status |
+| `jig ps -g` | Global view grouped by repo |
 | `jig attach [name]` | Watch workers in tmux |
 | `jig review <name>` | Review worker's changes |
 | `jig merge <name>` | Merge into current branch |
