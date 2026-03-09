@@ -1,6 +1,6 @@
 # `jig ps -g` should show which repo each worker belongs to
 
-**Status:** Planned
+**Status:** Done
 **Priority:** Urgent
 **Category:** Chores
 **Auto:** true

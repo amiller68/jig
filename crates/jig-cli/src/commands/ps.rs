@@ -48,11 +48,11 @@ impl Op for Ps {
             .file_name()
             .map(|n| n.to_string_lossy().to_string());
         let runtime_config = self.build_runtime_config(&repo.repo_root);
-        self.execute_ps(repo_filter, runtime_config)
+        self.execute_ps(repo_filter, runtime_config, false)
     }
 
     fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        self.execute_ps(None, RuntimeConfig::default())
+        self.execute_ps(None, RuntimeConfig::default(), true)
     }
 }
 
@@ -61,10 +61,11 @@ impl Ps {
         &self,
         repo_filter: Option<String>,
         runtime_config: RuntimeConfig,
+        global: bool,
     ) -> Result<NoOutput, PsError> {
         if let Some(interval) = self.watch {
             let interval = if interval == 0 { 2 } else { interval };
-            run_watch(interval, runtime_config, repo_filter);
+            run_watch(interval, runtime_config, repo_filter, global);
             return Ok(NoOutput);
         }
 
@@ -83,6 +84,9 @@ impl Ps {
 
         if display.is_empty() {
             eprintln!("No spawned sessions");
+        } else if global {
+            let output = ui::render_worker_table_grouped(&display, false);
+            eprintln!("{output}");
         } else {
             let table = ui::render_worker_table(&display, false);
             eprintln!("{table}");
@@ -179,7 +183,12 @@ fn format_tick_log(tick: &TickResult) -> Vec<String> {
 }
 
 /// Run the watch loop: display + orchestrate via daemon::run_with.
-fn run_watch(interval: u64, runtime_config: RuntimeConfig, repo_filter: Option<String>) {
+fn run_watch(
+    interval: u64,
+    runtime_config: RuntimeConfig,
+    repo_filter: Option<String>,
+    global: bool,
+) {
     let daemon_config = DaemonConfig {
         interval_seconds: interval,
         once: false,
@@ -263,7 +272,11 @@ fn run_watch(interval: u64, runtime_config: RuntimeConfig, repo_filter: Option<S
             eprint!("\x1B[H");
             match view {
                 ViewMode::Table => {
-                    let table = ui::render_worker_table(&tick.worker_display, true);
+                    let table_output = if global {
+                        ui::render_worker_table_grouped(&tick.worker_display, true)
+                    } else {
+                        ui::render_worker_table(&tick.worker_display, true).to_string()
+                    };
                     let status_line = format_tick_status(&Some(tick));
                     let auto_label = if auto_spawn {
                         "  \x1B[33mauto\x1B[0m"
@@ -271,7 +284,7 @@ fn run_watch(interval: u64, runtime_config: RuntimeConfig, repo_filter: Option<S
                         ""
                     };
                     let output = format!(
-                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table}\n\n\x1B[2m[l]ogs  [q]uit\x1B[0m",
+                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table_output}\n\n\x1B[2m[l]ogs  [q]uit\x1B[0m",
                         tick.worker_display.len(), interval,
                     );
                     for line in output.lines() {

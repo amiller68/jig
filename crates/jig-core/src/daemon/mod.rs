@@ -58,6 +58,7 @@ fn extract_branch_name(events: &[Event], worker_name: &str) -> String {
 /// callback can format output without any subprocess calls or file I/O.
 #[derive(Debug, Clone)]
 pub struct WorkerDisplayInfo {
+    pub repo: String,
     pub name: String,
     pub branch: String,
     pub tmux_status: TaskStatus,
@@ -557,6 +558,7 @@ impl<'a> Daemon<'a> {
 
         let nudges_total: u32 = new_state.nudge_counts.values().sum();
         let display_info = WorkerDisplayInfo {
+            repo: repo_name.to_string(),
             name: worker_name.to_string(),
             branch: branch_name.clone(),
             tmux_status,
