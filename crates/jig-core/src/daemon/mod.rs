@@ -301,15 +301,9 @@ impl<'a> Daemon<'a> {
             runtime.send_prune(prune_targets);
         }
 
-        // 4. Trigger issue poll if auto-spawn enabled
+        // 4. Trigger issue poll if auto-spawn enabled (polls all repos)
         let worker_names: Vec<String> = worker_list.iter().map(|(_, w)| w.clone()).collect();
-
-        // Find a repo root to use for issue polling (first registered repo)
-        if let Some(entry) = registry.repos().first() {
-            let base = RepoContext::resolve_base_branch_for(&entry.path)
-                .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
-            runtime.maybe_trigger_issue_poll(&entry.path, &base, &worker_names);
-        }
+        runtime.maybe_trigger_issue_poll(&registry, &worker_names);
 
         // 5. Auto-spawn from drained spawnable issues
         for issue in spawnable {
@@ -378,6 +372,63 @@ impl<'a> Daemon<'a> {
         workers_state.save().unwrap_or_else(|e| {
             tracing::warn!("failed to save workers state: {}", e);
         });
+
+        // Auto-spawn: poll all repos for spawnable issues (blocking).
+        // Check each repo's jig.toml for auto_spawn; collect eligible repos.
+        {
+            let repos: Vec<(std::path::PathBuf, String)> = registry
+                .repos()
+                .iter()
+                .filter(|entry| {
+                    JigToml::load(&entry.path)
+                        .ok()
+                        .flatten()
+                        .map(|t| t.spawn.auto_spawn)
+                        .unwrap_or(false)
+                })
+                .map(|entry| {
+                    let base = RepoContext::resolve_base_branch_for(&entry.path)
+                        .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
+                    (entry.path.clone(), base)
+                })
+                .collect();
+
+            if !repos.is_empty() {
+                let worker_names: Vec<String> =
+                    worker_list.iter().map(|(_, w)| w.clone()).collect();
+
+                // Use a reasonable default for max_concurrent_workers
+                let max_workers = JigToml::load(repos[0].0.as_path())
+                    .ok()
+                    .flatten()
+                    .map(|t| t.spawn.max_concurrent_workers)
+                    .unwrap_or(3);
+
+                let req = messages::IssueRequest {
+                    repos,
+                    existing_workers: worker_names,
+                    max_concurrent_workers: max_workers,
+                };
+
+                for issue in issue_actor::process_request(&req) {
+                    match self.auto_spawn_worker(&issue) {
+                        Ok(()) => {
+                            tracing::info!(
+                                worker = %issue.worker_name,
+                                issue = %issue.issue_id,
+                                "auto-spawned worker"
+                            );
+                            result.auto_spawned.push(issue.worker_name.clone());
+                        }
+                        Err(e) => {
+                            result
+                                .errors
+                                .push(format!("auto-spawn {}: {}", issue.issue_id, e));
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(result)
     }

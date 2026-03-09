@@ -182,11 +182,10 @@ impl DaemonRuntime {
         self.github_cache.get(worker_key)
     }
 
-    /// Trigger an issue poll if auto-spawn is enabled and interval elapsed.
+    /// Trigger an issue poll across all repos if auto-spawn is enabled and interval elapsed.
     pub fn maybe_trigger_issue_poll(
         &mut self,
-        repo_root: &std::path::Path,
-        base_branch: &str,
+        registry: &RepoRegistry,
         existing_workers: &[String],
     ) {
         if !self.config.auto_spawn {
@@ -199,16 +198,30 @@ impl DaemonRuntime {
             return;
         }
 
+        let repos: Vec<(std::path::PathBuf, String)> = registry
+            .repos()
+            .iter()
+            .map(|entry| {
+                let base = RepoContext::resolve_base_branch_for(&entry.path)
+                    .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
+                (entry.path.clone(), base)
+            })
+            .collect();
+
+        if repos.is_empty() {
+            return;
+        }
+
+        let repo_count = repos.len();
         let req = IssueRequest {
-            repo_root: repo_root.to_path_buf(),
-            base_branch: base_branch.to_string(),
+            repos,
             existing_workers: existing_workers.to_vec(),
             max_concurrent_workers: self.config.max_concurrent_workers,
         };
 
         if self.issue_tx.try_send(req).is_ok() {
             self.issue_pending = true;
-            tracing::debug!("triggered issue poll");
+            tracing::debug!(repos = repo_count, "triggered issue poll");
         }
     }
 

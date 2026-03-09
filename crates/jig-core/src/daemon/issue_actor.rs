@@ -23,37 +23,13 @@ pub fn spawn(
         .expect("failed to spawn issue actor thread")
 }
 
-fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
-    let jig_toml = match JigToml::load(&req.repo_root) {
-        Ok(Some(t)) => t,
-        _ => return vec![],
-    };
-
+/// Process an issue request synchronously. Used by both the actor thread and
+/// the blocking `tick_once` path.
+pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
     let global_config = match GlobalConfig::load() {
         Ok(c) => c,
         Err(e) => {
             tracing::debug!(error = %e, "failed to load global config for issue poll");
-            return vec![];
-        }
-    };
-
-    let provider = match crate::issues::make_provider_with_ref(
-        &req.repo_root,
-        &jig_toml,
-        &global_config,
-        &req.base_branch,
-    ) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to create issue provider");
-            return vec![];
-        }
-    };
-
-    let issues = match provider.list_spawnable() {
-        Ok(issues) => issues,
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to list spawnable issues");
             return vec![];
         }
     };
@@ -70,24 +46,52 @@ fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
         return vec![];
     }
 
-    issues
-        .into_iter()
-        .filter_map(|issue| {
-            let worker_name = derive_worker_name(&issue.id);
-            // Skip if a worker already exists for this issue
-            if req.existing_workers.contains(&worker_name) {
-                return None;
+    let mut all_spawnable = Vec::new();
+
+    for (repo_root, base_branch) in &req.repos {
+        let jig_toml = match JigToml::load(repo_root) {
+            Ok(Some(t)) => t,
+            _ => continue,
+        };
+
+        let provider = match crate::issues::make_provider_with_ref(
+            repo_root,
+            &jig_toml,
+            &global_config,
+            base_branch,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::debug!(repo = %repo_root.display(), error = %e, "failed to create issue provider");
+                continue;
             }
-            Some(SpawnableIssue {
-                repo_root: req.repo_root.clone(),
+        };
+
+        let issues = match provider.list_spawnable() {
+            Ok(issues) => issues,
+            Err(e) => {
+                tracing::debug!(repo = %repo_root.display(), error = %e, "failed to list spawnable issues");
+                continue;
+            }
+        };
+
+        for issue in issues {
+            let worker_name = derive_worker_name(&issue.id);
+            if req.existing_workers.contains(&worker_name) {
+                continue;
+            }
+            all_spawnable.push(SpawnableIssue {
+                repo_root: repo_root.clone(),
                 issue_id: issue.id,
                 issue_title: issue.title,
                 issue_body: issue.body,
                 worker_name,
-            })
-        })
-        .take(budget)
-        .collect()
+            });
+        }
+    }
+
+    all_spawnable.truncate(budget);
+    all_spawnable
 }
 
 /// Derive a worker name from an issue ID.

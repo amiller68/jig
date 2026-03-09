@@ -47,10 +47,8 @@ pub struct GitHubResponse {
 
 /// Request sent to the issue actor to poll for auto-spawnable issues.
 pub struct IssueRequest {
-    /// Repo root path.
-    pub repo_root: PathBuf,
-    /// Base branch ref (e.g. "origin/main") for reading issues from remote.
-    pub base_branch: String,
+    /// (repo_root, base_branch) for each registered repo.
+    pub repos: Vec<(PathBuf, String)>,
     /// Worker names already active (to avoid re-spawning).
     pub existing_workers: Vec<String>,
     /// Max concurrent workers allowed.
