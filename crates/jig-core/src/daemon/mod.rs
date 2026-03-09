@@ -302,8 +302,7 @@ impl<'a> Daemon<'a> {
         }
 
         // 4. Trigger issue poll if auto-spawn enabled (polls all repos)
-        let worker_names: Vec<String> = worker_list.iter().map(|(_, w)| w.clone()).collect();
-        runtime.maybe_trigger_issue_poll(&registry, &worker_names);
+        runtime.maybe_trigger_issue_poll(&registry, &worker_list);
 
         // 5. Auto-spawn from drained spawnable issues
         for issue in spawnable {
@@ -374,18 +373,11 @@ impl<'a> Daemon<'a> {
         });
 
         // Auto-spawn: poll all repos for spawnable issues (blocking).
-        // Check each repo's jig.toml for auto_spawn; collect eligible repos.
+        // Each repo's jig.toml controls auto_spawn and max_concurrent_workers.
         {
             let repos: Vec<(std::path::PathBuf, String)> = registry
                 .repos()
                 .iter()
-                .filter(|entry| {
-                    JigToml::load(&entry.path)
-                        .ok()
-                        .flatten()
-                        .map(|t| t.spawn.auto_spawn)
-                        .unwrap_or(false)
-                })
                 .map(|entry| {
                     let base = RepoContext::resolve_base_branch_for(&entry.path)
                         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
@@ -394,20 +386,9 @@ impl<'a> Daemon<'a> {
                 .collect();
 
             if !repos.is_empty() {
-                let worker_names: Vec<String> =
-                    worker_list.iter().map(|(_, w)| w.clone()).collect();
-
-                // Use a reasonable default for max_concurrent_workers
-                let max_workers = JigToml::load(repos[0].0.as_path())
-                    .ok()
-                    .flatten()
-                    .map(|t| t.spawn.max_concurrent_workers)
-                    .unwrap_or(3);
-
                 let req = messages::IssueRequest {
                     repos,
-                    existing_workers: worker_names,
-                    max_concurrent_workers: max_workers,
+                    existing_workers: worker_list.clone(),
                 };
 
                 for issue in issue_actor::process_request(&req) {

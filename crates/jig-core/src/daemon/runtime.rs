@@ -183,10 +183,14 @@ impl DaemonRuntime {
     }
 
     /// Trigger an issue poll across all repos if auto-spawn is enabled and interval elapsed.
+    ///
+    /// Each repo's own `jig.toml` controls whether auto-spawn is enabled and the
+    /// worker budget — this method just gates on the global interval and sends the
+    /// request to the issue actor.
     pub fn maybe_trigger_issue_poll(
         &mut self,
         registry: &RepoRegistry,
-        existing_workers: &[String],
+        existing_workers: &[(String, String)],
     ) {
         if !self.config.auto_spawn {
             return;
@@ -216,7 +220,6 @@ impl DaemonRuntime {
         let req = IssueRequest {
             repos,
             existing_workers: existing_workers.to_vec(),
-            max_concurrent_workers: self.config.max_concurrent_workers,
         };
 
         if self.issue_tx.try_send(req).is_ok() {

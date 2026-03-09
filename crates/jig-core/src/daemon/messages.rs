@@ -49,10 +49,8 @@ pub struct GitHubResponse {
 pub struct IssueRequest {
     /// (repo_root, base_branch) for each registered repo.
     pub repos: Vec<(PathBuf, String)>,
-    /// Worker names already active (to avoid re-spawning).
-    pub existing_workers: Vec<String>,
-    /// Max concurrent workers allowed.
-    pub max_concurrent_workers: usize,
+    /// Active workers as (repo_name, worker_name) pairs for per-repo budgeting.
+    pub existing_workers: Vec<(String, String)>,
 }
 
 /// A worker to prune (worktree + event logs + state).
