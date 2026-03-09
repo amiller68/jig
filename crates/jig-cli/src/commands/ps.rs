@@ -95,20 +95,21 @@ impl Ps {
         Ok(NoOutput)
     }
 
-    /// Build RuntimeConfig from CLI flags + jig.toml defaults.
+    /// Build RuntimeConfig from CLI flags + jig.toml + global config.
     fn build_runtime_config(&self, repo_root: &std::path::Path) -> RuntimeConfig {
         let jig_toml = JigToml::load(repo_root).ok().flatten().unwrap_or_default();
+        let global_config = jig_core::global::GlobalConfig::load().unwrap_or_default();
         let spawn_config = &jig_toml.spawn;
 
-        let auto_spawn = self.auto_spawn || spawn_config.auto_spawn;
+        let auto_spawn = self.auto_spawn || spawn_config.resolve_auto_spawn(&global_config.spawn);
         let max_concurrent_workers = self
             .max_workers
-            .unwrap_or(spawn_config.max_concurrent_workers);
+            .unwrap_or_else(|| spawn_config.resolve_max_concurrent_workers(&global_config.spawn));
 
         RuntimeConfig {
             auto_spawn,
             max_concurrent_workers,
-            auto_spawn_interval: spawn_config.auto_spawn_interval,
+            auto_spawn_interval: spawn_config.resolve_auto_spawn_interval(&global_config.spawn),
             sync_interval: 60,
         }
     }

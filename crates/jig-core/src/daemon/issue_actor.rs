@@ -46,7 +46,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
         };
 
         // Skip repos that don't have auto-spawn enabled
-        if !jig_toml.spawn.auto_spawn {
+        if !jig_toml.spawn.resolve_auto_spawn(&global_config.spawn) {
             continue;
         }
 
@@ -60,16 +60,16 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             .iter()
             .filter(|(rn, _)| rn == &repo_name)
             .count();
-        let budget = jig_toml
+        let max_workers = jig_toml
             .spawn
-            .max_concurrent_workers
-            .saturating_sub(repo_worker_count);
+            .resolve_max_concurrent_workers(&global_config.spawn);
+        let budget = max_workers.saturating_sub(repo_worker_count);
 
         if budget == 0 {
             tracing::debug!(
                 repo = %repo_name,
                 active = repo_worker_count,
-                max = jig_toml.spawn.max_concurrent_workers,
+                max = max_workers,
                 "repo at worker capacity, skipping"
             );
             continue;

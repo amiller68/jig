@@ -76,6 +76,30 @@ pub struct LinearProfile {
     pub api_key: String,
 }
 
+/// Daemon spawn configuration (global defaults).
+///
+/// Per-repo `jig.toml` can override these if explicitly set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GlobalSpawnConfig {
+    /// Whether the daemon should auto-spawn workers for eligible issues.
+    pub auto_spawn: bool,
+    /// Max concurrent workers the daemon will auto-spawn per repo.
+    pub max_concurrent_workers: usize,
+    /// Seconds between issue polls for auto-spawn.
+    pub auto_spawn_interval: u64,
+}
+
+impl Default for GlobalSpawnConfig {
+    fn default() -> Self {
+        Self {
+            auto_spawn: false,
+            max_concurrent_workers: 3,
+            auto_spawn_interval: 120,
+        }
+    }
+}
+
 /// Global configuration stored at `~/.config/jig/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -84,6 +108,7 @@ pub struct GlobalConfig {
     pub notify: NotifyConfig,
     pub github: GitHubConfig,
     pub linear: LinearConfig,
+    pub spawn: GlobalSpawnConfig,
 }
 
 impl GlobalConfig {

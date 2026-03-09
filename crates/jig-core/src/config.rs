@@ -317,39 +317,47 @@ pub struct WorktreeConfig {
     pub copy: Vec<String>,
 }
 
-/// Spawn configuration in jig.toml
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Spawn configuration in jig.toml (per-repo, committed).
+///
+/// `auto` is project-level (should the agent auto-start in spawned windows).
+/// The daemon fields (`auto_spawn`, `max_concurrent_workers`,
+/// `auto_spawn_interval`) are optional overrides of the global config
+/// defaults in `~/.config/jig/config.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpawnConfig {
     /// Auto-start Claude in spawned windows.
     #[serde(default)]
     pub auto: bool,
-    /// Whether the daemon should auto-spawn workers for eligible issues.
-    #[serde(default)]
-    pub auto_spawn: bool,
-    /// Max concurrent workers the daemon will auto-spawn (default 3).
-    #[serde(default = "default_max_concurrent_workers")]
-    pub max_concurrent_workers: usize,
-    /// Seconds between issue polls for auto-spawn (default 120).
-    #[serde(default = "default_auto_spawn_interval")]
-    pub auto_spawn_interval: u64,
+    /// Override global auto_spawn setting for this repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_spawn: Option<bool>,
+    /// Override global max_concurrent_workers for this repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_workers: Option<usize>,
+    /// Override global auto_spawn_interval for this repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_spawn_interval: Option<u64>,
 }
 
-fn default_max_concurrent_workers() -> usize {
-    3
-}
+impl SpawnConfig {
+    /// Resolve auto_spawn: jig.toml override → global config default.
+    pub fn resolve_auto_spawn(&self, global: &crate::global::GlobalSpawnConfig) -> bool {
+        self.auto_spawn.unwrap_or(global.auto_spawn)
+    }
 
-fn default_auto_spawn_interval() -> u64 {
-    120
-}
+    /// Resolve max_concurrent_workers: jig.toml override → global config default.
+    pub fn resolve_max_concurrent_workers(
+        &self,
+        global: &crate::global::GlobalSpawnConfig,
+    ) -> usize {
+        self.max_concurrent_workers
+            .unwrap_or(global.max_concurrent_workers)
+    }
 
-impl Default for SpawnConfig {
-    fn default() -> Self {
-        Self {
-            auto: false,
-            auto_spawn: false,
-            max_concurrent_workers: default_max_concurrent_workers(),
-            auto_spawn_interval: default_auto_spawn_interval(),
-        }
+    /// Resolve auto_spawn_interval: jig.toml override → global config default.
+    pub fn resolve_auto_spawn_interval(&self, global: &crate::global::GlobalSpawnConfig) -> u64 {
+        self.auto_spawn_interval
+            .unwrap_or(global.auto_spawn_interval)
     }
 }
 
