@@ -23,7 +23,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::JigToml;
 use crate::context::RepoContext;
 use crate::dispatch::{dispatch_actions, Action};
 use crate::error::Result;
@@ -905,15 +904,13 @@ impl<'a> Daemon<'a> {
             Some(&issue.issue_id),
         )?;
 
-        // Launch tmux window
-        let jig_toml = JigToml::load(repo_root)?.unwrap_or_default();
-        let auto_start = jig_toml.spawn.auto;
-
+        // Launch tmux window — always auto-start for daemon-spawned workers,
+        // since the whole point of auto-spawn is autonomous execution.
         crate::spawn::launch_tmux_window(
             &repo_ctx,
             &issue.worker_name,
             &worktree_path,
-            auto_start,
+            true,
             Some(&context),
         )?;
 
