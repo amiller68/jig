@@ -98,7 +98,8 @@ impl DaemonRuntime {
             issue_pending: false,
             last_issue_poll: past - std::time::Duration::from_secs(config.auto_spawn_interval + 1),
 
-            last_prune: past - std::time::Duration::from_secs(config.prune_interval + 1),
+            // Don't prune on the first tick — wait for tmux status to stabilize
+            last_prune: Instant::now(),
 
             config,
             _handles: vec![sync_handle, gh_handle, issue_handle],
