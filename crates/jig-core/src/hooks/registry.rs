@@ -72,7 +72,7 @@ impl HookRegistry {
         Ok(Self::new())
     }
 
-    /// Save registry to `<repo_path>/.jig/jig-hooks.json`.
+    /// Save registry to `<repo_path>/.jig/hooks/hooks.json`.
     pub fn save(&self, repo_path: &Path) -> Result<()> {
         let path = registry_path(repo_path);
         if let Some(parent) = path.parent() {
