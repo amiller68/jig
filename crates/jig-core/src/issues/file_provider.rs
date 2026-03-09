@@ -147,6 +147,7 @@ impl IssueProvider for FileProvider {
         Ok(all
             .into_iter()
             .filter(|i| i.auto && i.status == IssueStatus::Planned)
+            .filter(|i| self.is_spawnable_with_deps(i))
             .collect())
     }
 
@@ -596,6 +597,80 @@ mod tests {
         // Get non-existent
         let missing = provider.get("nope").unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn list_spawnable_respects_depends_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bugs = tmp.path().join("bugs");
+        std::fs::create_dir_all(&bugs).unwrap();
+
+        // Issue B: no dependencies, auto, planned → spawnable
+        std::fs::write(
+            bugs.join("fix-first.md"),
+            "# Fix First\n\n**Status:** Planned\n**Auto:** true\n",
+        )
+        .unwrap();
+
+        // Issue A: depends on B, auto, planned → NOT spawnable (B is Planned, not Complete)
+        std::fs::write(
+            bugs.join("depends-on-b.md"),
+            "# Depends On B\n\n**Status:** Planned\n**Auto:** true\n**Depends-On:** bugs/fix-first\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+
+        // Only B should be spawnable
+        let spawnable = provider.list_spawnable().unwrap();
+        assert_eq!(spawnable.len(), 1);
+        assert_eq!(spawnable[0].id, "bugs/fix-first");
+
+        // Mark B as Complete → A should now also be spawnable
+        std::fs::write(
+            bugs.join("fix-first.md"),
+            "# Fix First\n\n**Status:** Complete\n**Auto:** true\n",
+        )
+        .unwrap();
+
+        let spawnable = provider.list_spawnable().unwrap();
+        assert_eq!(spawnable.len(), 1);
+        assert_eq!(spawnable[0].id, "bugs/depends-on-b");
+    }
+
+    #[test]
+    fn list_spawnable_missing_dependency_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+
+        std::fs::write(
+            features.join("needs-ghost.md"),
+            "# Needs Ghost\n\n**Status:** Planned\n**Auto:** true\n**Depends-On:** nonexistent/issue\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let spawnable = provider.list_spawnable().unwrap();
+        assert!(spawnable.is_empty());
+    }
+
+    #[test]
+    fn is_spawnable_with_deps_no_deps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+
+        std::fs::write(
+            features.join("standalone.md"),
+            "# Standalone\n\n**Status:** Planned\n**Auto:** true\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let issues = provider.list(&IssueFilter::default()).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert!(provider.is_spawnable_with_deps(&issues[0]));
     }
 
     #[test]

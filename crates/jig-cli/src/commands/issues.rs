@@ -33,6 +33,14 @@ pub struct Issues {
     #[arg(short, long)]
     pub category: Option<String>,
 
+    /// Show only issues with unresolved dependencies
+    #[arg(long)]
+    pub blocked: bool,
+
+    /// Show only issues with all dependencies resolved (or no dependencies)
+    #[arg(long)]
+    pub unblocked: bool,
+
     /// Interactive expand/collapse mode
     #[arg(short, long)]
     pub interactive: bool,
@@ -72,6 +80,26 @@ impl Issues {
         }
     }
 
+    fn apply_dep_filter(
+        &self,
+        issues: Vec<CoreIssue>,
+        provider: &dyn issues::IssueProvider,
+    ) -> Vec<CoreIssue> {
+        if self.blocked {
+            issues
+                .into_iter()
+                .filter(|i| !provider.is_spawnable_with_deps(i))
+                .collect()
+        } else if self.unblocked {
+            issues
+                .into_iter()
+                .filter(|i| provider.is_spawnable_with_deps(i))
+                .collect()
+        } else {
+            issues
+        }
+    }
+
     fn finish(&self, all_issues: Vec<CoreIssue>) -> Result<IssuesOutput, IssuesError> {
         if self.ids {
             let ids: Vec<String> = all_issues.into_iter().map(|i| i.id).collect();
@@ -107,6 +135,7 @@ impl Op for Issues {
         }
 
         let all_issues = provider.list(&filter)?;
+        let all_issues = self.apply_dep_filter(all_issues, provider.as_ref());
         self.finish(all_issues)
     }
 
@@ -126,7 +155,9 @@ impl Op for Issues {
                 continue;
             }
 
-            all_issues.extend(provider.list(&filter)?);
+            let repo_issues = provider.list(&filter)?;
+            let repo_issues = self.apply_dep_filter(repo_issues, provider.as_ref());
+            all_issues.extend(repo_issues);
         }
 
         if let Some(id) = &self.id {

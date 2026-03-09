@@ -1,6 +1,6 @@
 # Dependency Blocking
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Medium
 **Category:** Improvements
 

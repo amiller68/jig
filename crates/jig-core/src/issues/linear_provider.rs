@@ -81,7 +81,11 @@ impl IssueProvider for LinearProvider {
             status: Some(IssueStatus::Planned),
             ..Default::default()
         })?;
-        Ok(all.into_iter().filter(|i| i.auto).collect())
+        Ok(all
+            .into_iter()
+            .filter(|i| i.auto)
+            .filter(|i| self.is_spawnable_with_deps(i))
+            .collect())
     }
 
     fn get(&self, id: &str) -> Result<Option<Issue>> {
