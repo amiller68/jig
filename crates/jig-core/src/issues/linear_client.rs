@@ -16,11 +16,8 @@ pub struct LinearClient {
 // -- GraphQL query constants --------------------------------------------------
 
 const LIST_ISSUES_QUERY: &str = r#"
-query ListIssues($teamKey: String!, $filter: IssueFilter, $first: Int) {
-  issues(filter: {
-    team: { key: { eq: $teamKey } }
-    and: [$filter]
-  }, first: $first) {
+query ListIssues($filter: IssueFilter, $first: Int) {
+  issues(filter: $filter, first: $first) {
     nodes {
       identifier
       title
@@ -32,8 +29,9 @@ query ListIssues($teamKey: String!, $filter: IssueFilter, $first: Int) {
       team { name }
       children { nodes { identifier } }
       labels { nodes { name } }
-      relations(filter: { type: { eq: "blocks" } }) {
+      relations {
         nodes {
+          type
           relatedIssue { identifier }
         }
       }
@@ -56,11 +54,10 @@ query GetIssue($identifier: String!) {
       team { name }
       children { nodes { identifier } }
       labels { nodes { name } }
-      relations(filter: { type: { eq: "blocks" } }) {
+      relations {
         nodes {
+          type
           relatedIssue { identifier }
-        }
-      }
     }
   }
 }
@@ -140,6 +137,8 @@ struct RawLabel {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawRelation {
+    #[serde(rename = "type")]
+    relation_type: String,
     related_issue: RawChildRef,
 }
 
@@ -186,6 +185,7 @@ impl From<RawIssue> for Issue {
             .relations
             .nodes
             .into_iter()
+            .filter(|r| r.relation_type == "blocks")
             .map(|r| r.related_issue.identifier)
             .collect();
 
@@ -233,15 +233,28 @@ impl LinearClient {
 
     fn execute<T: serde::de::DeserializeOwned>(&self, request: &GqlRequest) -> Result<T> {
         let response = ureq::post(LINEAR_API_URL)
+            .config()
+            .http_status_as_error(false)
+            .build()
             .header("Authorization", &self.api_key)
             .header("Content-Type", "application/json")
             .send_json(request)
             .map_err(|e| Error::Linear(format!("HTTP request failed: {}", e)))?;
 
-        let gql: GqlResponse<T> = response
+        let status = response.status();
+
+        let body = response
             .into_body()
-            .read_json()
-            .map_err(|e| Error::Linear(format!("failed to parse response: {}", e)))?;
+            .read_to_string()
+            .map_err(|e| Error::Linear(format!("failed to read response: {}", e)))?;
+
+        if status.as_u16() >= 400 {
+            return Err(Error::Linear(format!("HTTP {}: {}", status.as_u16(), body)));
+        }
+
+        let gql: GqlResponse<T> = serde_json::from_str(&body).map_err(|e| {
+            Error::Linear(format!("failed to parse response: {} — body: {}", e, body))
+        })?;
 
         if let Some(errors) = gql.errors {
             let msgs: Vec<String> = errors.into_iter().map(|e| e.message).collect();
@@ -261,6 +274,12 @@ impl LinearClient {
         priority: Option<&IssuePriority>,
     ) -> Result<Vec<Issue>> {
         let mut filter = serde_json::Map::new();
+
+        // Team filter
+        filter.insert(
+            "team".into(),
+            serde_json::json!({ "key": { "eq": team_key } }),
+        );
 
         if let Some(s) = status {
             let state_types = match s {
@@ -296,7 +315,6 @@ impl LinearClient {
         }
 
         let variables = serde_json::json!({
-            "teamKey": team_key,
             "filter": filter,
             "first": 100,
         });
