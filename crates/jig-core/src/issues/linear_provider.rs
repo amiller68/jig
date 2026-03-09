@@ -37,9 +37,16 @@ impl LinearProvider {
                 ))
             })?;
 
+        let team = linear_config.team.clone().ok_or_else(|| {
+            Error::Linear(
+                "Linear team key is required — set 'team' in [issues.linear] in jig.toml"
+                    .to_string(),
+            )
+        })?;
+
         Ok(Self {
             client: LinearClient::new(&profile.api_key),
-            team: linear_config.team.clone(),
+            team,
             projects: linear_config.projects.clone(),
         })
     }

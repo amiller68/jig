@@ -71,8 +71,9 @@ impl RepoContext {
     /// Resolve the effective base branch.
     /// Priority: jig.toml > repo-specific config > global default > hardcoded fallback.
     fn resolve_base_branch(repo_root: &std::path::Path) -> Result<String> {
-        // Check jig.toml first
-        if let Some(jig_toml) = JigToml::load(repo_root)? {
+        // Check jig.toml first — parse errors are non-fatal so a malformed
+        // jig.toml doesn't prevent basic repo operations.
+        if let Ok(Some(jig_toml)) = JigToml::load(repo_root) {
             if let Some(base) = jig_toml.worktree.base {
                 return Ok(base);
             }

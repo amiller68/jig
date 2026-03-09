@@ -278,8 +278,10 @@ pub struct IssuesConfig {
 pub struct LinearIssuesConfig {
     /// Name of the profile in global config to use for API key.
     pub profile: String,
-    /// Linear team key (e.g. "ENG").
-    pub team: String,
+    /// Linear team key (e.g. "ENG"). Optional — will be required at provider
+    /// init time, but can come from the profile-level config in the future.
+    #[serde(default)]
+    pub team: Option<String>,
     /// Optional list of allowed project names to filter by.
     #[serde(default)]
     pub projects: Vec<String>,
