@@ -14,6 +14,7 @@ pub mod github_actor;
 pub mod issue_actor;
 pub mod messages;
 mod pr;
+pub mod prune_actor;
 pub mod runtime;
 pub mod sync_actor;
 
@@ -27,7 +28,6 @@ use crate::context::RepoContext;
 use crate::dispatch::{dispatch_actions, Action};
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
-use crate::git;
 use crate::global::{GlobalConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::{execute_nudge, NudgeType};
@@ -42,6 +42,17 @@ use pr::{make_github_client, PrMonitor};
 
 pub use messages::SpawnableIssue;
 pub use runtime::{DaemonRuntime, RuntimeConfig};
+
+/// Extract the branch name from a worker's event log (looks for Spawn event),
+/// falling back to worker_name if no Spawn event exists.
+fn extract_branch_name(events: &[Event], worker_name: &str) -> String {
+    events
+        .iter()
+        .find(|e| e.event_type == EventType::Spawn)
+        .and_then(|e| e.data.get("branch").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| worker_name.to_string())
+}
 
 /// Pre-computed display data for a worker, populated during tick so the render
 /// callback can format output without any subprocess calls or file I/O.
@@ -180,6 +191,17 @@ impl<'a> Daemon<'a> {
         runtime.drain_github();
         let spawnable = runtime.drain_issues();
 
+        // Drain prune results from previous tick
+        if let Some(prune_complete) = runtime.drain_prune() {
+            for pr in prune_complete.results {
+                if let Some(err) = pr.error {
+                    result.errors.push(format!("prune {}: {}", pr.key, err));
+                } else {
+                    result.pruned.push(pr.key);
+                }
+            }
+        }
+
         // Load current global state (previous worker states)
         let mut workers_state = WorkersState::load().unwrap_or_default();
 
@@ -201,6 +223,7 @@ impl<'a> Daemon<'a> {
         tracing::debug!(count = worker_list.len(), "discovered workers");
 
         // 3. Process each worker
+        let mut live_prune_targets = Vec::new();
         for (repo_name, worker_name) in &worker_list {
             if quit.load(Ordering::Relaxed) {
                 break;
@@ -216,12 +239,13 @@ impl<'a> Daemon<'a> {
                 &registry,
                 runtime,
             ) {
-                Ok((actions, nudges, notifs, worker_tick_info, display_info)) => {
+                Ok((actions, nudges, notifs, worker_tick_info, display_info, prune_targets)) => {
                     result.actions_dispatched += actions;
                     result.nudges_sent += nudges;
                     result.notifications_sent += notifs;
                     result.worker_info.insert(key.clone(), worker_tick_info);
                     result.worker_display.push(display_info);
+                    live_prune_targets.extend(prune_targets);
                 }
                 Err(e) => {
                     result.errors.push(format!("{}: {}", key, e));
@@ -229,20 +253,10 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Collect stale workers for pruning: tmux session/window gone entirely.
-        // This catches workers that exited without a Terminal event (e.g. agent
-        // finished but no PR was opened, so no PR lifecycle cleanup fired).
-        let stale_workers: Vec<(String, String)> = result
-            .worker_display
-            .iter()
-            .filter(|w| matches!(w.tmux_status, TaskStatus::NoSession | TaskStatus::NoWindow))
-            .filter_map(|w| {
-                worker_list
-                    .iter()
-                    .find(|(_, wn)| *wn == w.name)
-                    .map(|(rn, _)| (rn.clone(), w.name.clone()))
-            })
-            .collect();
+        // Live path: send prune targets from Cleanup actions
+        if !live_prune_targets.is_empty() {
+            runtime.send_prune(live_prune_targets);
+        }
 
         // Filter out terminal workers and workers with no tmux session
         result.worker_display.retain(|w| {
@@ -261,28 +275,29 @@ impl<'a> Daemon<'a> {
             tracing::warn!("failed to save workers state: {}", e);
         });
 
-        // Periodically prune stale worktrees
-        if runtime.should_prune() && !stale_workers.is_empty() {
-            for (repo_name, worker_name) in &stale_workers {
+        // Recovery path: scan github cache for merged/closed PRs with worktrees still on disk.
+        // This catches workers whose PRs were merged/closed while the daemon was off.
+        if !runtime.prune_pending() {
+            let mut prune_targets = Vec::new();
+            for (repo_name, worker_name) in &worker_list {
                 let key = format!("{}/{}", repo_name, worker_name);
-                match self.prune_worker(repo_name, worker_name, &registry, &mut workers_state) {
-                    Ok(()) => {
-                        tracing::info!(worker = %key, "pruned stale worktree");
-                        result.pruned.push(key);
-                    }
-                    Err(e) => {
-                        result.errors.push(format!("prune {}: {}", key, e));
+                if let Some(cached) = runtime.get_cached_pr(&key) {
+                    if cached.pr_merged || cached.pr_closed {
+                        if let Some(entry) = Self::find_repo_path(&registry, repo_name) {
+                            let worktree_path =
+                                crate::config::worktree_path(&entry.path, worker_name);
+                            if worktree_path.exists() {
+                                prune_targets.push(messages::PruneTarget {
+                                    repo_path: entry.path.clone(),
+                                    repo_name: repo_name.clone(),
+                                    worker_name: worker_name.clone(),
+                                });
+                            }
+                        }
                     }
                 }
             }
-            if !result.pruned.is_empty() {
-                workers_state.save().unwrap_or_else(|e| {
-                    tracing::warn!("failed to save workers state after prune: {}", e);
-                });
-            }
-            runtime.mark_pruned();
-        } else if runtime.should_prune() {
-            runtime.mark_pruned();
+            runtime.send_prune(prune_targets);
         }
 
         // 4. Trigger issue poll if auto-spawn enabled
@@ -291,7 +306,7 @@ impl<'a> Daemon<'a> {
         // Find a repo root to use for issue polling (first registered repo)
         if let Some(entry) = registry.repos().first() {
             let base = RepoContext::resolve_base_branch_for(&entry.path)
-                .unwrap_or_else(|_| "origin/main".to_string());
+                .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
             runtime.maybe_trigger_issue_poll(&entry.path, &base, &worker_names);
         }
 
@@ -375,17 +390,18 @@ impl<'a> Daemon<'a> {
         workers_state: &mut WorkersState,
         registry: &RepoRegistry,
         runtime: &DaemonRuntime,
-    ) -> Result<(usize, usize, usize, WorkerTickInfo, WorkerDisplayInfo)> {
+    ) -> Result<(
+        usize,
+        usize,
+        usize,
+        WorkerTickInfo,
+        WorkerDisplayInfo,
+        Vec<messages::PruneTarget>,
+    )> {
         let event_log = EventLog::for_worker(repo_name, worker_name)?;
         let events = event_log.read_all()?;
         let new_state = WorkerState::reduce(&events, &self.config.health);
-
-        let branch_name = events
-            .iter()
-            .find(|e| e.event_type == EventType::Spawn)
-            .and_then(|e| e.data.get("branch").and_then(|v| v.as_str()))
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| worker_name.to_string());
+        let branch_name = extract_branch_name(&events, worker_name);
 
         // Use cached GitHub data — request a check for next tick if needed
         let mut worker_tick_info = WorkerTickInfo::default();
@@ -493,13 +509,14 @@ impl<'a> Daemon<'a> {
         }
 
         let action_count = actions.len();
-        let (nudge_count, notif_count) = self.execute_actions(
+        let (nudge_count, notif_count, cleanup_prune_targets) = self.execute_actions(
             &actions,
             repo_name,
             &branch_name,
             key,
             &new_state,
             &event_log,
+            registry,
         );
 
         // Update workers.json
@@ -522,10 +539,10 @@ impl<'a> Daemon<'a> {
         let (commits_ahead, is_dirty) = if let Some(entry) =
             Self::find_repo_path(registry, repo_name)
         {
-            let worktree_path = entry.path.join(crate::config::JIG_DIR).join(worker_name);
+            let worktree_path = crate::config::worktree_path(&entry.path, worker_name);
             if worktree_path.exists() {
                 let base = RepoContext::resolve_base_branch_for(&entry.path)
-                    .unwrap_or_else(|_| "origin/main".to_string());
+                    .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
                 let ahead = crate::git::get_commits_ahead(&worktree_path, &base)
                     .unwrap_or_default()
                     .len();
@@ -559,6 +576,7 @@ impl<'a> Daemon<'a> {
             notif_count,
             worker_tick_info,
             display_info,
+            cleanup_prune_targets,
         ))
     }
 
@@ -574,13 +592,7 @@ impl<'a> Daemon<'a> {
         let event_log = EventLog::for_worker(repo_name, worker_name)?;
         let events = event_log.read_all()?;
         let mut new_state = WorkerState::reduce(&events, &self.config.health);
-
-        let branch_name = events
-            .iter()
-            .find(|e| e.event_type == EventType::Spawn)
-            .and_then(|e| e.data.get("branch").and_then(|v| v.as_str()))
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| worker_name.to_string());
+        let branch_name = extract_branch_name(&events, worker_name);
 
         // Proactively discover PR if not already known
         if new_state.pr_url.is_none() && !new_state.status.is_terminal() {
@@ -653,13 +665,14 @@ impl<'a> Daemon<'a> {
         }
 
         let action_count = actions.len();
-        let (nudge_count, notif_count) = self.execute_actions(
+        let (nudge_count, notif_count, _prune_targets) = self.execute_actions(
             &actions,
             repo_name,
             &branch_name,
             key,
             &new_state,
             &event_log,
+            registry,
         );
 
         workers_state.set_worker(
@@ -679,7 +692,8 @@ impl<'a> Daemon<'a> {
         Ok((action_count, nudge_count, notif_count, worker_tick_info))
     }
 
-    /// Execute dispatched actions, returning (nudge_count, notif_count).
+    /// Execute dispatched actions, returning (nudge_count, notif_count, prune_targets).
+    #[allow(clippy::too_many_arguments)]
     fn execute_actions(
         &self,
         actions: &[Action],
@@ -688,9 +702,11 @@ impl<'a> Daemon<'a> {
         key: &str,
         new_state: &WorkerState,
         event_log: &EventLog,
-    ) -> (usize, usize) {
+        registry: &RepoRegistry,
+    ) -> (usize, usize, Vec<messages::PruneTarget>) {
         let mut nudge_count = 0;
         let mut notif_count = 0;
+        let mut prune_targets = Vec::new();
 
         for action in actions {
             match action {
@@ -704,15 +720,10 @@ impl<'a> Daemon<'a> {
                     );
 
                     if self.tmux.has_window(&target) {
-                        let is_agent = self
-                            .tmux
-                            .pane_command(&target)
-                            .map(|cmd| cmd == "claude" || cmd == "node")
-                            .unwrap_or(false);
-                        if !is_agent {
+                        if !self.tmux.pane_is_running(&target) {
                             tracing::debug!(
                                 worker = key,
-                                "agent not running in pane, skipping nudge"
+                                "no command running in pane, skipping nudge"
                             );
                             continue;
                         }
@@ -764,20 +775,29 @@ impl<'a> Daemon<'a> {
                     );
                 }
                 Action::Cleanup { worker_id } => {
-                    let target = TmuxTarget::new(
+                    let tmux_target = TmuxTarget::new(
                         format!("{}{}", self.daemon_config.session_prefix, repo_name),
                         branch_name.to_string(),
                     );
 
-                    if self.tmux.has_window(&target) {
-                        if let Err(e) = self.tmux.kill_window(&target) {
+                    if self.tmux.has_window(&tmux_target) {
+                        if let Err(e) = self.tmux.kill_window(&tmux_target) {
                             tracing::warn!("failed to kill window for {}: {}", worker_id, e);
                         }
                     }
 
-                    let event = Event::new(EventType::Terminal).with_field("reason", "cleanup");
+                    let event = Event::new(EventType::Terminal).with_field("terminal", "archived");
                     if let Err(e) = event_log.append(&event) {
                         tracing::warn!("failed to emit cleanup event for {}: {}", key, e);
+                    }
+
+                    // Queue worktree for pruning
+                    if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                        prune_targets.push(messages::PruneTarget {
+                            repo_path: entry.path.clone(),
+                            repo_name: repo_name.to_string(),
+                            worker_name: worker_id.clone(),
+                        });
                     }
 
                     tracing::info!("cleaned up worker {}", worker_id);
@@ -785,7 +805,7 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        (nudge_count, notif_count)
+        (nudge_count, notif_count, prune_targets)
     }
 
     /// Auto-spawn a worker for an issue.
@@ -795,7 +815,7 @@ impl<'a> Daemon<'a> {
         let repo_root = &issue.repo_root;
         let git_common_dir = crate::git::get_git_common_dir_for(repo_root)?;
         let worktrees_dir = repo_root.join(JIG_DIR);
-        let worktree_path = worktrees_dir.join(&issue.worker_name);
+        let worktree_path = crate::config::worktree_path(repo_root, &issue.worker_name);
 
         if worktree_path.exists() {
             tracing::debug!(worker = %issue.worker_name, "worktree already exists, skipping");
@@ -812,7 +832,7 @@ impl<'a> Daemon<'a> {
 
         // Resolve base branch
         let base_branch = RepoContext::resolve_base_branch_for(repo_root)
-            .unwrap_or_else(|_| "origin/main".to_string());
+            .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
 
         // Create the worktree
         let branch = &issue.worker_name;
@@ -866,46 +886,6 @@ impl<'a> Daemon<'a> {
         Ok(())
     }
 
-    /// Prune a stale worker: remove its git worktree, event logs, and global state entry.
-    fn prune_worker(
-        &self,
-        repo_name: &str,
-        worker_name: &str,
-        registry: &RepoRegistry,
-        workers_state: &mut WorkersState,
-    ) -> Result<()> {
-        let entry = Self::find_repo_path(registry, repo_name)
-            .ok_or_else(|| crate::error::Error::NotInGitRepo)?;
-
-        let worktrees_dir = entry.path.join(crate::config::JIG_DIR);
-        let worktree_path = worktrees_dir.join(worker_name);
-
-        // Remove the git worktree (force — it's already terminal)
-        if worktree_path.exists() {
-            if let Err(e) = git::remove_worktree(&worktree_path, true) {
-                tracing::warn!(worker = worker_name, error = %e, "git worktree remove failed, removing directory");
-                let _ = std::fs::remove_dir_all(&worktree_path);
-            }
-            // Clean up empty parent dirs (for nested paths like feature/foo)
-            cleanup_empty_parents(&worktree_path, &worktrees_dir);
-        }
-
-        // Remove event logs
-        if let Ok(events_dir) = crate::global::global_state_dir().map(|d| d.join("events")) {
-            let sanitized = format!("{}-{}", repo_name, worker_name.replace('/', "-"));
-            let event_dir = events_dir.join(&sanitized);
-            if event_dir.is_dir() {
-                let _ = std::fs::remove_dir_all(&event_dir);
-            }
-        }
-
-        // Remove global state entry
-        let key = format!("{}/{}", repo_name, worker_name);
-        workers_state.remove_worker(&key);
-
-        Ok(())
-    }
-
     /// Fetch the configured base branch for each registered repo (blocking).
     fn sync_repos(&self, registry: &RepoRegistry) {
         for entry in registry.repos() {
@@ -913,7 +893,7 @@ impl<'a> Daemon<'a> {
                 continue;
             }
             let base = RepoContext::resolve_base_branch_for(&entry.path)
-                .unwrap_or_else(|_| "origin/main".to_string());
+                .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
             let (remote, branch) = base.split_once('/').unwrap_or(("origin", &base));
 
             match std::process::Command::new("git")
@@ -937,30 +917,6 @@ impl<'a> Daemon<'a> {
                 }
             }
         }
-    }
-}
-
-/// Remove empty parent directories up to (but not including) the stop directory.
-fn cleanup_empty_parents(path: &std::path::Path, stop_at: &std::path::Path) {
-    let mut parent = path.parent();
-    while let Some(p) = parent {
-        if p == stop_at
-            || p.file_name()
-                .map(|n| n == crate::config::JIG_DIR)
-                .unwrap_or(false)
-        {
-            break;
-        }
-        match p.read_dir() {
-            Ok(mut entries) => {
-                if entries.next().is_some() {
-                    break; // not empty
-                }
-                let _ = std::fs::remove_dir(p);
-            }
-            Err(_) => break,
-        }
-        parent = p.parent();
     }
 }
 

@@ -106,7 +106,6 @@ impl Ps {
             max_concurrent_workers,
             auto_spawn_interval: spawn_config.auto_spawn_interval,
             sync_interval: 60,
-            prune_interval: 120,
         }
     }
 }

@@ -140,6 +140,30 @@ When a worker has an open PR, the daemon monitors it for problems:
 
 **Non-draft PRs** do not receive nudges — they're in human review. The STATE column shows `review` (cyan). Health problems still appear in the HEALTH column for visibility, but the daemon won't interrupt the agent.
 
+## Auto-Pruning
+
+The daemon automatically cleans up worktrees when their PRs are merged or closed.
+
+**What triggers pruning:**
+- A worker's PR is merged and `auto_cleanup_merged` is enabled (default)
+- A worker's PR is closed without merge and `auto_cleanup_closed` is enabled
+
+**What gets cleaned up:**
+- The git worktree (`git worktree remove` — no `--force`)
+- Event log directory under `~/.config/jig/state/events/`
+- Worker entry in `~/.config/jig/state/workers.json`
+
+**Safety:**
+- Uses `git worktree remove` without `--force` — fails gracefully if the worktree has uncommitted changes
+- The tmux window is killed before worktree removal
+- A `Terminal` event is emitted so the worker won't be re-processed
+
+**Recovery path:**
+On each tick the daemon scans its GitHub cache for merged/closed PRs that still have worktrees on disk. This catches PRs that were merged while the daemon was off.
+
+**Manual removal:**
+Use `jig nuke <worker>` to force-remove a worktree regardless of PR state or uncommitted changes.
+
 ## Troubleshooting
 
 **No workers discovered:**

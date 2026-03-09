@@ -8,7 +8,7 @@ use crate::context::RepoContext;
 use crate::registry::RepoRegistry;
 
 use super::messages::*;
-use super::{github_actor, issue_actor, sync_actor};
+use super::{github_actor, issue_actor, prune_actor, sync_actor};
 
 /// Runtime configuration for the daemon actors.
 #[derive(Debug, Clone)]
@@ -21,8 +21,6 @@ pub struct RuntimeConfig {
     pub auto_spawn_interval: u64,
     /// Seconds between git syncs.
     pub sync_interval: u64,
-    /// Seconds between prune checks for stale worktrees.
-    pub prune_interval: u64,
 }
 
 impl Default for RuntimeConfig {
@@ -32,7 +30,6 @@ impl Default for RuntimeConfig {
             max_concurrent_workers: 3,
             auto_spawn_interval: 120,
             sync_interval: 60,
-            prune_interval: 120,
         }
     }
 }
@@ -56,8 +53,10 @@ pub struct DaemonRuntime {
     issue_pending: bool,
     last_issue_poll: Instant,
 
-    // Prune tracking
-    last_prune: Instant,
+    // Prune actor
+    prune_tx: flume::Sender<PruneRequest>,
+    prune_rx: flume::Receiver<PruneComplete>,
+    prune_pending: bool,
 
     config: RuntimeConfig,
 
@@ -80,6 +79,10 @@ impl DaemonRuntime {
         let (issue_resp_tx, issue_resp_rx) = flume::bounded(1);
         let issue_handle = issue_actor::spawn(issue_req_rx, issue_resp_tx);
 
+        let (prune_req_tx, prune_req_rx) = flume::bounded(1);
+        let (prune_resp_tx, prune_resp_rx) = flume::bounded(1);
+        let prune_handle = prune_actor::spawn(prune_req_rx, prune_resp_tx);
+
         // Start with past timestamps so first tick triggers sync/poll immediately
         let past = Instant::now();
 
@@ -98,11 +101,12 @@ impl DaemonRuntime {
             issue_pending: false,
             last_issue_poll: past - std::time::Duration::from_secs(config.auto_spawn_interval + 1),
 
-            // Don't prune on the first tick — wait for tmux status to stabilize
-            last_prune: Instant::now(),
+            prune_tx: prune_req_tx,
+            prune_rx: prune_resp_rx,
+            prune_pending: false,
 
             config,
-            _handles: vec![sync_handle, gh_handle, issue_handle],
+            _handles: vec![sync_handle, gh_handle, issue_handle, prune_handle],
         }
     }
 
@@ -120,7 +124,7 @@ impl DaemonRuntime {
             .filter_map(|entry| {
                 let name = entry.path.file_name()?.to_string_lossy().to_string();
                 let base = RepoContext::resolve_base_branch_for(&entry.path)
-                    .unwrap_or_else(|_| "origin/main".to_string());
+                    .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
                 Some((name, entry.path.clone(), base))
             })
             .collect();
@@ -223,14 +227,31 @@ impl DaemonRuntime {
         }
     }
 
-    /// Check if it's time to prune stale worktrees.
-    pub fn should_prune(&self) -> bool {
-        self.last_prune.elapsed().as_secs() >= self.config.prune_interval
+    /// Send prune targets to the prune actor (non-blocking).
+    pub fn send_prune(&mut self, targets: Vec<PruneTarget>) {
+        if self.prune_pending || targets.is_empty() {
+            return;
+        }
+        if self.prune_tx.try_send(PruneRequest { targets }).is_ok() {
+            self.prune_pending = true;
+            tracing::debug!("triggered prune");
+        }
     }
 
-    /// Mark that a prune cycle just completed.
-    pub fn mark_pruned(&mut self) {
-        self.last_prune = Instant::now();
+    /// Drain any completed prune response (non-blocking).
+    pub fn drain_prune(&mut self) -> Option<PruneComplete> {
+        match self.prune_rx.try_recv() {
+            Ok(result) => {
+                self.prune_pending = false;
+                Some(result)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Whether a prune request is currently in flight.
+    pub fn prune_pending(&self) -> bool {
+        self.prune_pending
     }
 
     /// Get runtime config reference.

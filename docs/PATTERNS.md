@@ -48,7 +48,6 @@ impl Op for Create {
 - **Workspace structure**: Separate crates for different concerns
   - `jig-core` — Pure library with no I/O assumptions
   - `jig-cli` — CLI binary, depends on jig-core
-  - `jig-tui` — TUI binary, depends on jig-core
 
 - **Within crates**: One module per domain concept
   - `git.rs` — Low-level git operations via shell commands

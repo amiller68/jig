@@ -57,6 +57,30 @@ pub struct IssueRequest {
     pub max_concurrent_workers: usize,
 }
 
+/// A worker to prune (worktree + event logs + state).
+pub struct PruneTarget {
+    pub repo_path: PathBuf,
+    pub repo_name: String,
+    pub worker_name: String,
+}
+
+/// Request sent to the prune actor.
+pub struct PruneRequest {
+    pub targets: Vec<PruneTarget>,
+}
+
+/// Result of pruning a single worker.
+pub struct PruneResult {
+    /// "repo_name/worker_name"
+    pub key: String,
+    pub error: Option<String>,
+}
+
+/// Response from the prune actor.
+pub struct PruneComplete {
+    pub results: Vec<PruneResult>,
+}
+
 /// An issue that is eligible for auto-spawning.
 #[derive(Debug, Clone)]
 pub struct SpawnableIssue {

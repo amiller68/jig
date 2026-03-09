@@ -260,6 +260,7 @@ impl TmuxClient {
             None => false,
         }
     }
+
 }
 
 /// Collapse a multiline message into a single line for tmux input.

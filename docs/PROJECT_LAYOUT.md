@@ -54,7 +54,8 @@ jig/
 │   │       │   ├── messages.rs   # Inter-actor message types
 │   │       │   ├── sync_actor.rs # Background git fetch actor
 │   │       │   ├── github_actor.rs # Background GitHub API actor
-│   │       │   └── issue_actor.rs  # Background issue polling actor
+│   │       │   ├── issue_actor.rs  # Background issue polling actor
+│   │       │   └── prune_actor.rs # Background worktree pruning actor
 │   │       ├── nudge.rs    # Nudge system (classify, build, execute)
 │   │       ├── tmux.rs     # Type-safe tmux client (TmuxClient, TmuxTarget)
 │   │       ├── github/     # GitHub integration via gh CLI
@@ -134,7 +135,7 @@ jig/
 ## Configuration
 
 - `~/.config/jig/config` — Legacy flat key-value user configuration (base branch, hooks)
-- `~/.config/jig/config.toml` — Structured global configuration (health, notify)
+- `~/.config/jig/config.toml` — Structured global configuration (optional, defaults used if absent) (health, notify)
 - `~/.config/jig/state/workers.json` — Aggregated worker state across repos
 - `~/.config/jig/hooks/` — User hook scripts
 - `~/.config/jig/state/events/` — Per-worker event logs

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
-const DEFAULT_BASE_BRANCH: &str = "origin/main";
+pub const DEFAULT_BASE_BRANCH: &str = "origin/main";
 
 /// Directory name for jig-managed worktrees (relative to repo root)
 pub const JIG_DIR: &str = ".jig";
@@ -219,6 +219,11 @@ impl Config {
 
         entries
     }
+}
+
+/// Build the worktree path for a worker within a repo root.
+pub fn worktree_path(repo_root: &Path, worker_name: &str) -> PathBuf {
+    repo_root.join(JIG_DIR).join(worker_name)
 }
 
 /// Run on-create hook in a directory

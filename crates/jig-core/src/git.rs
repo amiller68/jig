@@ -241,6 +241,14 @@ pub fn get_current_branch() -> Result<String> {
 
 /// Create a git worktree
 pub fn create_worktree(path: &Path, branch: &str, base_branch: &str) -> Result<()> {
+    // Clean up stale worktree registrations (e.g. directory removed but git
+    // still tracks the entry). Without this, `git worktree add` fails with
+    // "missing but already registered worktree".
+    let _ = Command::new("git")
+        .args(["worktree", "prune"])
+        .stdin(Stdio::null())
+        .output();
+
     // Check if branch exists
     let branch_exists_already = branch_exists(branch)?;
 
