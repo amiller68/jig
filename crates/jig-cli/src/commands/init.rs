@@ -296,7 +296,11 @@ type = "{}"
         eprintln!("{} Initialization complete", "✓".green().bold());
 
         if let Some(ref extra) = self.audit {
-            let extra = if extra.is_empty() { None } else { Some(extra.as_str()) };
+            let extra = if extra.is_empty() {
+                None
+            } else {
+                Some(extra.as_str())
+            };
             launch_audit(&repo_root, adapter, self.backup, extra)?;
         }
 
@@ -406,7 +410,11 @@ fn launch_audit(
         window_name
     );
     eprintln!();
-    eprintln!("  Attach with: {} -t {}", "tmux attach".bold(), session_name);
+    eprintln!(
+        "  Attach with: {} -t {}",
+        "tmux attach".bold(),
+        session_name
+    );
 
     Ok(())
 }
