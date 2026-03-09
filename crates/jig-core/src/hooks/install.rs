@@ -65,7 +65,7 @@ pub fn should_install_hook(
 
 /// Install jig git hooks into `<repo_path>/.git/hooks/`.
 ///
-/// Registry is saved at `<repo_path>/jig-hooks.json`.
+/// Registry is saved at `<repo_path>/.jig/hooks/hooks.json`.
 pub fn init_hooks(repo_path: &Path, force: bool) -> Result<InitResult> {
     let hooks_dir = repo_path.join(".git").join("hooks");
     std::fs::create_dir_all(&hooks_dir)?;

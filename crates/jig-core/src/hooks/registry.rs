@@ -1,16 +1,18 @@
 //! Hook registry — tracks which git hooks jig has installed.
 //!
-//! Stored at `.git/jig-hooks.json` (or a custom path for testing).
+//! Stored at `.jig/jig-hooks.json` (gitignored, per-machine state).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::JIG_DIR;
 use crate::error::Result;
 
-/// Registry filename within the `.git` directory.
-const REGISTRY_FILE: &str = "jig-hooks.json";
+/// Registry path within the `.jig` directory.
+const REGISTRY_DIR: &str = "hooks";
+const REGISTRY_FILE: &str = "hooks.json";
 
 /// Tracks installed git hooks for idempotent init and safe uninstall.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,22 +40,44 @@ impl HookRegistry {
         }
     }
 
-    /// Load registry from `<repo_path>/jig-hooks.json`.
+    /// Load registry from `<repo_path>/.jig/hooks/hooks.json`.
     ///
-    /// Returns a fresh registry if the file doesn't exist.
+    /// Falls back to legacy `<repo_path>/jig-hooks.json` if the new path
+    /// doesn't exist, to support migration from older installs.
+    /// Returns a fresh registry if neither file exists.
     pub fn load(repo_path: &Path) -> Result<Self> {
         let path = registry_path(repo_path);
-        if !path.exists() {
-            return Ok(Self::new());
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let registry = serde_json::from_str(&content)?;
+            return Ok(registry);
         }
-        let content = std::fs::read_to_string(&path)?;
-        let registry = serde_json::from_str(&content)?;
-        Ok(registry)
+
+        // Try legacy location (<repo_root>/jig-hooks.json)
+        let legacy_path = repo_path.join("jig-hooks.json");
+        if legacy_path.exists() {
+            let content = std::fs::read_to_string(&legacy_path)?;
+            let registry: Self = serde_json::from_str(&content)?;
+            // Migrate: save to new location and remove legacy file
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let new_content = serde_json::to_string_pretty(&registry)?;
+            std::fs::write(&path, new_content)?;
+            let _ = std::fs::remove_file(&legacy_path);
+            tracing::debug!("migrated jig-hooks.json to .jig/hooks/hooks.json");
+            return Ok(registry);
+        }
+
+        Ok(Self::new())
     }
 
-    /// Save registry to `<repo_path>/jig-hooks.json`.
+    /// Save registry to `<repo_path>/.jig/jig-hooks.json`.
     pub fn save(&self, repo_path: &Path) -> Result<()> {
         let path = registry_path(repo_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let content = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
         Ok(())
@@ -95,8 +119,12 @@ impl Default for HookRegistry {
     }
 }
 
-fn registry_path(repo_path: &Path) -> PathBuf {
-    repo_path.join(REGISTRY_FILE)
+/// Path to the hook registry file for a given repo.
+pub fn registry_path(repo_path: &Path) -> PathBuf {
+    repo_path
+        .join(JIG_DIR)
+        .join(REGISTRY_DIR)
+        .join(REGISTRY_FILE)
 }
 
 #[cfg(test)]
@@ -178,7 +206,7 @@ mod tests {
         registry.mark_installed("post-commit");
         registry.save(tmp.path()).unwrap();
 
-        let content = std::fs::read_to_string(tmp.path().join(REGISTRY_FILE)).unwrap();
+        let content = std::fs::read_to_string(registry_path(tmp.path())).unwrap();
         assert!(content.contains('\n'));
         assert!(content.contains("  ")); // indented
     }

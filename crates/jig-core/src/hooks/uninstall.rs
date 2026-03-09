@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::error::Result;
 
-use super::registry::HookRegistry;
+use super::registry::{self, HookRegistry};
 
 /// Outcome for a single hook uninstall.
 #[derive(Debug)]
@@ -29,7 +29,7 @@ pub struct UninstallResult {
 /// Otherwise all hooks tracked in the registry are removed.
 pub fn uninstall_hooks(repo_path: &Path, specific_hook: Option<&str>) -> Result<UninstallResult> {
     let hooks_dir = repo_path.join(".git").join("hooks");
-    let registry_path = repo_path.join("jig-hooks.json");
+    let registry_path = registry::registry_path(repo_path);
 
     let mut registry = HookRegistry::load(repo_path)?;
     let mut outcomes = Vec::new();
@@ -121,7 +121,7 @@ mod tests {
         assert!(!repo.join(".git/hooks/pre-commit").exists());
 
         // Registry should be gone
-        assert!(!repo.join("jig-hooks.json").exists());
+        assert!(!registry::registry_path(&repo).exists());
     }
 
     #[test]
