@@ -29,6 +29,12 @@ impl Op for Attach {
         Ok(NoOutput)
     }
 
+    /// Attach to a worktree by name across all known repos.
+    ///
+    /// If multiple repos contain a worktree with the same name,
+    /// `GlobalCtx::repo_for_worktree` returns the first match
+    /// (in repo discovery order). This is consistent with other
+    /// global commands like `remove` and `open`.
     fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
         let name = self
             .name
