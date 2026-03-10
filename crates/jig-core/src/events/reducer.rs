@@ -15,6 +15,7 @@ pub struct WorkerState {
     pub last_commit_at: Option<i64>,
     pub pr_url: Option<String>,
     pub nudge_counts: HashMap<String, u32>,
+    pub last_nudge_at: HashMap<String, i64>,
     pub issue_ref: Option<String>,
     pub started_at: Option<i64>,
     pub last_event_at: Option<i64>,
@@ -28,6 +29,7 @@ impl Default for WorkerState {
             last_commit_at: None,
             pr_url: None,
             nudge_counts: HashMap::new(),
+            last_nudge_at: HashMap::new(),
             issue_ref: None,
             started_at: None,
             last_event_at: None,
@@ -123,6 +125,7 @@ impl WorkerState {
             EventType::Nudge => {
                 if let Some(nudge_type) = event.data.get("nudge_type").and_then(|v| v.as_str()) {
                     *self.nudge_counts.entry(nudge_type.to_string()).or_insert(0) += 1;
+                    self.last_nudge_at.insert(nudge_type.to_string(), event.ts);
                 }
             }
             EventType::Review => {
@@ -219,6 +222,34 @@ mod tests {
         let state = WorkerState::reduce(&events, &default_config());
         assert_eq!(state.nudge_counts.get("stalled"), Some(&2));
         assert_eq!(state.nudge_counts.get("waiting"), Some(&1));
+    }
+
+    #[test]
+    fn last_nudge_at_tracked() {
+        let now = chrono::Utc::now().timestamp();
+        let events = vec![
+            Event::new(EventType::Spawn),
+            Event {
+                ts: now - 600,
+                event_type: EventType::Nudge,
+                data: serde_json::json!({"nudge_type": "ci"}),
+            },
+            Event {
+                ts: now - 100,
+                event_type: EventType::Nudge,
+                data: serde_json::json!({"nudge_type": "ci"}),
+            },
+            Event {
+                ts: now - 500,
+                event_type: EventType::Nudge,
+                data: serde_json::json!({"nudge_type": "review"}),
+            },
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        // last_nudge_at should reflect the most recent nudge per type
+        assert_eq!(state.last_nudge_at.get("ci"), Some(&(now - 100)));
+        assert_eq!(state.last_nudge_at.get("review"), Some(&(now - 500)));
+        assert_eq!(state.nudge_counts.get("ci"), Some(&2));
     }
 
     #[test]
