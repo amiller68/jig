@@ -1,12 +1,12 @@
 //! Review command - show diff for parent review
 
 use clap::Args;
-use colored::Colorize;
 
 use jig_core::git::Repo;
 use jig_core::Error;
 
 use crate::op::{Op, RepoCtx};
+use crate::ui;
 
 /// Show diff for parent review
 #[derive(Args, Debug, Clone)]
@@ -55,29 +55,25 @@ impl Op for Review {
         let is_dirty = Repo::has_uncommitted_changes(&worktree_path)?;
 
         // Header
-        eprintln!("{}", format!("Review: {}", self.name).bold());
+        ui::header(&format!("Review: {}", self.name));
         eprintln!();
-        eprintln!("  {} {}", "Branch:".dimmed(), branch.cyan());
+        eprintln!("  {} {}", ui::dim("Branch:"), ui::highlight(&branch));
         eprintln!(
             "  {} {} ahead of {}",
-            "Commits:".dimmed(),
-            commits.len().to_string().cyan(),
-            repo.base_branch.dimmed()
+            ui::dim("Commits:"),
+            ui::highlight(&commits.len().to_string()),
+            ui::dim(&repo.base_branch)
         );
 
         if is_dirty {
             eprintln!();
-            eprintln!(
-                "  {} {}",
-                "Warning:".yellow().bold(),
-                "Worktree has uncommitted changes".yellow()
-            );
+            ui::warning("Worktree has uncommitted changes");
         }
 
         // Commit history
         if !commits.is_empty() {
             eprintln!();
-            eprintln!("{}", "Commits:".bold());
+            ui::header("Commits:");
             for commit in &commits {
                 eprintln!("  {}", commit);
             }
@@ -86,7 +82,7 @@ impl Op for Review {
         // Diff
         eprintln!();
         if self.full {
-            eprintln!("{}", "Full diff:".bold());
+            ui::header("Full diff:");
             let diff = Repo::diff(&worktree_path, &repo.base_branch)?;
             if diff.is_empty() {
                 eprintln!("  No changes");
@@ -95,7 +91,7 @@ impl Op for Review {
                 Ok(ReviewOutput(diff))
             }
         } else {
-            eprintln!("{}", "Changed files:".bold());
+            ui::header("Changed files:");
             let stat = Repo::diff_stat(&worktree_path, &repo.base_branch)?;
             if stat.is_empty() {
                 eprintln!("  No changes");

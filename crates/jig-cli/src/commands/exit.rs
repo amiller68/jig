@@ -1,13 +1,13 @@
 //! Exit worktree command
 
 use clap::Args;
-use colored::Colorize;
 use std::path::PathBuf;
 
 use jig_core::git::Repo;
 use jig_core::{git, Error};
 
 use crate::op::{Op, RepoCtx};
+use crate::ui;
 
 /// Exit current worktree and remove it
 #[derive(Args, Debug, Clone)]
@@ -70,7 +70,7 @@ impl Op for Exit {
             parent = p.parent();
         }
 
-        eprintln!("{} Exited worktree '{}'", "✓".green(), name.cyan());
+        ui::success(&format!("Exited worktree '{}'", ui::highlight(&name)));
 
         // Output cd command to base repo
         let canonical = repo.repo_root.canonicalize()?;

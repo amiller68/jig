@@ -71,18 +71,32 @@ impl Op for Create {
 ## Output Conventions
 
 - **stderr**: Status messages, progress, errors (with color)
-  - Use `eprintln!` with `colored` crate for formatting
-  - Prefix success with green checkmark: `"✓".green()`
-  - Prefix errors with `"error:".red().bold()`
+  - Use shared helpers from `crates/jig-cli/src/ui.rs` instead of inline `colored` calls
+  - `ui::success("msg")` — green ✓ prefix
+  - `ui::progress("msg")` — cyan → prefix
+  - `ui::warning("msg")` — yellow ! prefix
+  - `ui::failure("msg")` — red ✗ prefix
+  - `ui::detail("msg")` — indented → for sub-items
+  - `ui::header("msg")` — bold section header
+  - `ui::highlight("val")`, `ui::bold("val")`, `ui::dim("val")` — inline color helpers
+  - All helpers respect `--plain` flag (no colors when enabled)
 
 - **stdout**: Machine-readable output only
   - Shell commands that need to be eval'd (e.g., `cd '/path'`)
   - Data that might be piped to other tools
   - Never include ANSI color codes in stdout
 
+- **`--plain` flag**: Global flag for scriptable output
+  - Disables all colors and decorations
+  - Tables output as tab-separated values
+  - Status symbols still appear but without color
+
 ```rust
-// Status message (stderr)
-eprintln!("{} Created worktree '{}'", "✓".green(), name.cyan());
+// Status message (stderr) — use ui helpers
+ui::success(&format!("Created worktree '{}'", ui::highlight(name)));
+
+// Tables — use ui::new_table for consistent styling
+let mut table = ui::new_table(&["NAME", "BRANCH", "COMMITS"]);
 
 // Machine-readable output (stdout)
 println!("cd '{}'", canonical.display());

@@ -1,9 +1,9 @@
 //! Hooks command — manage hook integrations
 
 use clap::{Args, Subcommand};
-use colored::Colorize;
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Manage hook integrations
 #[derive(Args, Debug, Clone)]
@@ -54,10 +54,10 @@ impl Op for Hooks {
                 let result = jig_core::hooks::install_claude_hooks()?;
 
                 for name in &result.installed {
-                    eprintln!("{} Installed {}", "✓".green(), name);
+                    ui::success(&format!("Installed {}", name));
                 }
                 for name in &result.skipped {
-                    eprintln!("{} Skipped {} (already exists)", "!".yellow(), name);
+                    ui::warning(&format!("Skipped {} (already exists)", name));
                 }
 
                 if result.installed.is_empty() && !result.skipped.is_empty() {
@@ -78,10 +78,10 @@ impl Op for Hooks {
                 for r in &result.results {
                     match r {
                         jig_core::hooks::install::HookResult::Installed(name) => {
-                            eprintln!("{} {}: installed", "✓".green(), name);
+                            eprintln!("{} {}: installed", ui::SYM_OK, name);
                         }
                         jig_core::hooks::install::HookResult::AlreadyInstalled(name) => {
-                            eprintln!("{} {}: already installed", "✓".green(), name);
+                            eprintln!("{} {}: already installed", ui::SYM_OK, name);
                         }
                         jig_core::hooks::install::HookResult::BackedUpAndInstalled {
                             hook,
@@ -89,7 +89,7 @@ impl Op for Hooks {
                         } => {
                             eprintln!(
                                 "{} {}: installed (backed up existing hook)",
-                                "✓".green(),
+                                ui::SYM_OK,
                                 hook
                             );
                         }
@@ -122,16 +122,16 @@ impl Op for Hooks {
                 for outcome in &result.outcomes {
                     match outcome {
                         jig_core::hooks::uninstall::UninstallOutcome::Removed(name) => {
-                            eprintln!("{} {}: removed (no previous hook)", "✓".green(), name);
+                            ui::success(&format!("{}: removed (no previous hook)", name));
                         }
                         jig_core::hooks::uninstall::UninstallOutcome::RestoredBackup {
                             hook,
                             backup: _,
                         } => {
-                            eprintln!("{} {}: removed, restored from backup", "✓".green(), hook);
+                            ui::success(&format!("{}: removed, restored from backup", hook));
                         }
                         jig_core::hooks::uninstall::UninstallOutcome::RestoredUser(name) => {
-                            eprintln!("{} {}: removed, restored original hook", "✓".green(), name);
+                            ui::success(&format!("{}: removed, restored original hook", name));
                         }
                     }
                 }

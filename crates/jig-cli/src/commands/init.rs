@@ -1,7 +1,6 @@
 //! Init command - initialize repository for jig
 
 use clap::Args;
-use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
@@ -9,6 +8,7 @@ use jig_core::git::Repo;
 use jig_core::{adapter, session, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 // Embed templates at compile time from the templates/ directory
 const PROJECT_MD_TEMPLATE: &str = include_str!("../../../../templates/PROJECT.md");
@@ -92,37 +92,32 @@ impl Op for Init {
 
         // Check if agent is installed
         if !terminal::command_exists(adapter.command) {
-            eprintln!(
-                "{} '{}' not found in PATH. Install it before running agents.",
-                "warning:".yellow().bold(),
+            ui::warning(&format!(
+                "'{}' not found in PATH. Install it before running agents.",
                 adapter.command
-            );
+            ));
         }
 
         // If already initialized, just ensure hooks are set up
         if JigToml::exists(&repo_root) && !self.force {
-            eprintln!(
-                "{} Already initialized, ensuring hooks are set up...",
-                "→".cyan()
-            );
+            ui::progress("Already initialized, ensuring hooks are set up...");
             install_hooks(&repo_root, adapter, false);
             eprintln!();
-            eprintln!("{} Hooks up to date", "✓".green().bold());
+            ui::success("Hooks up to date");
             return Ok(NoOutput);
         }
 
-        eprintln!(
-            "{} Initializing jig for {} in {}",
-            "→".cyan(),
+        ui::progress(&format!(
+            "Initializing jig for {} in {}",
             adapter.name,
             repo_root.display()
-        );
+        ));
 
         // Create backup directory if backup is enabled
         let backup_dir = repo_root.join(".backup");
         if self.backup {
             fs::create_dir_all(&backup_dir)?;
-            eprintln!("  {} Created .backup/", "✓".green());
+            eprintln!("  {} Created .backup/", ui::SYM_OK);
         }
 
         let backup_dir_opt = if self.backup {
@@ -145,7 +140,7 @@ impl Op for Init {
             let path = repo_root.join(dir);
             if !path.exists() {
                 fs::create_dir_all(&path)?;
-                eprintln!("  {} Created {}/", "✓".green(), dir);
+                eprintln!("  {} Created {}/", ui::SYM_OK, dir);
             }
         }
 
@@ -155,12 +150,7 @@ impl Op for Init {
             let dir = repo_root.join(adapter.skills_dir).join(skill);
             if !dir.exists() {
                 fs::create_dir_all(&dir)?;
-                eprintln!(
-                    "  {} Created {}/{}/",
-                    "✓".green(),
-                    adapter.skills_dir,
-                    skill
-                );
+                eprintln!("  {} Created {}/{}/", ui::SYM_OK, adapter.skills_dir, skill);
             }
         }
 
@@ -297,7 +287,7 @@ type = "{}"
         install_hooks(&repo_root, adapter, self.force);
 
         eprintln!();
-        eprintln!("{} Initialization complete", "✓".green().bold());
+        ui::success(&ui::bold("Initialization complete"));
 
         if let Some(ref extra) = self.audit {
             let extra = if extra.is_empty() {
@@ -407,16 +397,14 @@ fn launch_audit(
     session::send_keys(session_name, window_name, &cmd)?;
 
     eprintln!();
-    eprintln!(
-        "{} Audit launched in tmux session {}:{}",
-        "→".cyan(),
-        session_name,
-        window_name
-    );
+    ui::progress(&format!(
+        "Audit launched in tmux session {}:{}",
+        session_name, window_name
+    ));
     eprintln!();
     eprintln!(
         "  Attach with: {} -t {}",
-        "tmux attach".bold(),
+        ui::bold("tmux attach"),
         session_name
     );
 
@@ -426,44 +414,44 @@ fn launch_audit(
 /// Install git hooks and agent-specific hooks (idempotent).
 fn install_hooks(repo_root: &Path, adapter: &adapter::AgentAdapter, force: bool) {
     eprintln!();
-    eprintln!("{} Installing git hooks...", "→".cyan());
+    ui::progress("Installing git hooks...");
     match jig_core::hooks::init_hooks(repo_root, force) {
         Ok(result) => {
             for r in &result.results {
                 match r {
                     jig_core::hooks::install::HookResult::Installed(name) => {
-                        eprintln!("  {} {}: installed", "✓".green(), name);
+                        eprintln!("  {} {}: installed", ui::SYM_OK, name);
                     }
                     jig_core::hooks::install::HookResult::AlreadyInstalled(name) => {
-                        eprintln!("  {} {}: already installed", "✓".green(), name);
+                        eprintln!("  {} {}: already installed", ui::SYM_OK, name);
                     }
                     jig_core::hooks::install::HookResult::BackedUpAndInstalled {
                         hook,
                         backup: _,
                     } => {
-                        eprintln!("  {} {}: installed (backed up existing)", "✓".green(), hook);
+                        eprintln!("  {} {}: installed (backed up existing)", ui::SYM_OK, hook);
                     }
                 }
             }
         }
         Err(e) => {
-            eprintln!("  {} Git hooks: {}", "!".yellow(), e);
+            ui::warning(&format!("Git hooks: {}", e));
         }
     }
 
     if matches!(adapter.agent_type, jig_core::adapter::AgentType::Claude) {
-        eprintln!("{} Installing Claude Code hooks...", "→".cyan());
+        ui::progress("Installing Claude Code hooks...");
         match jig_core::hooks::install_claude_hooks() {
             Ok(result) => {
                 for name in &result.installed {
-                    eprintln!("  {} {}: installed", "✓".green(), name);
+                    eprintln!("  {} {}: installed", ui::SYM_OK, name);
                 }
                 for name in &result.skipped {
-                    eprintln!("  {} {}: already exists", "✓".green(), name);
+                    eprintln!("  {} {}: already exists", ui::SYM_OK, name);
                 }
             }
             Err(e) => {
-                eprintln!("  {} Claude hooks: {}", "!".yellow(), e);
+                ui::warning(&format!("Claude hooks: {}", e));
             }
         }
     }
@@ -485,16 +473,20 @@ fn write_file(
                 fs::create_dir_all(parent)?;
             }
             fs::copy(&path, &backup_path)?;
-            eprintln!("  {} Backed up {}", "→".dimmed(), relative_path);
+            eprintln!("  {} Backed up {}", ui::dim(ui::SYM_ARROW), relative_path);
         }
 
         if !force {
-            eprintln!("  {} Skipped {} (exists)", "→".dimmed(), relative_path);
+            eprintln!(
+                "  {} Skipped {} (exists)",
+                ui::dim(ui::SYM_ARROW),
+                relative_path
+            );
             return Ok(());
         }
     }
 
     fs::write(&path, content)?;
-    eprintln!("  {} Created {}", "✓".green(), relative_path);
+    eprintln!("  {} Created {}", ui::SYM_OK, relative_path);
     Ok(())
 }

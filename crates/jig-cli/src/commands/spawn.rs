@@ -1,7 +1,6 @@
 //! Spawn command - create worktree and launch Claude in tmux
 
 use clap::Args;
-use colored::Colorize;
 
 use jig_core::git::Repo;
 use jig_core::global::GlobalConfig;
@@ -9,6 +8,7 @@ use jig_core::issues;
 use jig_core::{git, spawn, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Create worktree and launch Claude in tmux
 #[derive(Args, Debug, Clone)]
@@ -76,12 +76,11 @@ impl Op for Spawn {
             let git_repo = Repo::discover()?;
             git_repo.create_worktree(&worktree_path, &self.name, base)?;
 
-            eprintln!(
-                "{} Created worktree '{}' from '{}'",
-                "✓".green(),
-                self.name.cyan(),
-                base.cyan()
-            );
+            ui::success(&format!(
+                "Created worktree '{}' from '{}'",
+                ui::highlight(&self.name),
+                ui::highlight(base)
+            ));
         }
 
         // Resolve issue if provided
@@ -127,22 +126,21 @@ impl Op for Spawn {
             effective_context.as_deref(),
         )?;
 
-        eprintln!(
-            "{} Launched Claude in tmux window '{}'",
-            "✓".green(),
-            self.name.cyan()
-        );
+        ui::success(&format!(
+            "Launched Claude in tmux window '{}'",
+            ui::highlight(&self.name)
+        ));
 
         if use_auto {
-            eprintln!("  {} Auto mode enabled", "→".dimmed());
+            ui::detail("Auto mode enabled");
         }
 
         eprintln!();
         eprintln!(
             "  Use '{}' to attach",
-            format!("jig attach {}", self.name).cyan()
+            ui::highlight(&format!("jig attach {}", self.name))
         );
-        eprintln!("  Use '{}' to check status", "jig ps".cyan());
+        eprintln!("  Use '{}' to check status", ui::highlight("jig ps"));
 
         Ok(NoOutput)
     }

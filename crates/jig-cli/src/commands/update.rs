@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use clap::Args;
-use colored::Colorize;
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 const GITHUB_REPO: &str = "amiller68/jig";
 const INSTALL_SCRIPT_URL: &str = "https://raw.githubusercontent.com/amiller68/jig/main/install.sh";
@@ -61,34 +61,33 @@ impl Op for Update {
         let current_version = env!("CARGO_PKG_VERSION");
 
         // Print header
-        eprintln!("{}", "Update".bold());
-        eprintln!("  Current version: {}", current_version.to_string().cyan());
-        eprintln!("  Installation: {}", install_method.description().dimmed());
+        ui::header("Update");
+        eprintln!("  Current version: {}", ui::highlight(current_version));
+        eprintln!("  Installation: {}", ui::dim(install_method.description()));
         eprintln!();
 
         // Check for latest version
-        eprintln!("{} Checking for updates...", "→".cyan());
+        ui::progress("Checking for updates...");
         let latest_version = get_latest_version()?;
-        eprintln!("  Latest version: {}", latest_version.cyan());
+        eprintln!("  Latest version: {}", ui::highlight(&latest_version));
         eprintln!();
 
         // Compare versions
         let needs_update = is_newer_version(current_version, &latest_version);
 
         if !needs_update && !self.force {
-            eprintln!("{} Already up to date!", "✓".green());
+            ui::success("Already up to date!");
             return Ok(NoOutput);
         }
 
         if needs_update {
-            eprintln!(
-                "{} New version available: {} → {}",
-                "→".cyan(),
-                current_version.dimmed(),
-                latest_version.green()
-            );
+            ui::progress(&format!(
+                "New version available: {} → {}",
+                ui::dim(current_version),
+                ui::highlight(&latest_version)
+            ));
         } else {
-            eprintln!("{} Forcing update...", "→".cyan());
+            ui::progress("Forcing update...");
         }
 
         match install_method {
@@ -115,11 +114,10 @@ impl Op for Update {
                 } else {
                     eprintln!();
                     eprintln!("To update manually, run:");
-                    eprintln!(
-                        "  {} cargo install --git https://github.com/{}",
-                        "→".dimmed(),
+                    ui::detail(&format!(
+                        "cargo install --git https://github.com/{}",
                         GITHUB_REPO
-                    );
+                    ));
                     return Ok(NoOutput);
                 }
             }
@@ -128,28 +126,23 @@ impl Op for Update {
                 eprintln!();
                 eprintln!(
                     "Unknown installation method: {}",
-                    path.display().to_string().dimmed()
+                    ui::dim(&path.display().to_string())
                 );
                 eprintln!();
                 eprintln!("To install via script (recommended):");
-                eprintln!(
-                    "  {} curl -fsSL {} | bash",
-                    "→".dimmed(),
-                    INSTALL_SCRIPT_URL
-                );
+                ui::detail(&format!("curl -fsSL {} | bash", INSTALL_SCRIPT_URL));
                 eprintln!();
                 eprintln!("Or rebuild from source:");
-                eprintln!(
-                    "  {} cargo install --git https://github.com/{}",
-                    "→".dimmed(),
+                ui::detail(&format!(
+                    "cargo install --git https://github.com/{}",
                     GITHUB_REPO
-                );
+                ));
                 return Ok(NoOutput);
             }
         }
 
         eprintln!();
-        eprintln!("{} Updated successfully!", "✓".green());
+        ui::success("Updated successfully!");
 
         Ok(NoOutput)
     }
@@ -234,7 +227,7 @@ fn prompt_confirm(message: &str, default_yes: bool) -> Result<bool, UpdateError>
 /// Run the install script
 fn run_install_script() -> Result<(), UpdateError> {
     eprintln!();
-    eprintln!("{} Installing via install script...", "→".cyan());
+    ui::progress("Installing via install script...");
     eprintln!();
 
     let status = Command::new("bash")
@@ -260,12 +253,12 @@ fn check_and_remove_old_cargo_bin() -> Result<(), UpdateError> {
         eprintln!();
         eprintln!(
             "Found old build at {}",
-            cargo_bin.display().to_string().dimmed()
+            ui::dim(&cargo_bin.display().to_string())
         );
 
         if prompt_confirm("Remove it?", true)? {
             std::fs::remove_file(&cargo_bin)?;
-            eprintln!("{} Removed {}", "✓".green(), cargo_bin.display());
+            ui::success(&format!("Removed {}", cargo_bin.display()));
         }
     }
 
