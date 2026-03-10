@@ -4,7 +4,7 @@ use clap::Args;
 
 use jig_core::spawn;
 
-use crate::op::{NoOutput, Op, RepoCtx};
+use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 
 /// Attach to tmux session
 #[derive(Args, Debug, Clone)]
@@ -26,6 +26,22 @@ impl Op for Attach {
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
         spawn::attach(repo, self.name.as_deref())?;
+        Ok(NoOutput)
+    }
+
+    /// Attach to a worktree by name across all known repos.
+    ///
+    /// If multiple repos contain a worktree with the same name,
+    /// `GlobalCtx::repo_for_worktree` returns the first match
+    /// (in repo discovery order). This is consistent with other
+    /// global commands like `remove` and `open`.
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        let name = self
+            .name
+            .as_deref()
+            .ok_or_else(|| AttachError::Core(jig_core::Error::NameRequired))?;
+        let repo = ctx.repo_for_worktree(name)?;
+        spawn::attach(repo, Some(name))?;
         Ok(NoOutput)
     }
 }
