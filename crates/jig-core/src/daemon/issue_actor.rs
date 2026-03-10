@@ -103,7 +103,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             if repo_spawned >= budget {
                 break;
             }
-            let worker_name = derive_worker_name(&issue.id);
+            let worker_name = derive_worker_name(&issue.id, issue.branch_name.as_deref());
             // Skip if a worker already exists for this issue
             if req
                 .existing_workers
@@ -119,6 +119,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
                 issue_body: issue.body,
                 worker_name,
                 provider_kind,
+                branch_name: issue.branch_name,
             });
             repo_spawned += 1;
         }
@@ -127,11 +128,58 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
     all_spawnable
 }
 
-/// Derive a worker name from an issue ID.
-/// Preserves category prefixes: "features/global-attach" → "features/global-attach".
-/// Linear IDs pass through: "ENG-123" → "eng-123".
-fn derive_worker_name(issue_id: &str) -> String {
-    issue_id.to_lowercase()
+/// Derive a worker name from an issue ID and optional branch name.
+///
+/// When a branch name is available (e.g. Linear's `branchName` field like
+/// `feature/aut-4969-spawn-agent-thread-is-broken`), it is used as-is since
+/// it is already a valid git branch name.
+///
+/// For file-based issues (no branch name), the ID is lowercased and used
+/// directly — it already contains a descriptive slug.
+fn derive_worker_name(issue_id: &str, branch_name: Option<&str>) -> String {
+    match branch_name {
+        Some(name) if !name.is_empty() => sanitize_worker_name(name),
+        _ => issue_id.to_lowercase(),
+    }
+}
+
+/// Sanitize a branch name for use as a git worktree/branch name.
+///
+/// Applies git ref naming rules: no leading dots, no `.lock` suffix,
+/// no `..`, no ASCII control chars, no `\`, no spaces.
+fn sanitize_worker_name(name: &str) -> String {
+    let mut result: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_control() || c == '\\' || c == ' ' || c == '~' || c == '^' || c == ':' {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+
+    // Collapse consecutive dots (no "..")
+    while result.contains("..") {
+        result = result.replace("..", ".");
+    }
+
+    // Strip leading dots
+    result = result.trim_start_matches('.').to_string();
+
+    // Strip trailing ".lock"
+    if result.ends_with(".lock") {
+        result.truncate(result.len() - 5);
+    }
+
+    // Strip trailing dots and slashes
+    result = result.trim_end_matches(&['.', '/'][..]).to_string();
+
+    if result.is_empty() {
+        "worker".to_string()
+    } else {
+        result
+    }
 }
 
 #[cfg(test)]
@@ -139,14 +187,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn derive_worker_name_linear() {
-        assert_eq!(derive_worker_name("ENG-123"), "eng-123");
+    fn derive_worker_name_linear_no_branch() {
+        assert_eq!(derive_worker_name("ENG-123", None), "eng-123");
+    }
+
+    #[test]
+    fn derive_worker_name_linear_with_branch() {
+        assert_eq!(
+            derive_worker_name(
+                "AUT-4969",
+                Some("feature/aut-4969-spawn-agent-thread-is-broken")
+            ),
+            "feature/aut-4969-spawn-agent-thread-is-broken"
+        );
+    }
+
+    #[test]
+    fn derive_worker_name_linear_empty_branch() {
+        assert_eq!(derive_worker_name("ENG-123", Some("")), "eng-123");
     }
 
     #[test]
     fn derive_worker_name_preserves_category_prefix() {
         assert_eq!(
-            derive_worker_name("features/my-feature"),
+            derive_worker_name("features/my-feature", None),
             "features/my-feature"
         );
     }
@@ -154,18 +218,48 @@ mod tests {
     #[test]
     fn derive_worker_name_preserves_nested_prefix() {
         assert_eq!(
-            derive_worker_name("features/global-attach"),
+            derive_worker_name("features/global-attach", None),
             "features/global-attach"
         );
     }
 
     #[test]
     fn derive_worker_name_preserves_bugs_prefix() {
-        assert_eq!(derive_worker_name("bugs/fix-foo"), "bugs/fix-foo");
+        assert_eq!(derive_worker_name("bugs/fix-foo", None), "bugs/fix-foo");
     }
 
     #[test]
     fn derive_worker_name_simple() {
-        assert_eq!(derive_worker_name("fix-bug"), "fix-bug");
+        assert_eq!(derive_worker_name("fix-bug", None), "fix-bug");
+    }
+
+    #[test]
+    fn sanitize_worker_name_strips_leading_dot() {
+        assert_eq!(sanitize_worker_name(".hidden"), "hidden");
+    }
+
+    #[test]
+    fn sanitize_worker_name_strips_dot_lock() {
+        assert_eq!(sanitize_worker_name("branch.lock"), "branch");
+    }
+
+    #[test]
+    fn sanitize_worker_name_collapses_double_dots() {
+        assert_eq!(sanitize_worker_name("a..b"), "a.b");
+    }
+
+    #[test]
+    fn sanitize_worker_name_replaces_control_chars() {
+        assert_eq!(sanitize_worker_name("a\tb"), "a-b");
+    }
+
+    #[test]
+    fn sanitize_worker_name_replaces_spaces() {
+        assert_eq!(sanitize_worker_name("a b"), "a-b");
+    }
+
+    #[test]
+    fn sanitize_worker_name_empty_fallback() {
+        assert_eq!(sanitize_worker_name("..."), "worker");
     }
 }

@@ -93,10 +93,12 @@ pub struct SpawnableIssue {
     pub issue_title: String,
     /// Issue body (markdown).
     pub issue_body: String,
-    /// Derived worker name (e.g., "eng-123").
+    /// Derived worker name (e.g., "eng-123" or "feature/eng-123-some-slug").
     pub worker_name: String,
     /// Provider kind for completion instructions.
     pub provider_kind: ProviderKind,
+    /// Suggested branch name from the issue provider (e.g., Linear's `branchName`).
+    pub branch_name: Option<String>,
 }
 
 /// Request sent to the spawn actor to create workers.

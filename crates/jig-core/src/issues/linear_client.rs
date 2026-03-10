@@ -24,6 +24,7 @@ query ListIssues($filter: IssueFilter, $first: Int) {
       description
       url
       priority
+      branchName
       state { type }
       project { name }
       team { name }
@@ -49,6 +50,7 @@ query GetIssue($identifier: String!) {
       description
       url
       priority
+      branchName
       state { type }
       project { name }
       team { name }
@@ -100,6 +102,7 @@ struct RawIssue {
     description: Option<String>,
     url: String,
     priority: u8,
+    branch_name: Option<String>,
     state: RawState,
     project: Option<RawProject>,
     team: RawTeam,
@@ -214,6 +217,7 @@ impl From<RawIssue> for Issue {
             source: raw.url,
             children,
             labels,
+            branch_name: raw.branch_name,
         }
     }
 }
