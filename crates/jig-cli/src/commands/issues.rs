@@ -199,6 +199,7 @@ fn render_table(issues: &[CoreIssue]) -> Table {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             Cell::new("STATUS").add_attribute(Attribute::Bold),
+            Cell::new("AUTO").add_attribute(Attribute::Bold),
             Cell::new("PRI").add_attribute(Attribute::Bold),
             Cell::new("CATEGORY")
                 .add_attribute(Attribute::Bold)
@@ -230,8 +231,11 @@ fn render_table(issues: &[CoreIssue]) -> Table {
             format!("{} ({} tickets)", issue.title, issue.children.len())
         };
 
+        let auto_indicator = if issue.auto { "\u{25cf}" } else { "" };
+
         table.add_row(vec![
             Cell::new(status_sym).fg(status_color),
+            Cell::new(auto_indicator).fg(Color::Green),
             Cell::new(pri_text).fg(pri_color),
             Cell::new(category),
             Cell::new(&title).fg(Color::Cyan),
