@@ -1,6 +1,6 @@
 # Fix Conventional Commit Regex Warnings
 
-**Status:** Planned
+**Status:** Done
 **Priority:** Low
 **Category:** Bugs
 **Auto:** true
@@ -9,64 +9,29 @@
 
 Fix the `grep: warning: stray \ before !` warnings that appear on every grinder run when checking conventional commits.
 
-## Background
+## Resolution
 
-The issue-grinder checks commit messages for conventional commit format using this regex:
+The external `grind.sh` script (`~/.openclaw/workspace/skills/issue-grinder/grind.sh`)
+that contained the buggy bash regex has been superseded by jig's native Rust
+implementation in `crates/jig-core/src/github/detect.rs`.
+
+The Rust regex is correct and has no warnings:
+```rust
+r"^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?!?: .+"
+```
+
+This handles all conventional commit formats including breaking changes (`!`)
+and is covered by unit tests (`conventional_commit_regex_valid`,
+`conventional_commit_regex_invalid`).
+
+## Original Problem
+
+The bash grinder used `\!` in an extended regex, which caused `grep` warnings:
 ```bash
+# Bad — \! is a stray escape in ERE
 conv_regex="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\(.+\))?\!?:"
+echo "$msg" | grep -qE "$conv_regex"
 ```
 
-The `\!` is causing warnings because `!` doesn't need escaping in basic grep (only in extended regex). This warning appears 10+ times per grinder run.
-
-## Root Cause
-
-In the script:
-```bash
-if ! echo "$commit_msg" | grep -qE "$conv_regex"; then
-```
-
-The `-E` flag enables extended regex, but `\!` should just be `!` (or `\\!` if we want to be explicit).
-
-## Fix
-
-Change the regex to:
-```bash
-conv_regex="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\(.+\))?!?:"
-```
-
-Or more explicitly:
-```bash
-conv_regex="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\(.+\))?(\\!)?:"
-```
-
-## Acceptance Criteria
-
-- [ ] Fix regex in issue-grinder script
-- [ ] Test with various commit messages:
-  - `feat: add feature` ✓
-  - `feat!: breaking change` ✓
-  - `feat(scope): add feature` ✓
-  - `feat(scope)!: breaking change` ✓
-  - `bad commit message` ✗
-- [ ] No grep warnings in output
-
-## File Location
-
-`~/.openclaw/workspace/skills/issue-grinder/grind.sh` line ~880
-
-## Testing
-
-```bash
-# Test the regex
-conv_regex="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\(.+\))?!?:"
-
-echo "feat: add feature" | grep -qE "$conv_regex" && echo "✓ Match" || echo "✗ No match"
-echo "feat!: breaking" | grep -qE "$conv_regex" && echo "✓ Match" || echo "✗ No match"
-echo "feat(scope)!: breaking" | grep -qE "$conv_regex" && echo "✓ Match" || echo "✗ No match"
-echo "bad commit" | grep -qE "$conv_regex" && echo "✗ Match" || echo "✓ No match"
-```
-
-## Related Issues
-
-- #TBD: GitHub integration (should include proper commit validation)
-- #TBD: Pre-commit hooks for commit message validation
+The fix would have been to use `!` unescaped (`!?:`), but since jig now handles
+this natively in Rust, the grind.sh script is no longer in use.
