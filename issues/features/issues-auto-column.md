@@ -1,6 +1,6 @@
 # Show auto-spawn indicator in `jig issues` table
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Urgent
 **Auto:** true
 
