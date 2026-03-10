@@ -20,6 +20,8 @@ pub(crate) struct PrLifecycleResult {
     pub checks: Vec<PrCheckOutcome>,
     /// Whether the PR was merged/closed (terminal state handled separately).
     pub terminal: bool,
+    /// Total review feedback count (inline comments + ChangesRequested reviews).
+    pub review_feedback_count: Option<u32>,
 }
 
 /// Monitors PR state and injects appropriate actions.
@@ -40,7 +42,8 @@ impl<'a> PrMonitor<'a> {
         worker_name: &str,
         branch_name: &str,
         pr_url: &str,
-        worker_state: &WorkerState,
+        worker_state: &mut WorkerState,
+        stored_review_feedback_count: Option<u32>,
         actions: &mut Vec<Action>,
     ) -> PrLifecycleResult {
         let mut result = PrLifecycleResult::default();
@@ -124,6 +127,26 @@ impl<'a> PrMonitor<'a> {
                                 details = ?check.details,
                                 "PR check result"
                             );
+                            // Extract review feedback count
+                            if check_type == "reviews" {
+                                let comments = check.review_comment_count.unwrap_or(0);
+                                let changes_req = check.changes_requested_count.unwrap_or(0);
+                                let current = comments + changes_req;
+                                result.review_feedback_count = Some(current);
+
+                                // Reset review nudge count if new feedback arrived
+                                if pr_state_info.is_draft {
+                                    let previous = stored_review_feedback_count.unwrap_or(0);
+                                    if current > previous {
+                                        tracing::info!(
+                                            previous,
+                                            current,
+                                            "new review feedback detected, resetting review nudge count"
+                                        );
+                                        worker_state.nudge_counts.remove("review");
+                                    }
+                                }
+                            }
                             result.checks.push(PrCheckOutcome {
                                 name: check_type,
                                 has_problem,

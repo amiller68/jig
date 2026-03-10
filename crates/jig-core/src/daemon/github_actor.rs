@@ -38,6 +38,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_merged: false,
                 pr_closed: false,
                 is_draft: false,
+                review_feedback_count: None,
             };
         }
     };
@@ -71,6 +72,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
             pr_merged: false,
             pr_closed: false,
             is_draft: false,
+            review_feedback_count: None,
         };
     };
 
@@ -90,6 +92,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_merged: false,
                 pr_closed: false,
                 is_draft: false,
+                review_feedback_count: None,
             };
         }
     };
@@ -106,6 +109,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_merged: false,
                 pr_closed: false,
                 is_draft: false,
+                review_feedback_count: None,
             };
         }
     };
@@ -119,6 +123,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
             pr_merged: true,
             pr_closed: false,
             is_draft: false,
+            review_feedback_count: None,
         },
         github::PrState::Closed => GitHubResponse {
             worker_key: req.worker_key.clone(),
@@ -128,6 +133,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
             pr_merged: false,
             pr_closed: true,
             is_draft: false,
+            review_feedback_count: None,
         },
         github::PrState::Open => {
             let checks: Vec<(&str, Result<github::PrCheck, _>)> = vec![
@@ -137,16 +143,25 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 ("commits", github::check_commits(&client, pr_number)),
             ];
 
-            let pr_checks: Vec<(String, bool)> = checks
-                .into_iter()
-                .filter_map(|(name, result)| match result {
-                    Ok(check) => Some((name.to_string(), check.nudge.is_some())),
+            let mut pr_checks: Vec<(String, bool)> = Vec::new();
+            let mut review_feedback_count: Option<u32> = None;
+
+            for (name, result) in checks {
+                match result {
+                    Ok(check) => {
+                        // Extract review feedback count from the review check
+                        if name == "reviews" {
+                            let comments = check.review_comment_count.unwrap_or(0);
+                            let changes_req = check.changes_requested_count.unwrap_or(0);
+                            review_feedback_count = Some(comments + changes_req);
+                        }
+                        pr_checks.push((name.to_string(), check.nudge.is_some()));
+                    }
                     Err(e) => {
                         tracing::debug!(check = name, error = %e, "PR check failed");
-                        None
                     }
-                })
-                .collect();
+                }
+            }
 
             GitHubResponse {
                 worker_key: req.worker_key.clone(),
@@ -156,6 +171,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_merged: false,
                 pr_closed: false,
                 is_draft: pr_state_info.is_draft,
+                review_feedback_count,
             }
         }
     }

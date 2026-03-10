@@ -1,6 +1,6 @@
 # Reset review nudge count when new comments arrive
 
-**Status:** Planned
+**Status:** Done
 **Priority:** High
 **Auto:** true
 
