@@ -37,7 +37,7 @@ pub fn derive_status(events: &[Event], config: &HealthConfig) -> WorkerStatus {
         EventType::ToolUseStart | EventType::ToolUseEnd => WorkerStatus::Running,
         EventType::Commit | EventType::Push => WorkerStatus::Running,
         EventType::PrOpened => WorkerStatus::WaitingReview,
-        EventType::Spawn => WorkerStatus::Spawned,
+        EventType::Spawn | EventType::Resume => WorkerStatus::Spawned,
         EventType::Review => WorkerStatus::WaitingReview,
         EventType::CiStatus | EventType::Nudge => WorkerStatus::Running,
         EventType::Terminal => WorkerStatus::Archived,

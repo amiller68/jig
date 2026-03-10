@@ -2,10 +2,9 @@
 
 use clap::Args;
 
-use jig_core::git::Repo;
 use jig_core::global::GlobalConfig;
-use jig_core::issues;
-use jig_core::{git, spawn, terminal, Error, JigToml};
+use jig_core::worktree::Worktree;
+use jig_core::{config, issues, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -60,28 +59,34 @@ impl Op for Spawn {
 
         let worktree_path = repo.worktrees_dir.join(&self.name);
 
-        // Check if worktree already exists
-        let needs_create = !worktree_path.exists();
-
-        if needs_create {
-            git::ensure_worktrees_excluded(&repo.git_common_dir)?;
-
-            // Create parent directories for nested paths
-            if let Some(parent) = worktree_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-
-            // Create new branch from base
+        // Create worktree if needed using Worktree::create
+        let wt = if !worktree_path.exists() {
             let base = self.base.as_deref().unwrap_or(&repo.base_branch);
-            let git_repo = Repo::discover()?;
-            git_repo.create_worktree(&worktree_path, &self.name, base)?;
+            let copy_files = config::get_copy_files(&repo.repo_root)?;
+            let on_create_hook = config::get_on_create_hook(&repo.repo_root)?;
+
+            let wt = Worktree::create(
+                &repo.repo_root,
+                &repo.worktrees_dir,
+                &repo.git_common_dir,
+                &self.name,
+                None,
+                base,
+                on_create_hook.as_deref(),
+                &copy_files,
+                false,
+            )?;
 
             ui::success(&format!(
                 "Created worktree '{}' from '{}'",
                 ui::highlight(&self.name),
                 ui::highlight(base)
             ));
-        }
+
+            wt
+        } else {
+            Worktree::open(&repo.repo_root, &repo.worktrees_dir, &self.name)?
+        };
 
         // Resolve issue if provided
         let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
@@ -107,24 +112,9 @@ impl Op for Spawn {
         // Determine if auto mode should be used
         let use_auto = if self.auto { true } else { jig_toml.spawn.auto };
 
-        // Register in spawn state
-        let branch = Repo::worktree_branch(&worktree_path)?;
-        spawn::register(
-            repo,
-            &self.name,
-            &branch,
-            effective_context.as_deref(),
-            issue_ref,
-        )?;
-
-        // Launch in tmux
-        spawn::launch_tmux_window(
-            repo,
-            &self.name,
-            &worktree_path,
-            use_auto,
-            effective_context.as_deref(),
-        )?;
+        // Register and launch using Worktree methods
+        wt.register(effective_context.as_deref(), issue_ref)?;
+        wt.launch(effective_context.as_deref(), use_auto)?;
 
         ui::success(&format!(
             "Launched Claude in tmux window '{}'",

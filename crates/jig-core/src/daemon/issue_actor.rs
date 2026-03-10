@@ -125,10 +125,10 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
 }
 
 /// Derive a worker name from an issue ID.
-/// "ENG-123" → "eng-123", "features/my-feature" → "my-feature"
+/// Preserves category prefixes: "features/global-attach" → "features/global-attach".
+/// Linear IDs pass through: "ENG-123" → "eng-123".
 fn derive_worker_name(issue_id: &str) -> String {
-    let name = issue_id.rsplit('/').next().unwrap_or(issue_id);
-    name.to_lowercase()
+    issue_id.to_lowercase()
 }
 
 #[cfg(test)]
@@ -141,8 +141,24 @@ mod tests {
     }
 
     #[test]
-    fn derive_worker_name_file() {
-        assert_eq!(derive_worker_name("features/my-feature"), "my-feature");
+    fn derive_worker_name_preserves_category_prefix() {
+        assert_eq!(
+            derive_worker_name("features/my-feature"),
+            "features/my-feature"
+        );
+    }
+
+    #[test]
+    fn derive_worker_name_preserves_nested_prefix() {
+        assert_eq!(
+            derive_worker_name("features/global-attach"),
+            "features/global-attach"
+        );
+    }
+
+    #[test]
+    fn derive_worker_name_preserves_bugs_prefix() {
+        assert_eq!(derive_worker_name("bugs/fix-foo"), "bugs/fix-foo");
     }
 
     #[test]
