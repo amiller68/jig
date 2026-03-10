@@ -84,6 +84,12 @@ impl WorkerState {
         }
 
         match event.event_type {
+            EventType::Initializing => {
+                self.status = WorkerStatus::Initializing;
+                if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
+                    self.issue_ref = Some(issue.to_string());
+                }
+            }
             EventType::Spawn => {
                 self.status = WorkerStatus::Spawned;
                 if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
@@ -140,7 +146,11 @@ impl WorkerState {
             return;
         }
         // WaitingReview: worker did its job, waiting on human review — don't mark stalled
-        if matches!(self.status, WorkerStatus::WaitingReview) {
+        // Initializing: worker is running on-create hook — don't mark stalled
+        if matches!(
+            self.status,
+            WorkerStatus::WaitingReview | WorkerStatus::Initializing
+        ) {
             return;
         }
         if let Some(last_ts) = self.last_event_at {
@@ -283,5 +293,52 @@ mod tests {
         };
         let state = WorkerState::reduce(&events, &config);
         assert_eq!(state.status, WorkerStatus::Stalled);
+    }
+
+    #[test]
+    fn initializing_event_sets_status() {
+        let events =
+            vec![Event::new(EventType::Initializing).with_field("issue", "features/my-feature")];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Initializing);
+        assert_eq!(state.issue_ref.as_deref(), Some("features/my-feature"));
+    }
+
+    #[test]
+    fn initializing_transitions_to_spawned() {
+        let events = vec![
+            Event::new(EventType::Initializing).with_field("issue", "features/my-feature"),
+            Event::new(EventType::Spawn).with_field("branch", "features/my-feature"),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Spawned);
+    }
+
+    #[test]
+    fn initializing_to_failed_on_terminal() {
+        let events = vec![
+            Event::new(EventType::Initializing),
+            Event::new(EventType::Terminal)
+                .with_field("terminal", "failed")
+                .with_field("reason", "on-create hook failed"),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Failed);
+    }
+
+    #[test]
+    fn initializing_not_marked_stalled() {
+        let old_ts = chrono::Utc::now().timestamp() - 600;
+        let events = vec![Event {
+            ts: old_ts,
+            event_type: EventType::Initializing,
+            data: serde_json::Value::Object(serde_json::Map::new()),
+        }];
+        let config = HealthConfig {
+            silence_threshold_seconds: 300,
+            ..Default::default()
+        };
+        let state = WorkerState::reduce(&events, &config);
+        assert_eq!(state.status, WorkerStatus::Initializing);
     }
 }

@@ -5,7 +5,10 @@ use std::path::Path;
 use clap::Args;
 use comfy_table::{Cell, CellAlignment, Color};
 
+use jig_core::events::{EventLog, WorkerState};
 use jig_core::git::{self, Repo};
+use jig_core::global::GlobalConfig;
+use jig_core::worker::WorkerStatus;
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
@@ -61,7 +64,12 @@ impl Op for List {
             return Ok(ListOutput(out));
         }
 
-        let table = build_worktree_table(&worktrees, &repo.worktrees_dir, &repo.base_branch);
+        let table = build_worktree_table(
+            &worktrees,
+            &repo.worktrees_dir,
+            &repo.base_branch,
+            &repo.repo_root,
+        );
         eprintln!("{table}");
         Ok(ListOutput(String::new()))
     }
@@ -136,32 +144,63 @@ impl List {
             }
             first = false;
             ui::header(&repo_name);
-            let table = build_worktree_table(&worktrees, &repo.worktrees_dir, &repo.base_branch);
+            let table = build_worktree_table(
+                &worktrees,
+                &repo.worktrees_dir,
+                &repo.base_branch,
+                &repo.repo_root,
+            );
             eprintln!("{table}");
         }
         Ok(ListOutput(String::new()))
     }
 }
 
+/// Get worker status from event log for a worktree.
+fn worktree_event_status(repo_root: &Path, name: &str) -> Option<WorkerStatus> {
+    let repo_name = repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let event_log = EventLog::for_worker(&repo_name, name).ok()?;
+    let events = event_log.read_all().ok()?;
+    if events.is_empty() {
+        return None;
+    }
+    let config = GlobalConfig::load().ok()?.health;
+    Some(WorkerState::reduce(&events, &config).status)
+}
+
 fn build_worktree_table(
     names: &[String],
     worktrees_dir: &Path,
     base_branch: &str,
+    repo_root: &Path,
 ) -> comfy_table::Table {
     let mut table = ui::new_table(&["NAME", "BRANCH", "COMMITS"]);
 
     for name in names {
         let wt_path = worktrees_dir.join(name);
 
+        // Check if worker is initializing or failed
+        let worker_status = worktree_event_status(repo_root, name);
+
         let branch = Repo::worktree_branch(&wt_path).unwrap_or_else(|_| "?".to_string());
 
-        // Only show branch if it differs from worktree name
-        let (branch_display, branch_color) = if branch == *name {
-            ("-".to_string(), Color::DarkGrey)
-        } else if branch == base_branch {
-            (crate::ui::truncate(&branch, 40), Color::DarkGrey)
-        } else {
-            (crate::ui::truncate(&branch, 40), Color::Cyan)
+        // Show status hint for initializing/failed workers
+        let (branch_display, branch_color) = match worker_status {
+            Some(WorkerStatus::Initializing) => ("setting up...".to_string(), Color::Blue),
+            Some(WorkerStatus::Failed) => ("setup failed".to_string(), Color::Red),
+            _ => {
+                // Only show branch if it differs from worktree name
+                if branch == *name {
+                    ("-".to_string(), Color::DarkGrey)
+                } else if branch == base_branch {
+                    (crate::ui::truncate(&branch, 40), Color::DarkGrey)
+                } else {
+                    (crate::ui::truncate(&branch, 40), Color::Cyan)
+                }
+            }
         };
 
         let commits_ahead = Repo::commits_ahead(&wt_path, base_branch)

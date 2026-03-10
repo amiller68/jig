@@ -8,13 +8,13 @@ use crate::adapter;
 use crate::config::{JigToml, RepoConfig};
 use crate::context::RepoContext;
 use crate::error::{Error, Result};
-use crate::events::{Event, EventLog, EventType};
+use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::git::Repo;
 use crate::global::GlobalConfig;
 use crate::session;
 use crate::state::OrchestratorState;
 use crate::templates::{TemplateContext, TemplateEngine};
-use crate::worker::{TaskContext, Worker};
+use crate::worker::{TaskContext, Worker, WorkerStatus};
 
 /// Task status for ps command
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +239,25 @@ fn get_worker_status(session: &str, window: &str) -> TaskStatus {
 pub fn attach(repo: &RepoContext, name: Option<&str>) -> Result<()> {
     if let Some(window) = name {
         if !session::window_exists(&repo.session_name, window) {
+            // Check if the worker is initializing or failed
+            let worktree_path = repo.worktrees_dir.join(window);
+            if worktree_path.exists() {
+                if let Some(status) = get_worker_event_status(repo, window) {
+                    match status {
+                        WorkerStatus::Initializing => {
+                            return Err(Error::WorkerInitializing(window.to_string()));
+                        }
+                        WorkerStatus::Failed => {
+                            return Err(Error::WorkerSetupFailed(
+                                window.to_string(),
+                                get_worker_fail_reason(repo, window)
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
             return Err(Error::WorkerNotFound(window.to_string()));
         }
         // Attach directly to session:window — doesn't change other clients' active window
@@ -246,6 +265,41 @@ pub fn attach(repo: &RepoContext, name: Option<&str>) -> Result<()> {
     } else {
         session::attach(&repo.session_name)
     }
+}
+
+/// Derive worker status from event log.
+fn get_worker_event_status(repo: &RepoContext, name: &str) -> Option<WorkerStatus> {
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let event_log = EventLog::for_worker(&repo_name, name).ok()?;
+    let events = event_log.read_all().ok()?;
+    if events.is_empty() {
+        return None;
+    }
+    let config = GlobalConfig::load().ok()?.health;
+    Some(WorkerState::reduce(&events, &config).status)
+}
+
+/// Get the failure reason from a worker's event log.
+fn get_worker_fail_reason(repo: &RepoContext, name: &str) -> Option<String> {
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let event_log = EventLog::for_worker(&repo_name, name).ok()?;
+    let events = event_log.read_all().ok()?;
+    events.iter().rev().find_map(|e| {
+        e.data
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    })
 }
 
 /// Kill a worker's tmux window (without updating state)
@@ -279,6 +333,7 @@ pub fn unregister(repo: &RepoContext, name: &str) -> Result<()> {
 }
 
 /// Remove stale workers (whose tmux windows no longer exist) from state.
+/// Preserves workers that are Initializing or Failed (they have no tmux window by design).
 /// Returns the cleaned state if one existed.
 fn cleanup_stale_workers(
     repo_root: &std::path::Path,
@@ -289,12 +344,34 @@ fn cleanup_stale_workers(
         None => return Ok(None),
     };
 
+    let repo_name = repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let health_config = GlobalConfig::load().map(|g| g.health).unwrap_or_default();
+
     let stale_ids: Vec<_> = state
         .workers
         .values()
         .filter(|w| {
-            let status = get_worker_status(session_name, &w.name);
-            matches!(status, TaskStatus::NoWindow | TaskStatus::NoSession)
+            let tmux_status = get_worker_status(session_name, &w.name);
+            if !matches!(tmux_status, TaskStatus::NoWindow | TaskStatus::NoSession) {
+                return false;
+            }
+            // Don't clean up workers that are initializing or failed —
+            // they intentionally have no tmux window
+            if let Ok(event_log) = EventLog::for_worker(&repo_name, &w.name) {
+                if let Ok(events) = event_log.read_all() {
+                    if !events.is_empty() {
+                        let ws = WorkerState::reduce(&events, &health_config);
+                        if matches!(ws.status, WorkerStatus::Initializing | WorkerStatus::Failed) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
         })
         .map(|w| w.id)
         .collect();
