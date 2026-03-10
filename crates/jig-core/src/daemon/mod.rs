@@ -1154,54 +1154,44 @@ mod tests {
         assert_eq!(config.sync_interval, 60);
     }
 
+    /// Helper: mirrors the review nudge reset logic from process_worker.
+    fn maybe_reset_review_nudges(
+        nudge_counts: &mut HashMap<String, u32>,
+        stored: Option<u32>,
+        current: u32,
+    ) {
+        let previous = stored.unwrap_or(0);
+        if current > previous {
+            nudge_counts.remove("review");
+        }
+    }
+
     #[test]
     fn review_nudge_count_resets_on_new_feedback() {
-        // Simulate: stored feedback count is 2, current is 5 (new feedback arrived)
         let mut nudge_counts: HashMap<String, u32> = HashMap::new();
         nudge_counts.insert("review".to_string(), 3); // exhausted
 
-        let stored_review_feedback_count: Option<u32> = Some(2);
-        let current_review_feedback_count: u32 = 5;
-
-        // This mirrors the reset logic in process_worker
-        let previous = stored_review_feedback_count.unwrap_or(0);
-        if current_review_feedback_count > previous {
-            nudge_counts.remove("review");
-        }
+        maybe_reset_review_nudges(&mut nudge_counts, Some(2), 5);
 
         assert_eq!(nudge_counts.get("review"), None);
     }
 
     #[test]
     fn review_nudge_count_unchanged_when_no_new_feedback() {
-        // Simulate: stored feedback count equals current (no new feedback)
         let mut nudge_counts: HashMap<String, u32> = HashMap::new();
         nudge_counts.insert("review".to_string(), 2);
 
-        let stored_review_feedback_count: Option<u32> = Some(3);
-        let current_review_feedback_count: u32 = 3;
-
-        let previous = stored_review_feedback_count.unwrap_or(0);
-        if current_review_feedback_count > previous {
-            nudge_counts.remove("review");
-        }
+        maybe_reset_review_nudges(&mut nudge_counts, Some(3), 3);
 
         assert_eq!(nudge_counts.get("review"), Some(&2));
     }
 
     #[test]
     fn review_nudge_count_resets_from_none_stored() {
-        // Simulate: no stored count (first check), current has feedback
         let mut nudge_counts: HashMap<String, u32> = HashMap::new();
         nudge_counts.insert("review".to_string(), 1);
 
-        let stored_review_feedback_count: Option<u32> = None;
-        let current_review_feedback_count: u32 = 2;
-
-        let previous = stored_review_feedback_count.unwrap_or(0);
-        if current_review_feedback_count > previous {
-            nudge_counts.remove("review");
-        }
+        maybe_reset_review_nudges(&mut nudge_counts, None, 2);
 
         assert_eq!(nudge_counts.get("review"), None);
     }
