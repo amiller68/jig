@@ -230,7 +230,7 @@ fn render_table(issues: &[CoreIssue], spawn_labels: &[String]) -> comfy_table::T
             None => ("-", Color::DarkGrey),
         };
 
-        let auto_indicator = if issue.auto(spawn_labels) { "*" } else { "" };
+        let auto_indicator = if issue.auto(spawn_labels) { "✓" } else { "" };
 
         let category = issue.category.as_deref().unwrap_or("-");
 
