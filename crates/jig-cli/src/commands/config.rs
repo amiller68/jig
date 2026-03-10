@@ -123,6 +123,46 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
         }
     }
 
+    eprintln!();
+    ui::header("Auto-spawn");
+    eprintln!();
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Enabled:"),
+        ui::highlight(&display.auto_spawn.to_string()),
+        ui::dim(&format!("({})", display.auto_spawn_source))
+    );
+    eprintln!(
+        "  {} {}",
+        ui::dim("Auto-start Claude:"),
+        ui::highlight(&display.auto_start.to_string())
+    );
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Max workers:"),
+        ui::highlight(&display.max_concurrent_workers.to_string()),
+        ui::dim(&format!("({})", display.max_concurrent_workers_source))
+    );
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Poll interval:"),
+        ui::highlight(&format!("{}s", display.auto_spawn_interval)),
+        ui::dim(&format!("({})", display.auto_spawn_interval_source))
+    );
+    if display.spawn_labels.is_empty() {
+        eprintln!(
+            "  {} {}",
+            ui::dim("Spawn labels:"),
+            ui::warn_text("(none — no issues will be eligible)")
+        );
+    } else {
+        eprintln!(
+            "  {} {}",
+            ui::dim("Spawn labels:"),
+            ui::highlight(&display.spawn_labels.join(", "))
+        );
+    }
+
     Ok(ConfigOutput(None))
 }
 
