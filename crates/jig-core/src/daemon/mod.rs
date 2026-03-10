@@ -844,10 +844,9 @@ impl<'a> Daemon<'a> {
     /// Auto-spawn a worker for an issue.
     fn auto_spawn_worker(&self, issue: &SpawnableIssue) -> Result<()> {
         use crate::config::JIG_DIR;
+        use crate::worktree::Worktree;
 
         let repo_root = &issue.repo_root;
-        let repo = crate::git::Repo::open(repo_root)?;
-        let git_common_dir = repo.common_dir();
         let worktrees_dir = repo_root.join(JIG_DIR);
         let worktree_path = crate::config::worktree_path(repo_root, &issue.worker_name);
 
@@ -856,64 +855,34 @@ impl<'a> Daemon<'a> {
             return Ok(());
         }
 
-        // Ensure .jig is gitignored
-        crate::git::ensure_worktrees_excluded(&git_common_dir)?;
-
-        // Create parent directories
-        if let Some(parent) = worktree_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
         // Resolve base branch
         let base_branch = RepoContext::resolve_base_branch_for(repo_root)
             .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
 
-        // Create the worktree
-        let branch = &issue.worker_name;
-        repo.create_worktree(&worktree_path, branch, &base_branch)?;
-
-        // Copy configured files
+        // Get copy files and on-create hook
         let copy_files = crate::config::get_copy_files(repo_root)?;
-        if !copy_files.is_empty() {
-            crate::config::copy_worktree_files(repo_root, &worktree_path, &copy_files)?;
-        }
+        let on_create_hook = crate::config::get_on_create_hook(repo_root)?;
+        let git_common_dir = crate::git::Repo::open(repo_root)?.common_dir();
 
-        // Run on-create hook
-        crate::config::run_on_create_hook_for_repo(repo_root, &worktree_path)?;
-
-        // Build repo context for registration
-        let repo_name = repo_root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let session_name = format!("jig-{}", repo_name);
-        let repo_ctx = RepoContext {
-            repo_root: repo_root.clone(),
-            worktrees_dir,
-            git_common_dir,
-            base_branch: base_branch.clone(),
-            session_name,
-        };
+        // Create worktree using Worktree::create
+        let wt = Worktree::create(
+            repo_root,
+            &worktrees_dir,
+            &git_common_dir,
+            &issue.worker_name,
+            None,
+            &base_branch,
+            on_create_hook.as_deref(),
+            &copy_files,
+            true, // auto_spawned
+        )?;
 
         // Register worker with issue context
         let context = format!("{}\n\n{}", issue.issue_title, issue.issue_body);
-        crate::spawn::register(
-            &repo_ctx,
-            &issue.worker_name,
-            branch,
-            Some(&context),
-            Some(&issue.issue_id),
-        )?;
+        wt.register(Some(&context), Some(&issue.issue_id))?;
 
-        // Launch tmux window — always auto-start for daemon-spawned workers,
-        // since the whole point of auto-spawn is autonomous execution.
-        crate::spawn::launch_tmux_window(
-            &repo_ctx,
-            &issue.worker_name,
-            &worktree_path,
-            true,
-            Some(&context),
-        )?;
+        // Launch tmux window — always auto-start for daemon-spawned workers
+        wt.launch(Some(&context), true)?;
 
         Ok(())
     }

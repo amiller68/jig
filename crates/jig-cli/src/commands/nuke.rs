@@ -87,7 +87,7 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
     let worktree_names = git::list_worktree_names(&repo.worktrees_dir).unwrap_or_default();
     for name in &worktree_names {
         let path = repo.worktrees_dir.join(name);
-        if Repo::remove_worktree(&path, true).is_err() {
+        if Repo::remove_worktree(&path, true, Some(&repo.repo_root)).is_err() {
             // Stale directory — git doesn't track it anymore, just rm it
             let _ = std::fs::remove_dir_all(&path);
         }

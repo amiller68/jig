@@ -1,26 +1,41 @@
 //! Worktree operations
 //!
-//! High-level worktree management.
+//! `Worktree` is the single abstraction for a worker's physical state —
+//! its repo, branch, path, tmux session, spawn context, and lifecycle.
 
 use std::path::{Path, PathBuf};
 
-use crate::config::{self, copy_worktree_files, run_on_create_hook};
+use crate::adapter;
+use crate::config::{self, copy_worktree_files, run_on_create_hook, JigToml, RepoConfig};
+use crate::context::RepoContext;
 use crate::error::{Error, Result};
+use crate::events::{Event, EventLog, EventType};
 use crate::git::{self, Repo};
+use crate::global::GlobalConfig;
+use crate::session;
+use crate::state::OrchestratorState;
+use crate::templates::{TemplateContext, TemplateEngine};
+use crate::worker::{TaskContext, Worker};
 
-/// Represents a git worktree
+/// Represents a git worktree — the single source of truth for a worker's physical state.
 #[derive(Debug, Clone)]
 pub struct Worktree {
-    /// Name of the worktree (relative path from .jig/)
+    /// Name of the worktree (relative path from .jig/, e.g. "features/global-attach")
     pub name: String,
     /// Full path to the worktree
     pub path: PathBuf,
     /// Branch name
     pub branch: String,
+    /// Parent repo root
+    pub repo_root: PathBuf,
+    /// Tmux session name (e.g. "jig-<repo>")
+    pub session_name: String,
+    /// Whether this worktree was daemon-created vs manual
+    pub auto_spawned: bool,
 }
 
 impl Worktree {
-    /// Create a new worktree
+    /// Create a new worktree on disk, returning a populated struct.
     #[allow(clippy::too_many_arguments)]
     pub fn create(
         repo_root: &Path,
@@ -31,6 +46,7 @@ impl Worktree {
         base_branch: &str,
         on_create_hook: Option<&str>,
         copy_files: &[String],
+        auto: bool,
     ) -> Result<Self> {
         let worktree_path = worktrees_dir.join(name);
 
@@ -50,8 +66,8 @@ impl Worktree {
         // Determine branch name
         let branch = branch.unwrap_or(name);
 
-        // Create the worktree
-        let repo = Repo::discover()?;
+        // Create the worktree — use Repo::open, not Repo::discover
+        let repo = Repo::open(repo_root)?;
         repo.create_worktree(&worktree_path, branch, base_branch)?;
 
         // Copy configured files (e.g., .env)
@@ -64,29 +80,42 @@ impl Worktree {
             run_on_create_hook(hook, &worktree_path)?;
         }
 
+        let session_name = Self::derive_session_name(repo_root);
+
         Ok(Self {
             name: name.to_string(),
             path: worktree_path,
             branch: branch.to_string(),
+            repo_root: repo_root.to_path_buf(),
+            session_name,
+            auto_spawned: auto,
         })
     }
 
-    /// List all worktrees in a directory
-    pub fn list(worktrees_dir: &Path) -> Result<Vec<Self>> {
+    /// List all worktrees in a directory.
+    pub fn list(repo_root: &Path, worktrees_dir: &Path) -> Result<Vec<Self>> {
         let names = git::list_worktree_names(worktrees_dir)?;
+        let session_name = Self::derive_session_name(repo_root);
 
         names
             .into_iter()
             .map(|name| {
                 let path = worktrees_dir.join(&name);
                 let branch = Repo::worktree_branch(&path).unwrap_or_else(|_| name.clone());
-                Ok(Self { name, path, branch })
+                Ok(Self {
+                    name,
+                    path,
+                    branch,
+                    repo_root: repo_root.to_path_buf(),
+                    session_name: session_name.clone(),
+                    auto_spawned: false,
+                })
             })
             .collect()
     }
 
-    /// Open/get an existing worktree by name
-    pub fn open(worktrees_dir: &Path, name: &str) -> Result<Self> {
+    /// Open/get an existing worktree by name.
+    pub fn open(repo_root: &Path, worktrees_dir: &Path, name: &str) -> Result<Self> {
         let path = worktrees_dir.join(name);
 
         if !path.exists() {
@@ -94,22 +123,26 @@ impl Worktree {
         }
 
         let branch = Repo::worktree_branch(&path)?;
+        let session_name = Self::derive_session_name(repo_root);
 
         Ok(Self {
             name: name.to_string(),
             path,
             branch,
+            repo_root: repo_root.to_path_buf(),
+            session_name,
+            auto_spawned: false,
         })
     }
 
-    /// Remove this worktree
+    /// Remove this worktree. Uses `Repo::open(repo_root)`, never `Repo::discover()`.
     pub fn remove(&self, force: bool) -> Result<()> {
         // Check for uncommitted changes unless force
         if !force && Repo::has_uncommitted_changes(&self.path)? {
             return Err(Error::UncommittedChanges);
         }
 
-        Repo::remove_worktree(&self.path, force)?;
+        Repo::remove_worktree(&self.path, force, Some(&self.repo_root))?;
 
         // Clean up empty parent directories (for nested paths)
         self.cleanup_empty_parents()?;
@@ -117,27 +150,158 @@ impl Worktree {
         Ok(())
     }
 
-    /// Clean up empty parent directories
-    fn cleanup_empty_parents(&self) -> Result<()> {
-        let mut parent = self.path.parent();
+    // ---------------------------------------------------------------
+    // Tmux methods
+    // ---------------------------------------------------------------
 
-        while let Some(p) = parent {
-            // Stop if we've reached the jig directory
-            if p.file_name().map(|n| n == config::JIG_DIR).unwrap_or(false) {
-                break;
+    /// Check if this worktree has a tmux window.
+    pub fn has_tmux_window(&self) -> bool {
+        session::window_exists(&self.session_name, &self.name)
+    }
+
+    /// Check if the agent is running in the tmux pane.
+    pub fn is_agent_running(&self) -> bool {
+        session::pane_is_running(&self.session_name, &self.name)
+    }
+
+    /// Launch a tmux window for this worktree.
+    pub fn launch(&self, context: Option<&str>, auto: bool) -> Result<()> {
+        // Render preamble when auto=true
+        let effective_context = if auto {
+            let engine = TemplateEngine::new().with_repo(&self.repo_root);
+            let global_config = GlobalConfig::load()?;
+            let mut tpl_ctx = TemplateContext::new();
+            tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
+            tpl_ctx.set(
+                "task_context",
+                context.unwrap_or(
+                    "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+                ),
+            );
+            Some(engine.render("spawn-preamble", &tpl_ctx)?)
+        } else {
+            context.map(|s| s.to_string())
+        };
+
+        // Get adapter from config
+        let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
+        let agent_adapter =
+            adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+
+        // Create window in tmux
+        session::create_window(&self.session_name, &self.name, &self.path)?;
+
+        // Build spawn command using adapter
+        let cmd = adapter::build_spawn_command(agent_adapter, effective_context.as_deref(), auto);
+
+        // Send command to window
+        session::send_keys(&self.session_name, &self.name, &cmd)?;
+
+        Ok(())
+    }
+
+    /// Resume this worktree: appends a Resume event (preserves event history) and relaunches.
+    pub fn resume(&self, context: Option<&str>) -> Result<()> {
+        let repo_name = self.repo_name();
+
+        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+            let mut event = Event::new(EventType::Resume);
+            if let Some(ctx) = context {
+                event = event.with_field("context", ctx);
             }
+            let _ = event_log.append(&event);
+        }
 
-            // Stop if directory is not empty
-            if p.read_dir()?.next().is_some() {
-                break;
+        self.launch(context, self.auto_spawned)
+    }
+
+    // ---------------------------------------------------------------
+    // Registration (absorb from spawn.rs)
+    // ---------------------------------------------------------------
+
+    /// Register this worktree as a worker in the orchestrator state.
+    pub fn register(&self, context: Option<&str>, issue_ref: Option<&str>) -> Result<()> {
+        let config = RepoConfig {
+            base_branch: self.resolve_base_branch(),
+            ..Default::default()
+        };
+
+        let mut state = OrchestratorState::load_or_create(self.repo_root.clone(), config)?;
+
+        let mut worker = Worker::new(
+            self.name.clone(),
+            self.path.clone(),
+            self.branch.clone(),
+            self.resolve_base_branch(),
+            self.session_name.clone(),
+        );
+
+        // Set task context if provided
+        if let Some(ctx) = context {
+            let mut task = TaskContext::new(ctx.to_string());
+            if let Some(issue) = issue_ref {
+                task = task.with_issue(issue.to_string());
             }
+            worker.set_task(task);
+        } else if let Some(issue) = issue_ref {
+            worker.set_task(TaskContext::new(String::new()).with_issue(issue.to_string()));
+        }
 
-            std::fs::remove_dir(p)?;
-            parent = p.parent();
+        worker.tmux_window = Some(self.name.clone());
+        state.add_worker(worker);
+        state.save()?;
+
+        // Emit Spawn event
+        let repo_name = self.repo_name();
+
+        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+            let _ = event_log.reset();
+            let mut event = Event::new(EventType::Spawn)
+                .with_field("branch", self.branch.as_str())
+                .with_field("repo", repo_name.as_str());
+            if self.auto_spawned {
+                event = event.with_field("auto", true);
+            }
+            if let Some(issue) = issue_ref {
+                event = event.with_field("issue", issue);
+            }
+            let _ = event_log.append(&event);
         }
 
         Ok(())
     }
+
+    /// Unregister this worktree from state and clean up event log.
+    pub fn unregister(&self) -> Result<()> {
+        if let Some(mut state) = OrchestratorState::load(&self.repo_root)? {
+            let id = state.get_worker_by_name(&self.name).map(|w| w.id);
+            if let Some(id) = id {
+                state.remove_worker(&id);
+                state.save()?;
+            }
+        }
+
+        // Clean up event log
+        let repo_name = self.repo_name();
+        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+            let _ = event_log.remove();
+        }
+
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------
+    // Orphan detection
+    // ---------------------------------------------------------------
+
+    /// An orphaned worktree is auto-spawned, has no tmux window, but still exists on disk.
+    pub fn is_orphaned(&self) -> bool {
+        self.auto_spawned && !self.has_tmux_window() && self.path.exists()
+    }
+
+    // ---------------------------------------------------------------
+    // Diff/status helpers (kept for compatibility)
+    // ---------------------------------------------------------------
 
     /// Check if this worktree has uncommitted changes
     pub fn has_uncommitted_changes(&self) -> Result<bool> {
@@ -162,5 +326,51 @@ impl Worktree {
     /// Get diff stat (summary)
     pub fn get_diff_stat(&self, base_branch: &str) -> Result<String> {
         Repo::diff_stat(&self.path, base_branch)
+    }
+
+    // ---------------------------------------------------------------
+    // Private helpers
+    // ---------------------------------------------------------------
+
+    /// Clean up empty parent directories.
+    fn cleanup_empty_parents(&self) -> Result<()> {
+        let mut parent = self.path.parent();
+
+        while let Some(p) = parent {
+            // Stop if we've reached the jig directory
+            if p.file_name().map(|n| n == config::JIG_DIR).unwrap_or(false) {
+                break;
+            }
+
+            // Stop if directory is not empty
+            if p.read_dir()?.next().is_some() {
+                break;
+            }
+
+            std::fs::remove_dir(p)?;
+            parent = p.parent();
+        }
+
+        Ok(())
+    }
+
+    fn repo_name(&self) -> String {
+        self.repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn derive_session_name(repo_root: &Path) -> String {
+        let repo_name = repo_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        format!("jig-{}", repo_name)
+    }
+
+    fn resolve_base_branch(&self) -> String {
+        RepoContext::resolve_base_branch_for(&self.repo_root)
+            .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string())
     }
 }

@@ -90,6 +90,13 @@ impl WorkerState {
                     self.issue_ref = Some(issue.to_string());
                 }
             }
+            EventType::Resume => {
+                self.status = WorkerStatus::Spawned;
+                // Preserve existing issue_ref; override only if provided
+                if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
+                    self.issue_ref = Some(issue.to_string());
+                }
+            }
             EventType::ToolUseStart | EventType::ToolUseEnd => {
                 self.status = WorkerStatus::Running;
             }
@@ -234,6 +241,32 @@ mod tests {
         let state = WorkerState::reduce(&events, &default_config());
         assert!(state.started_at.is_some());
         assert!(state.last_event_at.is_some());
+    }
+
+    #[test]
+    fn resume_preserves_commit_count_and_issue_ref() {
+        let events = vec![
+            Event::new(EventType::Spawn).with_field("issue", "features/smart-context"),
+            Event::new(EventType::Commit).with_field("sha", "abc"),
+            Event::new(EventType::Commit).with_field("sha", "def"),
+            Event::new(EventType::Resume),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Spawned);
+        assert_eq!(state.commit_count, 2);
+        assert_eq!(state.issue_ref.as_deref(), Some("features/smart-context"));
+    }
+
+    #[test]
+    fn resume_transitions_to_spawned() {
+        let events = vec![
+            Event::new(EventType::Spawn),
+            Event::new(EventType::ToolUseStart),
+            Event::new(EventType::Stop),
+            Event::new(EventType::Resume),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Spawned);
     }
 
     #[test]

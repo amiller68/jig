@@ -54,7 +54,7 @@ impl Op for Exit {
         }
 
         // Remove the worktree
-        Repo::remove_worktree(&worktree_path, self.force)?;
+        Repo::remove_worktree(&worktree_path, self.force, Some(&repo.repo_root))?;
 
         // Clean up empty parent directories (for nested paths)
         let mut parent = worktree_path.parent();

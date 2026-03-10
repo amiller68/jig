@@ -176,7 +176,10 @@ impl Repo {
     }
 
     /// Remove a git worktree.
-    pub fn remove_worktree(path: &Path, force: bool) -> Result<()> {
+    ///
+    /// If `repo_root` is provided, uses `Repo::open(repo_root)` instead of
+    /// falling back to `Repo::discover()` when the worktree path doesn't exist.
+    pub fn remove_worktree(path: &Path, force: bool, repo_root: Option<&Path>) -> Result<()> {
         if !force && path.exists() && Self::has_uncommitted_changes(path)? {
             return Err(Error::UncommittedChanges);
         }
@@ -186,6 +189,8 @@ impl Repo {
             let wt_repo = Self::open(path)?;
             let main_workdir = wt_repo.base_repo_dir();
             Self::open(&main_workdir)?
+        } else if let Some(root) = repo_root {
+            Self::open(root)?
         } else {
             Self::discover()?
         };

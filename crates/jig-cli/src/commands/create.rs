@@ -3,8 +3,8 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use jig_core::git::Repo;
-use jig_core::{config, git, Error};
+use jig_core::worktree::Worktree;
+use jig_core::{config, Error};
 
 use crate::op::{Op, RepoCtx};
 use crate::ui;
@@ -63,55 +63,44 @@ impl Op for Create {
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
-        let worktree_path = repo.worktrees_dir.join(&self.name);
 
-        // Check if already exists
-        if worktree_path.exists() {
-            return Err(Error::WorktreeExists(self.name.clone()).into());
-        }
-
-        // Determine branch name
-        let branch = self.branch.as_deref().unwrap_or(&self.name);
-
-        // Ensure .jig is gitignored
-        git::ensure_worktrees_excluded(&repo.git_common_dir)?;
-
-        // Create parent directories if needed (for nested paths like feature/auth/login)
-        if let Some(parent) = worktree_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        // Create the worktree
         let base = self.base.as_deref().unwrap_or(&repo.base_branch);
-        let git_repo = Repo::discover()?;
-        git_repo.create_worktree(&worktree_path, branch, base)?;
+        let copy_files = config::get_copy_files(&repo.repo_root)?;
+        let on_create_hook = if self.no_hooks {
+            None
+        } else {
+            config::get_on_create_hook(&repo.repo_root)?
+        };
 
+        let wt = Worktree::create(
+            &repo.repo_root,
+            &repo.worktrees_dir,
+            &repo.git_common_dir,
+            &self.name,
+            self.branch.as_deref(),
+            base,
+            on_create_hook.as_deref(),
+            &copy_files,
+            false,
+        )?;
+
+        let branch = self.branch.as_deref().unwrap_or(&self.name);
         ui::success(&format!(
             "Created worktree '{}' on branch '{}'",
             ui::highlight(&self.name),
             ui::highlight(branch)
         ));
 
-        // Copy configured files (e.g., .env)
-        let copy_files = config::get_copy_files(&repo.repo_root)?;
-        if !copy_files.is_empty() {
-            config::copy_worktree_files(&repo.repo_root, &worktree_path, &copy_files)?;
-            for file in &copy_files {
-                if repo.repo_root.join(file).exists() {
-                    ui::detail(&format!("Copied {}", file));
-                }
+        // Log copied files
+        for file in &copy_files {
+            if repo.repo_root.join(file).exists() {
+                ui::detail(&format!("Copied {}", file));
             }
-        }
-
-        // Run on-create hook unless --no-hooks
-        if !self.no_hooks {
-            config::run_on_create_hook_for_repo(&repo.repo_root, &worktree_path)?;
         }
 
         // Output cd command if -o flag
         if self.open {
-            // Canonicalize path for cd command
-            let canonical = worktree_path.canonicalize()?;
+            let canonical = wt.path.canonicalize()?;
             Ok(CreateOutput::Cd(canonical))
         } else {
             Ok(CreateOutput::None)
