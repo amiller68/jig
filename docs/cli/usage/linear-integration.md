@@ -71,6 +71,10 @@ jig issues --priority high
 # Filter by project (category)
 jig issues --category Backend
 
+# Filter by label (all must match)
+jig issues --label backend
+jig issues --label backend --label sprint-1
+
 # View a single issue
 jig issues ENG-123
 
@@ -113,6 +117,7 @@ Linear states map to jig statuses:
 | `body` | `# Title` heading + description markdown |
 | `source` | Linear issue URL |
 | `children` | Sub-issue identifiers |
+| `labels` | Linear label names |
 
 ## Switching back to file-based issues
 

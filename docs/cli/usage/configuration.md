@@ -20,6 +20,7 @@ type = "claude"                # Agent framework (claude, cursor)
 
 [issues]
 provider = "linear"            # Issue provider ("file" or "linear")
+spawn_labels = ["jig-auto"]    # Only auto-spawn issues with all these labels
 
 [issues.linear]
 profile = "work"               # References ~/.config/jig/config.toml profile

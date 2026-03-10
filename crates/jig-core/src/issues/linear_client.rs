@@ -214,6 +214,7 @@ impl From<RawIssue> for Issue {
             source: raw.url,
             children,
             labels,
+            auto: false,
         }
     }
 }

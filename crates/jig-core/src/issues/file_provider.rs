@@ -142,20 +142,6 @@ impl IssueProvider for FileProvider {
         Ok(all.into_iter().filter(|i| i.matches(filter)).collect())
     }
 
-    fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>> {
-        let all = self.scan_all()?;
-        Ok(all
-            .into_iter()
-            .filter(|i| i.status == IssueStatus::Planned)
-            .filter(|i| {
-                spawn_labels
-                    .iter()
-                    .all(|required| i.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
-            })
-            .filter(|i| self.is_spawnable_with_deps(i))
-            .collect())
-    }
-
     fn get(&self, id: &str) -> Result<Option<Issue>> {
         if let Some(ref src) = self.git_ref {
             // Try with and without .md extension
@@ -284,6 +270,7 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         source: rel_path.to_string(),
         children,
         labels,
+        auto: false,
     })
 }
 
@@ -366,6 +353,7 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         source: path.to_string_lossy().to_string(),
         children,
         labels,
+        auto: false,
     })
 }
 
@@ -766,8 +754,8 @@ mod tests {
                 body: String::new(),
                 source: String::new(),
                 children: vec![],
-
                 labels: vec![],
+                auto: false,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -779,8 +767,8 @@ mod tests {
                 body: String::new(),
                 source: String::new(),
                 children: vec![],
-
                 labels: vec![],
+                auto: false,
             },
         ];
         sort_issues(&mut issues);

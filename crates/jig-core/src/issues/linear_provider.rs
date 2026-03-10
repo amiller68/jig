@@ -9,7 +9,7 @@ use crate::global::GlobalConfig;
 
 use super::linear_client::LinearClient;
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter, IssueStatus};
+use super::types::{Issue, IssueFilter};
 
 /// Issue provider backed by the Linear API.
 pub struct LinearProvider {
@@ -85,22 +85,6 @@ impl IssueProvider for LinearProvider {
         });
 
         Ok(issues)
-    }
-
-    fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>> {
-        let all = self.list(&IssueFilter {
-            status: Some(IssueStatus::Planned),
-            ..Default::default()
-        })?;
-        Ok(all
-            .into_iter()
-            .filter(|i| {
-                spawn_labels
-                    .iter()
-                    .all(|required| i.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
-            })
-            .filter(|i| self.is_spawnable_with_deps(i))
-            .collect())
     }
 
     fn get(&self, id: &str) -> Result<Option<Issue>> {
