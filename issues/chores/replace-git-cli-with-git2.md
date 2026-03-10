@@ -1,6 +1,6 @@
 # Replace git CLI shelling with git2 library
 
-**Status:** In Review
+**Status:** Done
 **Priority:** Urgent
 **Auto:** true
 
