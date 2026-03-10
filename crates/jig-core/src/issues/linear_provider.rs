@@ -19,6 +19,9 @@ pub struct LinearProvider {
 }
 
 impl LinearProvider {
+    /// The provider kind for Linear issues.
+    pub const PROVIDER_KIND: super::provider::ProviderKind = super::provider::ProviderKind::Linear;
+
     /// Build a provider from repo and global config.
     ///
     /// Looks up the named profile in `global_config` to resolve the API key.
@@ -58,7 +61,7 @@ impl IssueProvider for LinearProvider {
     }
 
     fn kind(&self) -> super::provider::ProviderKind {
-        super::provider::ProviderKind::Linear
+        Self::PROVIDER_KIND
     }
 
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
