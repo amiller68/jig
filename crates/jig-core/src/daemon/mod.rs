@@ -226,7 +226,7 @@ impl<'a> Daemon<'a> {
 
         // 2. Trigger background sync if interval elapsed
         if !self.daemon_config.skip_sync {
-            runtime.maybe_trigger_sync(&registry);
+            runtime.maybe_trigger_sync(&registry, self.daemon_config.repo_filter.as_deref());
         }
 
         let mut worker_list = discover_workers(&registry);
@@ -316,8 +316,12 @@ impl<'a> Daemon<'a> {
             runtime.send_prune(prune_targets);
         }
 
-        // 4. Trigger issue poll if auto-spawn enabled (polls all repos)
-        runtime.maybe_trigger_issue_poll(&registry, &worker_list);
+        // 4. Trigger issue poll if auto-spawn enabled (scoped to repo_filter)
+        runtime.maybe_trigger_issue_poll(
+            &registry,
+            &worker_list,
+            self.daemon_config.repo_filter.as_deref(),
+        );
 
         // 5. Send spawnable issues to background spawn actor (non-blocking)
         if !spawnable.is_empty() {
@@ -375,12 +379,25 @@ impl<'a> Daemon<'a> {
             tracing::warn!("failed to save workers state: {}", e);
         });
 
-        // Auto-spawn: poll all repos for spawnable issues (blocking).
+        // Auto-spawn: poll repos for spawnable issues (blocking).
         // Each repo's jig.toml controls auto_spawn and max_concurrent_workers.
+        // When repo_filter is set, only poll that repo.
         {
             let repos: Vec<(std::path::PathBuf, String)> = registry
                 .repos()
                 .iter()
+                .filter(|entry| {
+                    self.daemon_config
+                        .repo_filter
+                        .as_ref()
+                        .is_none_or(|filter| {
+                            entry
+                                .path
+                                .file_name()
+                                .map(|n| n.to_string_lossy() == *filter)
+                                .unwrap_or(false)
+                        })
+                })
                 .map(|entry| {
                     let base = RepoContext::resolve_base_branch_for(&entry.path)
                         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());

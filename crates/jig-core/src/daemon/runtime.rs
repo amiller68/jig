@@ -133,7 +133,9 @@ impl DaemonRuntime {
     }
 
     /// Trigger a git sync if the interval has elapsed and no sync is pending.
-    pub fn maybe_trigger_sync(&mut self, registry: &RepoRegistry) {
+    ///
+    /// When `repo_filter` is set, only sync repos matching that name.
+    pub fn maybe_trigger_sync(&mut self, registry: &RepoRegistry, repo_filter: Option<&str>) {
         if self.sync_pending {
             return;
         }
@@ -143,6 +145,15 @@ impl DaemonRuntime {
         let repos: Vec<(String, PathBuf, String)> = registry
             .repos()
             .iter()
+            .filter(|entry| {
+                repo_filter.is_none_or(|filter| {
+                    entry
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == filter)
+                        .unwrap_or(false)
+                })
+            })
             .filter_map(|entry| {
                 let name = entry.path.file_name()?.to_string_lossy().to_string();
                 let base = RepoContext::resolve_base_branch_for(&entry.path)
@@ -204,15 +215,17 @@ impl DaemonRuntime {
         self.github_cache.get(worker_key)
     }
 
-    /// Trigger an issue poll across all repos if auto-spawn is enabled and interval elapsed.
+    /// Trigger an issue poll if auto-spawn is enabled and interval elapsed.
     ///
-    /// Each repo's own `jig.toml` controls whether auto-spawn is enabled and the
-    /// worker budget — this method just gates on the global interval and sends the
-    /// request to the issue actor.
+    /// When `repo_filter` is set, only poll repos matching that name. Each repo's
+    /// own `jig.toml` controls whether auto-spawn is enabled and the worker budget —
+    /// this method just gates on the global interval and sends the request to the
+    /// issue actor.
     pub fn maybe_trigger_issue_poll(
         &mut self,
         registry: &RepoRegistry,
         existing_workers: &[(String, String)],
+        repo_filter: Option<&str>,
     ) {
         if !self.config.auto_spawn {
             return;
@@ -227,6 +240,15 @@ impl DaemonRuntime {
         let repos: Vec<(std::path::PathBuf, String)> = registry
             .repos()
             .iter()
+            .filter(|entry| {
+                repo_filter.is_none_or(|filter| {
+                    entry
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == filter)
+                        .unwrap_or(false)
+                })
+            })
             .map(|entry| {
                 let base = RepoContext::resolve_base_branch_for(&entry.path)
                     .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
