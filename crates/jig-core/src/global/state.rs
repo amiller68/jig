@@ -24,6 +24,10 @@ pub struct WorkerEntry {
     pub last_event_at: i64,
     #[serde(default)]
     pub nudge_counts: HashMap<String, u32>,
+    /// Review feedback count at the start of the current nudge cycle.
+    /// When new feedback arrives (count increases), the review nudge count resets.
+    #[serde(default)]
+    pub review_feedback_count: Option<u32>,
 }
 
 /// Aggregated worker state across all repos.
@@ -113,6 +117,7 @@ mod tests {
             started_at: 1000,
             last_event_at: 2000,
             nudge_counts: HashMap::new(),
+            review_feedback_count: None,
         }
     }
 

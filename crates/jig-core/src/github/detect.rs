@@ -22,6 +22,10 @@ pub struct PrCheck {
     pub nudge: Option<NudgeType>,
     /// Human-readable details.
     pub details: Vec<String>,
+    /// Number of review comments (inline). Only set for review checks.
+    pub review_comment_count: Option<u32>,
+    /// Number of ChangesRequested reviews. Only set for review checks.
+    pub changes_requested_count: Option<u32>,
 }
 
 /// Check CI status for a branch and return a nudge if checks are failing.
@@ -32,6 +36,8 @@ pub fn check_ci(client: &GitHubClient, git_ref: &str) -> Result<PrCheck> {
         return Ok(PrCheck {
             nudge: None,
             details: vec![],
+            review_comment_count: None,
+            changes_requested_count: None,
         });
     }
 
@@ -55,6 +61,8 @@ pub fn check_ci(client: &GitHubClient, git_ref: &str) -> Result<PrCheck> {
     Ok(PrCheck {
         nudge: Some(NudgeType::Ci),
         details,
+        review_comment_count: None,
+        changes_requested_count: None,
     })
 }
 
@@ -66,12 +74,16 @@ pub fn check_conflicts(client: &GitHubClient, pr_number: u64) -> Result<PrCheck>
         return Ok(PrCheck {
             nudge: None,
             details: vec![],
+            review_comment_count: None,
+            changes_requested_count: None,
         });
     }
 
     Ok(PrCheck {
         nudge: Some(NudgeType::Conflict),
         details: vec!["PR has merge conflicts".to_string()],
+        review_comment_count: None,
+        changes_requested_count: None,
     })
 }
 
@@ -80,9 +92,13 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
     let reviews = client.get_reviews(pr_number)?;
     let inline = client.get_review_comments(pr_number)?;
 
-    let has_changes_requested = reviews
+    let changes_requested_count = reviews
         .iter()
-        .any(|r| r.state == super::types::ReviewState::ChangesRequested);
+        .filter(|r| r.state == super::types::ReviewState::ChangesRequested)
+        .count() as u32;
+
+    let has_changes_requested = changes_requested_count > 0;
+    let review_comment_count = inline.len() as u32;
 
     let unresolved_comments: Vec<String> = inline
         .iter()
@@ -100,6 +116,8 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
         return Ok(PrCheck {
             nudge: None,
             details: vec![],
+            review_comment_count: Some(review_comment_count),
+            changes_requested_count: Some(changes_requested_count),
         });
     }
 
@@ -112,6 +130,8 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
     Ok(PrCheck {
         nudge: Some(NudgeType::Review),
         details,
+        review_comment_count: Some(review_comment_count),
+        changes_requested_count: Some(changes_requested_count),
     })
 }
 
@@ -130,12 +150,16 @@ pub fn check_commits(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
         return Ok(PrCheck {
             nudge: None,
             details: vec![],
+            review_comment_count: None,
+            changes_requested_count: None,
         });
     }
 
     Ok(PrCheck {
         nudge: Some(NudgeType::BadCommits),
         details: bad,
+        review_comment_count: None,
+        changes_requested_count: None,
     })
 }
 

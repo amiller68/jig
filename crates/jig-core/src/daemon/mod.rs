@@ -468,7 +468,7 @@ impl<'a> Daemon<'a> {
 
         // Re-read state with potential PrOpened event
         let events = event_log.read_all()?;
-        let new_state = WorkerState::reduce(&events, &self.config.health);
+        let mut new_state = WorkerState::reduce(&events, &self.config.health);
 
         let old_state = workers_state
             .get_worker(key)
@@ -484,8 +484,13 @@ impl<'a> Daemon<'a> {
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
 
+        // Track review feedback count for nudge reset logic
+        let mut current_review_feedback_count: Option<u32> = None;
+
         // Handle merged/closed PR from cached data
         if let Some(cached) = runtime.get_cached_pr(key) {
+            current_review_feedback_count = cached.review_feedback_count;
+
             if cached.pr_merged && self.config.github.auto_cleanup_merged {
                 actions.push(Action::Cleanup {
                     worker_id: worker_name.to_string(),
@@ -505,6 +510,23 @@ impl<'a> Daemon<'a> {
                     });
                 }
             } else if cached.is_draft {
+                // Reset review nudge count if new feedback arrived
+                let stored_count = workers_state
+                    .get_worker(key)
+                    .and_then(|e| e.review_feedback_count);
+                if let Some(current) = cached.review_feedback_count {
+                    let previous = stored_count.unwrap_or(0);
+                    if current > previous {
+                        tracing::info!(
+                            worker = key,
+                            previous,
+                            current,
+                            "new review feedback detected, resetting review nudge count"
+                        );
+                        new_state.nudge_counts.remove("review");
+                    }
+                }
+
                 // Draft PR — dispatch nudges from cached check results
                 // Non-draft PRs are in human review, skip nudges.
                 for (check_name, has_problem) in &cached.pr_checks {
@@ -563,6 +585,7 @@ impl<'a> Daemon<'a> {
                 started_at: new_state.started_at.unwrap_or(0),
                 last_event_at: new_state.last_event_at.unwrap_or(0),
                 nudge_counts: new_state.nudge_counts.clone(),
+                review_feedback_count: current_review_feedback_count,
             },
         );
 
@@ -671,19 +694,25 @@ impl<'a> Daemon<'a> {
 
         // Check PR lifecycle
         let mut worker_tick_info = WorkerTickInfo::default();
+        let mut current_review_feedback_count: Option<u32> = None;
         if !new_state.status.is_terminal() {
-            if let Some(pr_url) = &new_state.pr_url {
+            if let Some(pr_url) = new_state.pr_url.clone() {
                 worker_tick_info.has_pr = true;
+                let stored_review_feedback_count = workers_state
+                    .get_worker(key)
+                    .and_then(|e| e.review_feedback_count);
                 match make_github_client(repo_name, registry) {
                     Some(client) => {
                         let monitor = PrMonitor::new(&client, self.config);
                         let pr_result = monitor.check_lifecycle(
                             worker_name,
                             &branch_name,
-                            pr_url,
-                            &new_state,
+                            &pr_url,
+                            &mut new_state,
+                            stored_review_feedback_count,
                             &mut actions,
                         );
+                        current_review_feedback_count = pr_result.review_feedback_count;
                         worker_tick_info.pr_checks = pr_result
                             .checks
                             .into_iter()
@@ -719,6 +748,7 @@ impl<'a> Daemon<'a> {
                 started_at: new_state.started_at.unwrap_or(0),
                 last_event_at: new_state.last_event_at.unwrap_or(0),
                 nudge_counts: new_state.nudge_counts.clone(),
+                review_feedback_count: current_review_feedback_count,
             },
         );
 
@@ -1091,6 +1121,7 @@ mod tests {
             started_at: 1000,
             last_event_at: 2000,
             nudge_counts: HashMap::new(),
+            review_feedback_count: None,
         };
         let state = entry_to_worker_state(&entry);
         assert_eq!(state.status, crate::worker::WorkerStatus::Running);

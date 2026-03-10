@@ -43,6 +43,9 @@ pub struct GitHubResponse {
     pub pr_closed: bool,
     /// Whether the PR is a draft.
     pub is_draft: bool,
+    /// Total review feedback count (inline comments + ChangesRequested reviews).
+    /// Used to detect new feedback and reset review nudge counts.
+    pub review_feedback_count: Option<u32>,
 }
 
 /// Request sent to the issue actor to poll for auto-spawnable issues.
