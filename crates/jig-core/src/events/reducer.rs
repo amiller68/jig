@@ -90,6 +90,10 @@ impl WorkerState {
                     self.issue_ref = Some(issue.to_string());
                 }
             }
+            EventType::Resume => {
+                // Like Spawn but preserves issue_ref, commit_count, and event history
+                self.status = WorkerStatus::Spawned;
+            }
             EventType::ToolUseStart | EventType::ToolUseEnd => {
                 self.status = WorkerStatus::Running;
             }
@@ -250,5 +254,33 @@ mod tests {
         };
         let state = WorkerState::reduce(&events, &config);
         assert_eq!(state.status, WorkerStatus::Stalled);
+    }
+
+    #[test]
+    fn resume_transitions_to_spawned() {
+        let events = vec![
+            Event::new(EventType::Spawn).with_field("issue", "test-issue"),
+            Event::new(EventType::ToolUseStart),
+            Event::new(EventType::Commit).with_field("sha", "abc"),
+            Event::new(EventType::Stop),
+            Event::new(EventType::Resume),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Spawned);
+        // Resume preserves commit_count and issue_ref
+        assert_eq!(state.commit_count, 1);
+        assert_eq!(state.issue_ref.as_deref(), Some("test-issue"));
+    }
+
+    #[test]
+    fn resume_preserves_pr_url() {
+        let events = vec![
+            Event::new(EventType::Spawn),
+            Event::new(EventType::PrOpened).with_field("pr_url", "https://github.com/pr/1"),
+            Event::new(EventType::Resume),
+        ];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.status, WorkerStatus::Spawned);
+        assert_eq!(state.pr_url.as_deref(), Some("https://github.com/pr/1"));
     }
 }

@@ -42,6 +42,7 @@ crate::command_enum! {
     (Config, commands::Config),
     (Repos, commands::Repos),
     (Spawn, commands::Spawn),
+    (Resume, commands::Resume),
     (Ps, commands::Ps),
     (Attach, commands::Attach),
     (Review, commands::Review),

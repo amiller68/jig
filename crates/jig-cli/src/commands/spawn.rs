@@ -116,6 +116,7 @@ impl Op for Spawn {
             &branch,
             effective_context.as_deref(),
             issue_ref,
+            use_auto,
         )?;
 
         // Launch in tmux

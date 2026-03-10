@@ -12,9 +12,11 @@
 mod discovery;
 pub mod github_actor;
 pub mod issue_actor;
+pub mod lifecycle;
 pub mod messages;
 mod pr;
 pub mod prune_actor;
+pub mod recovery;
 pub mod runtime;
 pub mod sync_actor;
 
@@ -47,7 +49,7 @@ pub use runtime::{DaemonRuntime, RuntimeConfig};
 fn extract_branch_name(events: &[Event], worker_name: &str) -> String {
     events
         .iter()
-        .find(|e| e.event_type == EventType::Spawn)
+        .find(|e| e.event_type == EventType::Spawn || e.event_type == EventType::Resume)
         .and_then(|e| e.data.get("branch").and_then(|v| v.as_str()))
         .map(|s| s.to_string())
         .unwrap_or_else(|| worker_name.to_string())
@@ -484,6 +486,29 @@ impl<'a> Daemon<'a> {
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
 
+        // Dead tmux detection: if worker is active but tmux window is dead, trigger recovery
+        let tmux_status_check = self.get_tmux_status(repo_name, worker_name);
+        if matches!(
+            new_state.status,
+            WorkerStatus::Running | WorkerStatus::Spawned | WorkerStatus::Stalled
+        ) && matches!(
+            tmux_status_check,
+            TaskStatus::NoWindow | TaskStatus::NoSession
+        ) && self.config.recovery.auto_recover
+        {
+            tracing::info!(
+                worker = key,
+                status = new_state.status.as_str(),
+                "dead tmux detected for active worker, triggering recovery"
+            );
+            // Remove any nudge actions (can't nudge a dead tmux)
+            actions.retain(|a| !matches!(a, Action::Nudge { .. }));
+            actions.push(Action::Restart {
+                worker_id: worker_name.to_string(),
+                reason: "dead tmux window detected".to_string(),
+            });
+        }
+
         // Handle merged/closed PR from cached data
         if let Some(cached) = runtime.get_cached_pr(key) {
             if cached.pr_merged && self.config.github.auto_cleanup_merged {
@@ -802,10 +827,50 @@ impl<'a> Daemon<'a> {
                 }
                 Action::Restart { worker_id, reason } => {
                     tracing::info!(
-                        "restart requested for {}: {} (not yet implemented)",
-                        worker_id,
-                        reason
+                        worker = %worker_id,
+                        reason = %reason,
+                        "restarting worker via resume"
                     );
+                    if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                        let session_prefix = &self.daemon_config.session_prefix;
+                        match recovery::build_repo_context_pub(
+                            &entry.path,
+                            repo_name,
+                            session_prefix,
+                        ) {
+                            Ok(repo_ctx) => {
+                                let context =
+                                    crate::spawn::extract_spawn_context(repo_name, worker_id);
+                                match crate::spawn::resume_worker(
+                                    &repo_ctx,
+                                    worker_id,
+                                    true,
+                                    context.as_deref(),
+                                ) {
+                                    Ok(()) => {
+                                        tracing::info!(
+                                            worker = %worker_id,
+                                            "worker restarted successfully"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            worker = %worker_id,
+                                            error = %e,
+                                            "failed to restart worker"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    worker = %worker_id,
+                                    error = %e,
+                                    "failed to build repo context for restart"
+                                );
+                            }
+                        }
+                    }
                 }
                 Action::Cleanup { worker_id } => {
                     let tmux_target = TmuxTarget::new(
@@ -903,6 +968,7 @@ impl<'a> Daemon<'a> {
             branch,
             Some(&context),
             Some(&issue.issue_id),
+            true, // daemon-spawned workers are always auto
         )?;
 
         // Launch tmux window — always auto-start for daemon-spawned workers,
@@ -982,6 +1048,32 @@ where
     let mut runtime = DaemonRuntime::new(runtime_config);
     let quit = Arc::new(AtomicBool::new(false));
 
+    // Install signal handler
+    let quit_signal = quit.clone();
+    let _ = ctrlc::set_handler(move || {
+        quit_signal.store(true, Ordering::Relaxed);
+    });
+
+    // Record daemon start
+    let _ = lifecycle::record_start();
+
+    // Check for unclean shutdown and recover orphaned workers
+    if lifecycle::was_unclean_shutdown() {
+        tracing::warn!("previous daemon run did not shut down cleanly");
+    }
+    if global_config.recovery.auto_recover {
+        let registry = RepoRegistry::load().unwrap_or_default();
+        let orphans = recovery::find_orphaned_workers(&registry, &daemon_config.session_prefix);
+        if !orphans.is_empty() {
+            tracing::info!(count = orphans.len(), "recovering orphaned workers");
+            let recovered =
+                recovery::recover_orphaned_workers(&orphans, &daemon_config.session_prefix);
+            for key in &recovered {
+                tracing::info!(worker = %key, "recovered orphaned worker");
+            }
+        }
+    }
+
     loop {
         match daemon.tick(&mut runtime, &quit) {
             Ok(tick) => {
@@ -999,19 +1091,23 @@ where
                     tracing::warn!("worker error: {}", err);
                 }
                 if quit.load(Ordering::Relaxed) {
+                    let _ = lifecycle::record_stop("signal");
                     return Ok(quit);
                 }
                 let keep_going = on_tick(&tick, &quit);
                 if daemon_config.once || !keep_going {
+                    let _ = lifecycle::record_stop("normal");
                     return Ok(quit);
                 }
             }
             Err(e) => {
                 tracing::error!("tick failed: {}", e);
                 if daemon_config.once {
+                    let _ = lifecycle::record_stop("error");
                     return Err(e);
                 }
                 if quit.load(Ordering::Relaxed) {
+                    let _ = lifecycle::record_stop("signal");
                     return Ok(quit);
                 }
                 std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
@@ -1028,7 +1124,42 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
     let notifier = make_notifier(&global_config)?;
     let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
 
+    // Install signal handler with quit flag
+    let quit = Arc::new(AtomicBool::new(false));
+    let quit_signal = quit.clone();
+    let _ = ctrlc::set_handler(move || {
+        quit_signal.store(true, Ordering::Relaxed);
+    });
+
+    // Record daemon start
+    let _ = lifecycle::record_start();
+
+    // Check for unclean shutdown and recover orphaned workers
+    if lifecycle::was_unclean_shutdown() {
+        tracing::warn!("previous daemon run did not shut down cleanly");
+        eprintln!("[recovery] previous daemon run crashed, checking for orphaned workers...");
+    }
+    if global_config.recovery.auto_recover {
+        let registry = RepoRegistry::load().unwrap_or_default();
+        let orphans = recovery::find_orphaned_workers(&registry, &daemon_config.session_prefix);
+        if !orphans.is_empty() {
+            eprintln!(
+                "[recovery] found {} orphaned worker(s), recovering...",
+                orphans.len()
+            );
+            let recovered =
+                recovery::recover_orphaned_workers(&orphans, &daemon_config.session_prefix);
+            for key in &recovered {
+                eprintln!("[recovery] recovered {}", key);
+            }
+        }
+    }
+
     loop {
+        if quit.load(Ordering::Relaxed) {
+            let _ = lifecycle::record_stop("signal");
+            return Ok(());
+        }
         match daemon.tick_once() {
             Ok(tick) => {
                 if tick.workers_checked > 0 || !tick.errors.is_empty() {
@@ -1042,6 +1173,7 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
                     );
                 }
                 if daemon_config.once {
+                    let _ = lifecycle::record_stop("normal");
                     return Ok(());
                 }
                 std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
@@ -1049,6 +1181,7 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
             Err(e) => {
                 tracing::error!("tick failed: {}", e);
                 if daemon_config.once {
+                    let _ = lifecycle::record_stop("error");
                     return Err(e);
                 }
                 std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));

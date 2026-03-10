@@ -54,6 +54,7 @@ pub fn register(
     branch: &str,
     context: Option<&str>,
     issue_ref: Option<&str>,
+    auto: bool,
 ) -> Result<()> {
     let worktree_path = repo.worktrees_dir.join(name);
 
@@ -99,14 +100,103 @@ pub fn register(
         let _ = event_log.reset();
         let mut event = Event::new(EventType::Spawn)
             .with_field("branch", branch)
-            .with_field("repo", repo_name.as_str());
+            .with_field("repo", repo_name.as_str())
+            .with_field("auto", auto);
         if let Some(issue) = issue_ref {
             event = event.with_field("issue", issue);
+        }
+        if let Some(ctx) = context {
+            event = event.with_field("context", ctx);
         }
         let _ = event_log.append(&event);
     }
 
     Ok(())
+}
+
+/// Resume an existing worker by appending a Resume event and re-launching tmux.
+///
+/// Unlike `register()`, this preserves the existing event log history.
+pub fn resume_worker(
+    repo: &RepoContext,
+    name: &str,
+    auto: bool,
+    context: Option<&str>,
+) -> Result<()> {
+    let worktree_path = repo.worktrees_dir.join(name);
+
+    if !worktree_path.exists() {
+        return Err(Error::WorktreeNotFound(name.to_string()));
+    }
+
+    // Check that tmux window does NOT already exist
+    if session::window_exists(&repo.session_name, name) {
+        return Err(Error::Custom(format!(
+            "tmux window '{}' already exists — use `jig attach {}` instead",
+            name, name
+        )));
+    }
+
+    let repo_name = repo
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Read the branch from the worktree
+    let branch =
+        crate::git::Repo::worktree_branch(&worktree_path).unwrap_or_else(|_| name.to_string());
+
+    // Append Resume event (preserving history)
+    if let Ok(event_log) = EventLog::for_worker(&repo_name, name) {
+        let mut event = Event::new(EventType::Resume)
+            .with_field("branch", branch.as_str())
+            .with_field("repo", repo_name.as_str());
+        if let Some(ctx) = context {
+            event = event.with_field("context", ctx);
+        }
+        let _ = event_log.append(&event);
+    }
+
+    // Launch in tmux
+    launch_tmux_window(repo, name, &worktree_path, auto, context)?;
+
+    Ok(())
+}
+
+/// Extract the original context from a worker's event log (from the last Spawn/Resume event).
+pub fn extract_spawn_context(repo_name: &str, worker_name: &str) -> Option<String> {
+    let event_log = EventLog::for_worker(repo_name, worker_name).ok()?;
+    let events = event_log.read_all().ok()?;
+    // Find the last Spawn or Resume event
+    events
+        .iter()
+        .rev()
+        .find(|e| e.event_type == EventType::Spawn || e.event_type == EventType::Resume)
+        .and_then(|e| e.data.get("context").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+}
+
+/// Check if the original spawn was in auto mode (from the Spawn event).
+pub fn was_auto_spawn(repo_name: &str, worker_name: &str) -> bool {
+    let event_log = match EventLog::for_worker(repo_name, worker_name) {
+        Ok(log) => log,
+        Err(_) => return false,
+    };
+    let events = match event_log.read_all() {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    // Check if the original Spawn event had auto=true, or if there was ever a Resume
+    // (daemon-initiated resumes are always auto)
+    events.iter().any(|e| e.event_type == EventType::Resume)
+        || events.iter().any(|e| {
+            e.event_type == EventType::Spawn
+                && e.data
+                    .get("auto")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+        })
 }
 
 /// Launch a tmux window for a worker

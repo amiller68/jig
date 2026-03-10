@@ -29,6 +29,11 @@ pub fn worker_events_dir(repo: &str, worker: &str) -> Result<PathBuf> {
         .join(format!("{}-{}", repo, worker)))
 }
 
+/// `~/.config/jig/state/daemon.jsonl`
+pub fn daemon_log_path() -> Result<PathBuf> {
+    Ok(global_state_dir()?.join("daemon.jsonl"))
+}
+
 /// Create all global directories (config, state, hooks, state/events).
 pub fn ensure_global_dirs() -> Result<()> {
     let dirs = [

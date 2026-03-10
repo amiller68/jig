@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum EventType {
     Spawn,
+    Resume,
     ToolUseStart,
     ToolUseEnd,
     Commit,
@@ -103,5 +104,18 @@ mod tests {
         let map = restored.data.as_object().unwrap();
         assert_eq!(map["url"], "https://github.com/pr/1");
         assert_eq!(map["draft"], true);
+    }
+
+    #[test]
+    fn resume_event_serializes() {
+        let event = Event::new(EventType::Resume)
+            .with_field("branch", "feature/foo")
+            .with_field("context", "continue working");
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["type"], "resume");
+        assert_eq!(parsed["branch"], "feature/foo");
+        assert_eq!(parsed["context"], "continue working");
     }
 }
