@@ -97,11 +97,9 @@ impl IssueProvider for LinearProvider {
             .into_iter()
             .filter(|i| i.auto)
             .filter(|i| {
-                spawn_labels.iter().all(|required| {
-                    i.labels
-                        .iter()
-                        .any(|l| l.eq_ignore_ascii_case(required))
-                })
+                spawn_labels
+                    .iter()
+                    .all(|required| i.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
             })
             .filter(|i| self.is_spawnable_with_deps(i))
             .collect())

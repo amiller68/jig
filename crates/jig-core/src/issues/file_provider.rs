@@ -148,11 +148,9 @@ impl IssueProvider for FileProvider {
             .into_iter()
             .filter(|i| i.auto && i.status == IssueStatus::Planned)
             .filter(|i| {
-                spawn_labels.iter().all(|required| {
-                    i.labels
-                        .iter()
-                        .any(|l| l.eq_ignore_ascii_case(required))
-                })
+                spawn_labels
+                    .iter()
+                    .all(|required| i.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
             })
             .filter(|i| self.is_spawnable_with_deps(i))
             .collect())
@@ -711,9 +709,7 @@ mod tests {
         assert_eq!(all.len(), 3);
 
         // Filter to backend only
-        let backend = provider
-            .list_spawnable(&["backend".to_string()])
-            .unwrap();
+        let backend = provider.list_spawnable(&["backend".to_string()]).unwrap();
         assert_eq!(backend.len(), 1);
         assert_eq!(backend[0].title, "Backend Task");
 
@@ -724,9 +720,7 @@ mod tests {
         assert_eq!(both.len(), 1);
 
         // Filter to sprint-1 → matches both labeled issues
-        let sprint = provider
-            .list_spawnable(&["sprint-1".to_string()])
-            .unwrap();
+        let sprint = provider.list_spawnable(&["sprint-1".to_string()]).unwrap();
         assert_eq!(sprint.len(), 2);
 
         // Filter to nonexistent label → empty
@@ -748,10 +742,7 @@ mod tests {
         let provider = FileProvider::new(tmp.path());
         let issues = provider.list(&IssueFilter::default()).unwrap();
         assert_eq!(issues.len(), 1);
-        assert_eq!(
-            issues[0].labels,
-            vec!["backend", "auth", "sprint-12"]
-        );
+        assert_eq!(issues[0].labels, vec!["backend", "auth", "sprint-12"]);
     }
 
     #[test]
