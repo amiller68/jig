@@ -270,7 +270,6 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         source: rel_path.to_string(),
         children,
         labels,
-        auto: false,
     })
 }
 
@@ -353,7 +352,6 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         source: path.to_string_lossy().to_string(),
         children,
         labels,
-        auto: false,
     })
 }
 
@@ -608,35 +606,36 @@ mod tests {
         let bugs = tmp.path().join("bugs");
         std::fs::create_dir_all(&bugs).unwrap();
 
-        // Issue B: no dependencies, auto, planned → spawnable
+        // Issue B: no dependencies, labeled, planned → spawnable
         std::fs::write(
             bugs.join("fix-first.md"),
-            "# Fix First\n\n**Status:** Planned\n",
+            "# Fix First\n\n**Status:** Planned\n**Labels:** auto\n",
         )
         .unwrap();
 
-        // Issue A: depends on B, auto, planned → NOT spawnable (B is Planned, not Complete)
+        // Issue A: depends on B, labeled, planned → NOT spawnable (B is Planned, not Complete)
         std::fs::write(
             bugs.join("depends-on-b.md"),
-            "# Depends On B\n\n**Status:** Planned\n**Depends-On:** bugs/fix-first\n",
+            "# Depends On B\n\n**Status:** Planned\n**Labels:** auto\n**Depends-On:** bugs/fix-first\n",
         )
         .unwrap();
 
         let provider = FileProvider::new(tmp.path());
+        let labels = vec!["auto".to_string()];
 
         // Only B should be spawnable
-        let spawnable = provider.list_spawnable(&[]).unwrap();
+        let spawnable = provider.list_spawnable(&labels).unwrap();
         assert_eq!(spawnable.len(), 1);
         assert_eq!(spawnable[0].id, "bugs/fix-first");
 
         // Mark B as Complete → A should now also be spawnable
         std::fs::write(
             bugs.join("fix-first.md"),
-            "# Fix First\n\n**Status:** Complete\n",
+            "# Fix First\n\n**Status:** Complete\n**Labels:** auto\n",
         )
         .unwrap();
 
-        let spawnable = provider.list_spawnable(&[]).unwrap();
+        let spawnable = provider.list_spawnable(&labels).unwrap();
         assert_eq!(spawnable.len(), 1);
         assert_eq!(spawnable[0].id, "bugs/depends-on-b");
     }
@@ -649,12 +648,12 @@ mod tests {
 
         std::fs::write(
             features.join("needs-ghost.md"),
-            "# Needs Ghost\n\n**Status:** Planned\n**Depends-On:** nonexistent/issue\n",
+            "# Needs Ghost\n\n**Status:** Planned\n**Labels:** auto\n**Depends-On:** nonexistent/issue\n",
         )
         .unwrap();
 
         let provider = FileProvider::new(tmp.path());
-        let spawnable = provider.list_spawnable(&[]).unwrap();
+        let spawnable = provider.list_spawnable(&["auto".to_string()]).unwrap();
         assert!(spawnable.is_empty());
     }
 
@@ -682,9 +681,9 @@ mod tests {
 
         let provider = FileProvider::new(tmp.path());
 
-        // No spawn_labels → all auto issues returned
+        // No spawn_labels → empty (auto-spawn is opt-in)
         let all = provider.list_spawnable(&[]).unwrap();
-        assert_eq!(all.len(), 3);
+        assert!(all.is_empty());
 
         // Filter to backend only
         let backend = provider.list_spawnable(&["backend".to_string()]).unwrap();
@@ -755,7 +754,6 @@ mod tests {
                 source: String::new(),
                 children: vec![],
                 labels: vec![],
-                auto: false,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -768,7 +766,6 @@ mod tests {
                 source: String::new(),
                 children: vec![],
                 labels: vec![],
-                auto: false,
             },
         ];
         sort_issues(&mut issues);

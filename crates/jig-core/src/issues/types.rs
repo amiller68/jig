@@ -106,10 +106,6 @@ pub struct Issue {
     pub children: Vec<String>,
     /// Labels/tags attached to this issue.
     pub labels: Vec<String>,
-    /// Whether this issue is eligible for auto-spawn.
-    /// Computed from `labels` vs the repo's `spawn_labels` config — not parsed.
-    #[serde(default)]
-    pub auto: bool,
 }
 
 /// Filter criteria for listing issues.
@@ -123,15 +119,19 @@ pub struct IssueFilter {
 }
 
 impl Issue {
-    /// Compute the `auto` field based on the repo's `spawn_labels` config.
+    /// Whether this issue is eligible for auto-spawn given the repo's
+    /// `spawn_labels` config.
     ///
-    /// An issue is auto-spawnable when it carries all of the configured
-    /// `spawn_labels` (case-insensitive). If `spawn_labels` is empty, all
-    /// issues are considered auto-spawnable.
-    pub fn compute_auto(&mut self, spawn_labels: &[String]) {
-        self.auto = spawn_labels
+    /// Returns `true` when `spawn_labels` is non-empty and the issue carries
+    /// all of the configured labels (case-insensitive). Returns `false` when
+    /// `spawn_labels` is empty — auto-spawn is opt-in via labels.
+    pub fn auto(&self, spawn_labels: &[String]) -> bool {
+        if spawn_labels.is_empty() {
+            return false;
+        }
+        spawn_labels
             .iter()
-            .all(|required| self.labels.iter().any(|l| l.eq_ignore_ascii_case(required)));
+            .all(|required| self.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
     }
 
     /// Whether this issue matches the given filter.
@@ -196,7 +196,6 @@ mod tests {
             source: String::new(),
             children: vec![],
             labels: vec![],
-            auto: false,
         };
 
         assert!(issue.matches(&IssueFilter::default()));
@@ -223,7 +222,6 @@ mod tests {
             source: String::new(),
             children: vec![],
             labels: vec!["backend".into(), "Auth".into()],
-            auto: false,
         };
 
         // Single label match (case-insensitive)
@@ -255,8 +253,8 @@ mod tests {
     }
 
     #[test]
-    fn compute_auto_from_spawn_labels() {
-        let mut issue = Issue {
+    fn auto_from_spawn_labels() {
+        let issue = Issue {
             id: "test".into(),
             title: "Test".into(),
             status: IssueStatus::Planned,
@@ -267,31 +265,24 @@ mod tests {
             source: String::new(),
             children: vec![],
             labels: vec!["backend".into(), "sprint-1".into()],
-            auto: false,
         };
 
-        // Empty spawn_labels → auto = true (all issues eligible)
-        issue.compute_auto(&[]);
-        assert!(issue.auto);
+        // Empty spawn_labels → auto = false (opt-in via labels)
+        assert!(!issue.auto(&[]));
 
         // Matching label → auto = true
-        issue.compute_auto(&["backend".into()]);
-        assert!(issue.auto);
+        assert!(issue.auto(&["backend".into()]));
 
         // Case-insensitive match
-        issue.compute_auto(&["Backend".into()]);
-        assert!(issue.auto);
+        assert!(issue.auto(&["Backend".into()]));
 
         // All must match
-        issue.compute_auto(&["backend".into(), "sprint-1".into()]);
-        assert!(issue.auto);
+        assert!(issue.auto(&["backend".into(), "sprint-1".into()]));
 
         // Missing label → auto = false
-        issue.compute_auto(&["frontend".into()]);
-        assert!(!issue.auto);
+        assert!(!issue.auto(&["frontend".into()]));
 
         // One present, one missing → auto = false
-        issue.compute_auto(&["backend".into(), "frontend".into()]);
-        assert!(!issue.auto);
+        assert!(!issue.auto(&["backend".into(), "frontend".into()]));
     }
 }
