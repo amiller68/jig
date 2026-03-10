@@ -886,9 +886,11 @@ impl<'a> Daemon<'a> {
                  (`issues/{}.md`) and committing the change.",
                 issue.issue_id
             ),
-            crate::issues::ProviderKind::Linear => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
+            crate::issues::ProviderKind::Linear => {
+                "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
                  Status sync is handled automatically — no manual status update is needed."
-                .to_string(),
+                    .to_string()
+            }
         };
         let context = format!(
             "{}\n\n{}{}",
