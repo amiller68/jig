@@ -1,6 +1,6 @@
 # Show auto-spawn config in `jig config` and add `jig issues --auto`
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Labels:** auto
 
