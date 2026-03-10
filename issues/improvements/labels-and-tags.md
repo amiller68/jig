@@ -1,9 +1,8 @@
 # Labels and Tags
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Category:** Improvements
-**Auto:** true
 
 ## Objective
 
@@ -92,4 +91,4 @@ Add `--label` / `-l` to issues completions in all three shells.
 - [ ] `jig issues --label backend` filters by label
 - [ ] Multiple labels: `jig issues --label backend --label auth` requires all to match
 - [ ] Shell completions updated for `--label`
-- [ ] `auto` field derivation unchanged (still uses `jig-auto` / `**Auto:**`)
+- [ ] `auto` field removed — auto-spawn eligibility determined purely by `spawn_labels` config

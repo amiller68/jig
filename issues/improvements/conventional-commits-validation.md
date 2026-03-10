@@ -3,7 +3,6 @@
 **Status:** Planned
 **Priority:** Medium
 **Category:** Improvements
-**Auto:** true
 **Depends-On:** bugs/conventional-commit-regex-warnings
 
 ## Objective

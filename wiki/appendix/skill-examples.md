@@ -34,7 +34,7 @@ For instance, if you named your Linear MCP server `my-linear`, the tools would b
 
 ````markdown
 ---
-description: Create Linear issues with the jig-auto label
+description: Create Linear issues with appropriate labels
 tools: [mcp__linear-aut__list_teams, mcp__linear-aut__list_issue_labels, mcp__linear-aut__save_issue, Bash]
 ---
 
@@ -44,13 +44,13 @@ When the user describes work to be done, create well-structured Linear issues.
 
 ## Steps
 
-1. **Discover context** — Use `mcp__linear-aut__list_teams` to find the team configured in `jig.toml`. Use `mcp__linear-aut__list_issue_labels` to find the `jig-auto` label ID for that team.
+1. **Discover context** — Use `mcp__linear-aut__list_teams` to find the team configured in `jig.toml`. Use `mcp__linear-aut__list_issue_labels` to find available labels for that team. Check `jig.toml` `[issues] spawn_labels` to see which labels are required for auto-spawn.
 
 2. **Create issues** — For each piece of work, use `mcp__linear-aut__save_issue` with:
    - `teamId`: from step 1
    - `title`: concise summary (under 80 characters)
    - `description`: markdown body following the project's issue format (see below)
-   - `labelIds`: include the `jig-auto` label
+   - `labelIds`: include the labels matching `spawn_labels` from `jig.toml`
 
 3. **Verify** — Run `jig issues` to confirm the new issues appear in the local issue list.
 
@@ -92,7 +92,7 @@ One sentence: what this accomplishes.
 return 429 with Retry-After header, and add integration tests
 ```
 
-Claude will discover your team, create the issue with the `jig-auto` label, and confirm it appears in `jig issues`.
+Claude will discover your team, create the issue with the appropriate labels, and confirm it appears in `jig issues`.
 
 {: .note }
 > **Future improvement:** This workflow will be simplified by a native `jig issues create` command that reads team, project, and label config directly from `jig.toml` — no MCP discovery step needed.

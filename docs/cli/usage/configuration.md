@@ -20,6 +20,7 @@ type = "claude"                # Agent framework (claude, cursor)
 
 [issues]
 provider = "linear"            # Issue provider ("file" or "linear")
+spawn_labels = ["jig-auto"]    # Only auto-spawn issues with all these labels
 
 [issues.linear]
 profile = "work"               # References ~/.config/jig/config.toml profile
@@ -144,3 +145,34 @@ Files are copied from the repo root to the new worktree after creation, before t
 By default, jig uses file-based issues from the `issues/` directory. You can switch to Linear by setting `provider = "linear"` in `jig.toml` and adding a Linear API key to your global config.
 
 See [Linear Integration](./linear-integration.md) for full setup instructions.
+
+### Labels
+
+Issues support labels for tagging and filtering. File-based issues use `**Labels:**` frontmatter:
+
+```markdown
+**Labels:** backend, sprint-1, auth
+```
+
+Linear issues use their native label system — labels are fetched from the GraphQL API.
+
+Filter by label with the `--label` / `-l` flag:
+
+```bash
+jig issues --label backend                    # issues with "backend" label
+jig issues --label backend --label sprint-1   # must have BOTH labels
+```
+
+Label matching is case-insensitive.
+
+### Auto-spawn with `spawn_labels`
+
+The `spawn_labels` config in `[issues]` controls which issues the daemon auto-spawns. Only issues carrying **all** of the configured labels are eligible:
+
+```toml
+[issues]
+spawn_labels = ["jig-auto"]           # only auto-spawn issues labeled "jig-auto"
+spawn_labels = ["backend", "sprint-1"] # must have BOTH labels
+```
+
+When `spawn_labels` is empty (the default), no issues are auto-spawned — auto-spawn is opt-in via labels. The AUTO column in `jig issues` shows `*` for issues matching the configured `spawn_labels`.

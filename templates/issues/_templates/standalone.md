@@ -1,6 +1,7 @@
 # [Title]
 
 **Status:** Planned
+**Labels:**
 
 ## Objective
 

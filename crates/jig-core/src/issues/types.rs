@@ -104,8 +104,8 @@ pub struct Issue {
     pub source: String,
     /// Child ticket IDs (for epic indices with a `## Tickets` table).
     pub children: Vec<String>,
-    /// Whether this issue is auto-spawnable by the daemon.
-    pub auto: bool,
+    /// Labels/tags attached to this issue.
+    pub labels: Vec<String>,
 }
 
 /// Filter criteria for listing issues.
@@ -114,9 +114,26 @@ pub struct IssueFilter {
     pub status: Option<IssueStatus>,
     pub priority: Option<IssuePriority>,
     pub category: Option<String>,
+    /// Filter by labels (all must match).
+    pub labels: Vec<String>,
 }
 
 impl Issue {
+    /// Whether this issue is eligible for auto-spawn given the repo's
+    /// `spawn_labels` config.
+    ///
+    /// Returns `true` when `spawn_labels` is non-empty and the issue carries
+    /// all of the configured labels (case-insensitive). Returns `false` when
+    /// `spawn_labels` is empty — auto-spawn is opt-in via labels.
+    pub fn auto(&self, spawn_labels: &[String]) -> bool {
+        if spawn_labels.is_empty() {
+            return false;
+        }
+        spawn_labels
+            .iter()
+            .all(|required| self.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
+    }
+
     /// Whether this issue matches the given filter.
     pub fn matches(&self, filter: &IssueFilter) -> bool {
         if let Some(ref status) = filter.status {
@@ -131,6 +148,11 @@ impl Issue {
         }
         if let Some(ref category) = filter.category {
             if self.category.as_deref() != Some(category.as_str()) {
+                return false;
+            }
+        }
+        for label in &filter.labels {
+            if !self.labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
                 return false;
             }
         }
@@ -173,7 +195,7 @@ mod tests {
             body: String::new(),
             source: String::new(),
             children: vec![],
-            auto: false,
+            labels: vec![],
         };
 
         assert!(issue.matches(&IssueFilter::default()));
@@ -185,5 +207,82 @@ mod tests {
             status: Some(IssueStatus::Blocked),
             ..Default::default()
         }));
+    }
+
+    #[test]
+    fn filter_matches_labels() {
+        let issue = Issue {
+            id: "test".into(),
+            title: "Test".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec!["backend".into(), "Auth".into()],
+        };
+
+        // Single label match (case-insensitive)
+        assert!(issue.matches(&IssueFilter {
+            labels: vec!["Backend".into()],
+            ..Default::default()
+        }));
+
+        // Multiple labels — all must match
+        assert!(issue.matches(&IssueFilter {
+            labels: vec!["backend".into(), "auth".into()],
+            ..Default::default()
+        }));
+
+        // Missing label → no match
+        assert!(!issue.matches(&IssueFilter {
+            labels: vec!["frontend".into()],
+            ..Default::default()
+        }));
+
+        // One present, one missing → no match
+        assert!(!issue.matches(&IssueFilter {
+            labels: vec!["backend".into(), "frontend".into()],
+            ..Default::default()
+        }));
+
+        // Empty filter labels → matches everything
+        assert!(issue.matches(&IssueFilter::default()));
+    }
+
+    #[test]
+    fn auto_from_spawn_labels() {
+        let issue = Issue {
+            id: "test".into(),
+            title: "Test".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec!["backend".into(), "sprint-1".into()],
+        };
+
+        // Empty spawn_labels → auto = false (opt-in via labels)
+        assert!(!issue.auto(&[]));
+
+        // Matching label → auto = true
+        assert!(issue.auto(&["backend".into()]));
+
+        // Case-insensitive match
+        assert!(issue.auto(&["Backend".into()]));
+
+        // All must match
+        assert!(issue.auto(&["backend".into(), "sprint-1".into()]));
+
+        // Missing label → auto = false
+        assert!(!issue.auto(&["frontend".into()]));
+
+        // One present, one missing → auto = false
+        assert!(!issue.auto(&["backend".into(), "frontend".into()]));
     }
 }

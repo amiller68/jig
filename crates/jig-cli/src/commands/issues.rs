@@ -34,6 +34,10 @@ pub struct Issues {
     #[arg(short, long)]
     pub category: Option<String>,
 
+    /// Filter by label (can specify multiple; all must match)
+    #[arg(short, long)]
+    pub label: Vec<String>,
+
     /// Show only issues with unresolved dependencies
     #[arg(long)]
     pub blocked: bool,
@@ -63,7 +67,7 @@ pub enum IssuesError {
 
 #[derive(Debug)]
 pub enum IssuesOutput {
-    Table(Vec<CoreIssue>),
+    Table(Vec<CoreIssue>, Vec<String>),
     Detail(CoreIssue),
     Interactive,
     Ids(Vec<String>),
@@ -78,6 +82,7 @@ impl Issues {
                 .as_deref()
                 .and_then(IssuePriority::from_str_loose),
             category: self.category.clone(),
+            labels: self.label.clone(),
         }
     }
 
@@ -101,7 +106,11 @@ impl Issues {
         }
     }
 
-    fn finish(&self, all_issues: Vec<CoreIssue>) -> Result<IssuesOutput, IssuesError> {
+    fn finish(
+        &self,
+        all_issues: Vec<CoreIssue>,
+        spawn_labels: Vec<String>,
+    ) -> Result<IssuesOutput, IssuesError> {
         if self.ids {
             let ids: Vec<String> = all_issues.into_iter().map(|i| i.id).collect();
             return Ok(IssuesOutput::Ids(ids));
@@ -112,7 +121,7 @@ impl Issues {
             return Ok(IssuesOutput::Interactive);
         }
 
-        Ok(IssuesOutput::Table(all_issues))
+        Ok(IssuesOutput::Table(all_issues, spawn_labels))
     }
 }
 
@@ -137,7 +146,7 @@ impl Op for Issues {
 
         let all_issues = provider.list(&filter)?;
         let all_issues = self.apply_dep_filter(all_issues, provider.as_ref());
-        self.finish(all_issues)
+        self.finish(all_issues, jig_toml.issues.spawn_labels.clone())
     }
 
     fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
@@ -165,14 +174,14 @@ impl Op for Issues {
             return Err(IssuesError::Usage(format!("issue not found: {}", id)));
         }
 
-        self.finish(all_issues)
+        self.finish(all_issues, Vec::new())
     }
 }
 
 impl fmt::Display for IssuesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Table(issues) => {
+            Self::Table(issues, spawn_labels) => {
                 if issues.is_empty() {
                     return write!(f, "No issues found");
                 }
@@ -185,7 +194,7 @@ impl fmt::Display for IssuesOutput {
                     }
                     return Ok(());
                 }
-                let table = render_table(issues);
+                let table = render_table(issues, spawn_labels);
                 write!(f, "{table}")
             }
             Self::Detail(issue) => {
@@ -202,7 +211,7 @@ impl fmt::Display for IssuesOutput {
     }
 }
 
-fn render_table(issues: &[CoreIssue]) -> comfy_table::Table {
+fn render_table(issues: &[CoreIssue], spawn_labels: &[String]) -> comfy_table::Table {
     let mut table = ui::new_table(&["STATUS", "AUTO", "PRI", "CATEGORY", "ISSUE"]);
 
     for issue in issues {
@@ -221,6 +230,8 @@ fn render_table(issues: &[CoreIssue]) -> comfy_table::Table {
             None => ("-", Color::DarkGrey),
         };
 
+        let auto_indicator = if issue.auto(spawn_labels) { "*" } else { "" };
+
         let category = issue.category.as_deref().unwrap_or("-");
 
         let title = if issue.children.is_empty() {
@@ -228,8 +239,6 @@ fn render_table(issues: &[CoreIssue]) -> comfy_table::Table {
         } else {
             format!("{} ({} tickets)", issue.title, issue.children.len())
         };
-
-        let auto_indicator = if issue.auto { "\u{25cf}" } else { "" };
 
         table.add_row(vec![
             Cell::new(status_sym).fg(status_color),

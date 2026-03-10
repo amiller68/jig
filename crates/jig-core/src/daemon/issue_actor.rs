@@ -88,7 +88,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             }
         };
 
-        let issues = match provider.list_spawnable() {
+        let issues = match provider.list_spawnable(&jig_toml.issues.spawn_labels) {
             Ok(issues) => issues,
             Err(e) => {
                 tracing::debug!(repo = %repo_name, error = %e, "failed to list spawnable issues");

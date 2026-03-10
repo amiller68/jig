@@ -71,6 +71,10 @@ jig issues --priority high
 # Filter by project (category)
 jig issues --category Backend
 
+# Filter by label (all must match)
+jig issues --label backend
+jig issues --label backend --label sprint-1
+
 # View a single issue
 jig issues ENG-123
 
@@ -113,6 +117,19 @@ Linear states map to jig statuses:
 | `body` | `# Title` heading + description markdown |
 | `source` | Linear issue URL |
 | `children` | Sub-issue identifiers |
+| `labels` | Linear label names |
+
+## Labels and auto-spawn
+
+Linear labels map directly to jig's label system. Use `spawn_labels` in `jig.toml` to control which Linear issues the daemon auto-spawns:
+
+```toml
+[issues]
+provider = "linear"
+spawn_labels = ["jig-auto"]    # only auto-spawn issues with this Linear label
+```
+
+When `spawn_labels` is empty, no issues are auto-spawned. The `*` in the AUTO column of `jig issues` indicates matching issues.
 
 ## Switching back to file-based issues
 
