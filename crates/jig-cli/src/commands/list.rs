@@ -6,7 +6,7 @@ use clap::Args;
 use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
-use jig_core::git;
+use jig_core::git::{self, Repo};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
 
@@ -81,7 +81,8 @@ impl Op for List {
 
 impl List {
     fn list_all_git_worktrees(&self) -> Result<ListOutput, ListError> {
-        let worktrees = git::list_all_worktrees()?;
+        let repo = Repo::discover()?;
+        let worktrees = repo.list_all_worktrees()?;
         for (path, branch) in &worktrees {
             let branch_display = if branch.is_empty() {
                 "(detached)".dimmed().to_string()
@@ -156,7 +157,7 @@ fn build_worktree_table(names: &[String], worktrees_dir: &Path, base_branch: &st
     for name in names {
         let wt_path = worktrees_dir.join(name);
 
-        let branch = git::get_worktree_branch(&wt_path).unwrap_or_else(|_| "?".to_string());
+        let branch = Repo::worktree_branch(&wt_path).unwrap_or_else(|_| "?".to_string());
 
         // Only show branch if it differs from worktree name
         let (branch_display, branch_color) = if branch == *name {
@@ -167,10 +168,10 @@ fn build_worktree_table(names: &[String], worktrees_dir: &Path, base_branch: &st
             (crate::ui::truncate(&branch, 40), Color::Cyan)
         };
 
-        let commits_ahead = git::get_commits_ahead(&wt_path, base_branch)
+        let commits_ahead = Repo::commits_ahead(&wt_path, base_branch)
             .map(|c| c.len())
             .unwrap_or(0);
-        let dirty = git::has_uncommitted_changes(&wt_path).unwrap_or(false);
+        let dirty = Repo::has_uncommitted_changes(&wt_path).unwrap_or(false);
 
         let dirty_marker = if dirty { "*" } else { "" };
         let commits_str = if commits_ahead > 0 || dirty {

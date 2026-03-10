@@ -5,6 +5,7 @@ use colored::Colorize;
 use glob::Pattern;
 use std::path::Path;
 
+use jig_core::git::Repo;
 use jig_core::{git, Error, RepoContext};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
@@ -85,11 +86,11 @@ fn remove_single(
     repo: &RepoContext,
 ) -> Result<(), RemoveError> {
     // Check for uncommitted changes unless force
-    if !force && git::has_uncommitted_changes(path)? {
+    if !force && Repo::has_uncommitted_changes(path)? {
         return Err(Error::UncommittedChanges.into());
     }
 
-    git::remove_worktree(path, force)?;
+    Repo::remove_worktree(path, force)?;
 
     // Clean up empty parent directories (for nested paths)
     let mut parent = path.parent();

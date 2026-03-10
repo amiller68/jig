@@ -4,6 +4,7 @@ use clap::Args;
 use colored::Colorize;
 use std::path::PathBuf;
 
+use jig_core::git::Repo;
 use jig_core::{git, Error};
 
 use crate::op::{Op, RepoCtx};
@@ -48,12 +49,12 @@ impl Op for Exit {
         let worktree_path = repo.worktrees_dir.join(&name);
 
         // Check for uncommitted changes unless force
-        if !self.force && git::has_uncommitted_changes(&worktree_path)? {
+        if !self.force && Repo::has_uncommitted_changes(&worktree_path)? {
             return Err(Error::UncommittedChanges.into());
         }
 
         // Remove the worktree
-        git::remove_worktree(&worktree_path, self.force)?;
+        Repo::remove_worktree(&worktree_path, self.force)?;
 
         // Clean up empty parent directories (for nested paths)
         let mut parent = worktree_path.parent();

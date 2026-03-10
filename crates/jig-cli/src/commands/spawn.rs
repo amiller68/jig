@@ -3,6 +3,7 @@
 use clap::Args;
 use colored::Colorize;
 
+use jig_core::git::Repo;
 use jig_core::global::GlobalConfig;
 use jig_core::issues;
 use jig_core::{git, spawn, terminal, Error, JigToml};
@@ -72,7 +73,8 @@ impl Op for Spawn {
 
             // Create new branch from base
             let base = self.base.as_deref().unwrap_or(&repo.base_branch);
-            git::create_worktree(&worktree_path, &self.name, base)?;
+            let git_repo = Repo::discover()?;
+            git_repo.create_worktree(&worktree_path, &self.name, base)?;
 
             eprintln!(
                 "{} Created worktree '{}' from '{}'",
@@ -107,7 +109,7 @@ impl Op for Spawn {
         let use_auto = if self.auto { true } else { jig_toml.spawn.auto };
 
         // Register in spawn state
-        let branch = git::get_worktree_branch(&worktree_path)?;
+        let branch = Repo::worktree_branch(&worktree_path)?;
         spawn::register(
             repo,
             &self.name,

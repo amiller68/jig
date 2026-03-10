@@ -1,8 +1,7 @@
 //! Prune actor — removes worktrees for merged/closed PRs in a background thread.
 
-use std::process::{Command, Stdio};
-
 use super::messages::{PruneComplete, PruneRequest, PruneResult};
+use crate::git::Repo;
 
 /// Spawn the prune actor thread. Returns immediately.
 ///
@@ -48,32 +47,22 @@ pub fn spawn(
 fn prune_single(target: &super::messages::PruneTarget) -> std::result::Result<(), String> {
     let worktree_path = crate::config::worktree_path(&target.repo_path, &target.worker_name);
 
-    if worktree_path.exists() {
-        // Remove the git worktree (no --force: fails safely on uncommitted changes)
-        let worktree_str = worktree_path.to_string_lossy().to_string();
-        let output = Command::new("git")
-            .args(["worktree", "remove", &worktree_str])
-            .current_dir(&target.repo_path)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("failed to run git worktree remove: {}", e))?;
+    let repo = Repo::open(&target.repo_path).map_err(|e| format!("failed to open repo: {}", e))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(format!("git worktree remove failed: {}", stderr));
-        }
+    if worktree_path.exists() {
+        let wt_name = repo
+            .find_worktree_name_for_path(&worktree_path)
+            .map_err(|e| format!("failed to find worktree: {}", e))?;
+
+        repo.prune_worktree(&wt_name)
+            .map_err(|e| format!("git worktree prune failed: {}", e))?;
 
         // Clean up empty parent dirs (for nested paths like feature/foo)
         let worktrees_dir = target.repo_path.join(crate::config::JIG_DIR);
         cleanup_empty_parents(&worktree_path, &worktrees_dir);
     } else {
         // Directory already gone but git may still have a stale registration.
-        // Prune clears entries whose directories no longer exist.
-        let _ = Command::new("git")
-            .args(["worktree", "prune"])
-            .current_dir(&target.repo_path)
-            .stdin(Stdio::null())
-            .output();
+        repo.prune_stale_worktrees();
     }
 
     // Remove event logs
@@ -136,6 +125,10 @@ mod tests {
         // When the worktree path doesn't exist, prune_single should succeed as a no-op
         // (it still tries to clean events/state, which may also be absent).
         let tmp = tempfile::tempdir().unwrap();
+
+        // Initialize a git repo so git2 can open it
+        git2::Repository::init(tmp.path()).unwrap();
+
         let target = super::super::messages::PruneTarget {
             repo_path: tmp.path().to_path_buf(),
             repo_name: "test-repo".to_string(),
@@ -149,6 +142,10 @@ mod tests {
     #[test]
     fn prune_single_absent_event_log_no_panic() {
         let tmp = tempfile::tempdir().unwrap();
+
+        // Initialize a git repo so git2 can open it
+        git2::Repository::init(tmp.path()).unwrap();
+
         let target = super::super::messages::PruneTarget {
             repo_path: tmp.path().to_path_buf(),
             repo_name: "repo".to_string(),

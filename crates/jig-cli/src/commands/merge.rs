@@ -3,7 +3,8 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{git, spawn, Error};
+use jig_core::git::Repo;
+use jig_core::{spawn, Error};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 
@@ -33,15 +34,16 @@ impl Op for Merge {
         }
 
         // Check for uncommitted changes
-        if git::has_uncommitted_changes(&worktree_path)? {
+        if Repo::has_uncommitted_changes(&worktree_path)? {
             return Err(Error::UncommittedChanges.into());
         }
 
         // Get branch name
-        let branch = git::get_worktree_branch(&worktree_path)?;
+        let branch = Repo::worktree_branch(&worktree_path)?;
 
         // Merge the branch
-        git::merge_branch(&branch)?;
+        let git_repo = Repo::discover()?;
+        git_repo.merge_branch(&branch)?;
 
         eprintln!(
             "{} Merged branch '{}' into current branch",

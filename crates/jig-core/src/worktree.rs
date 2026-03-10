@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::{self, copy_worktree_files, run_on_create_hook};
 use crate::error::{Error, Result};
-use crate::git;
+use crate::git::{self, Repo};
 
 /// Represents a git worktree
 #[derive(Debug, Clone)]
@@ -51,7 +51,8 @@ impl Worktree {
         let branch = branch.unwrap_or(name);
 
         // Create the worktree
-        git::create_worktree(&worktree_path, branch, base_branch)?;
+        let repo = Repo::discover()?;
+        repo.create_worktree(&worktree_path, branch, base_branch)?;
 
         // Copy configured files (e.g., .env)
         if !copy_files.is_empty() {
@@ -78,7 +79,7 @@ impl Worktree {
             .into_iter()
             .map(|name| {
                 let path = worktrees_dir.join(&name);
-                let branch = git::get_worktree_branch(&path).unwrap_or_else(|_| name.clone());
+                let branch = Repo::worktree_branch(&path).unwrap_or_else(|_| name.clone());
                 Ok(Self { name, path, branch })
             })
             .collect()
@@ -92,7 +93,7 @@ impl Worktree {
             return Err(Error::WorktreeNotFound(name.to_string()));
         }
 
-        let branch = git::get_worktree_branch(&path)?;
+        let branch = Repo::worktree_branch(&path)?;
 
         Ok(Self {
             name: name.to_string(),
@@ -104,11 +105,11 @@ impl Worktree {
     /// Remove this worktree
     pub fn remove(&self, force: bool) -> Result<()> {
         // Check for uncommitted changes unless force
-        if !force && git::has_uncommitted_changes(&self.path)? {
+        if !force && Repo::has_uncommitted_changes(&self.path)? {
             return Err(Error::UncommittedChanges);
         }
 
-        git::remove_worktree(&self.path, force)?;
+        Repo::remove_worktree(&self.path, force)?;
 
         // Clean up empty parent directories (for nested paths)
         self.cleanup_empty_parents()?;
@@ -140,26 +141,26 @@ impl Worktree {
 
     /// Check if this worktree has uncommitted changes
     pub fn has_uncommitted_changes(&self) -> Result<bool> {
-        git::has_uncommitted_changes(&self.path)
+        Repo::has_uncommitted_changes(&self.path)
     }
 
     /// Get commits ahead of base branch
     pub fn get_commits_ahead(&self, base_branch: &str) -> Result<Vec<String>> {
-        git::get_commits_ahead(&self.path, base_branch)
+        Repo::commits_ahead(&self.path, base_branch)
     }
 
     /// Get diff stats
     pub fn get_diff_stats(&self, base_branch: &str) -> Result<crate::worker::DiffStats> {
-        git::get_diff_stats(&self.path, base_branch)
+        Repo::diff_stats(&self.path, base_branch)
     }
 
     /// Get full diff
     pub fn get_diff(&self, base_branch: &str) -> Result<String> {
-        git::get_diff(&self.path, base_branch)
+        Repo::diff(&self.path, base_branch)
     }
 
     /// Get diff stat (summary)
     pub fn get_diff_stat(&self, base_branch: &str) -> Result<String> {
-        git::get_diff_stat(&self.path, base_branch)
+        Repo::diff_stat(&self.path, base_branch)
     }
 }

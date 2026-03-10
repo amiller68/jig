@@ -1,6 +1,6 @@
 # Replace git CLI shelling with git2 library
 
-**Status:** Planned
+**Status:** Done
 **Priority:** Urgent
 **Auto:** true
 
@@ -34,8 +34,8 @@ Also in `crates/jig-core/src/daemon/prune_actor.rs`:
 
 ## Acceptance Criteria
 
-- [ ] No `Command::new("git")` calls remain for worktree/branch operations
-- [ ] All existing tests pass
+- [x] No `Command::new("git")` calls remain for worktree/branch operations
+- [x] All existing tests pass
 - [ ] Daemon auto-spawn and prune work correctly with git2
 
 ## Verification

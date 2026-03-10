@@ -2,6 +2,7 @@
 
 use colored::Colorize;
 
+use jig_core::git::Repo;
 use jig_core::{git, global_state_dir, OrchestratorState, TmuxClient, WorkersState};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
@@ -95,7 +96,7 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
     let worktree_names = git::list_worktree_names(&repo.worktrees_dir).unwrap_or_default();
     for name in &worktree_names {
         let path = repo.worktrees_dir.join(name);
-        if git::remove_worktree(&path, true).is_err() {
+        if Repo::remove_worktree(&path, true).is_err() {
             // Stale directory — git doesn't track it anymore, just rm it
             let _ = std::fs::remove_dir_all(&path);
         }

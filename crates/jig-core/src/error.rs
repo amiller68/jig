@@ -44,8 +44,11 @@ pub enum Error {
     #[error("Tmux session not found: {0}")]
     TmuxSessionNotFound(String),
 
+    #[error("Merge conflict with branch '{0}'")]
+    MergeConflict(String),
+
     #[error("Git error: {0}")]
-    Git(String),
+    Git2(#[from] git2::Error),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

@@ -568,24 +568,24 @@ impl<'a> Daemon<'a> {
 
         // Build display info — git checks are fast local ops
         let tmux_status = self.get_tmux_status(repo_name, worker_name);
-        let (commits_ahead, is_dirty) = if let Some(entry) =
-            Self::find_repo_path(registry, repo_name)
-        {
-            let worktree_path = crate::config::worktree_path(&entry.path, worker_name);
-            if worktree_path.exists() {
-                let base = RepoContext::resolve_base_branch_for(&entry.path)
-                    .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
-                let ahead = crate::git::get_commits_ahead(&worktree_path, &base)
-                    .unwrap_or_default()
-                    .len();
-                let dirty = crate::git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
-                (ahead, dirty)
+        let (commits_ahead, is_dirty) =
+            if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                let worktree_path = crate::config::worktree_path(&entry.path, worker_name);
+                if worktree_path.exists() {
+                    let base = RepoContext::resolve_base_branch_for(&entry.path)
+                        .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
+                    let ahead = crate::git::Repo::commits_ahead(&worktree_path, &base)
+                        .unwrap_or_default()
+                        .len();
+                    let dirty =
+                        crate::git::Repo::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+                    (ahead, dirty)
+                } else {
+                    (0, false)
+                }
             } else {
                 (0, false)
-            }
-        } else {
-            (0, false)
-        };
+            };
 
         let nudges_total: u32 = new_state.nudge_counts.values().sum();
         let display_info = WorkerDisplayInfo {
@@ -846,7 +846,8 @@ impl<'a> Daemon<'a> {
         use crate::config::JIG_DIR;
 
         let repo_root = &issue.repo_root;
-        let git_common_dir = crate::git::get_git_common_dir_for(repo_root)?;
+        let repo = crate::git::Repo::open(repo_root)?;
+        let git_common_dir = repo.common_dir();
         let worktrees_dir = repo_root.join(JIG_DIR);
         let worktree_path = crate::config::worktree_path(repo_root, &issue.worker_name);
 
@@ -869,7 +870,7 @@ impl<'a> Daemon<'a> {
 
         // Create the worktree
         let branch = &issue.worker_name;
-        crate::git::create_worktree(&worktree_path, branch, &base_branch)?;
+        repo.create_worktree(&worktree_path, branch, &base_branch)?;
 
         // Copy configured files
         let copy_files = crate::config::get_copy_files(repo_root)?;

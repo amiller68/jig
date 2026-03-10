@@ -12,7 +12,7 @@ jig/
 │   │       ├── lib.rs      # Public API exports
 │   │       ├── error.rs    # Error types (thiserror)
 │   │       ├── context.rs  # RepoContext (derived once, threaded through)
-│   │       ├── git.rs      # Git operations (shell commands)
+│   │       ├── git.rs      # Git operations (git2/libgit2 Repo wrapper)
 │   │       ├── worktree.rs # Worktree abstraction
 │   │       ├── config.rs   # Configuration management
 │   │       ├── worker.rs   # Worker state and lifecycle
