@@ -12,7 +12,7 @@ pub mod types;
 
 pub use file_provider::FileProvider;
 pub use linear_provider::LinearProvider;
-pub use provider::IssueProvider;
+pub use provider::{IssueProvider, ProviderKind};
 pub use types::{Issue, IssueFilter, IssuePriority, IssueStatus};
 
 use std::path::Path;

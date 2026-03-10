@@ -35,6 +35,9 @@ struct GitRefSource {
 }
 
 impl FileProvider {
+    /// The provider kind for file-based issues.
+    pub const PROVIDER_KIND: super::provider::ProviderKind = super::provider::ProviderKind::File;
+
     pub fn new(issues_dir: impl Into<PathBuf>) -> Self {
         Self {
             issues_dir: issues_dir.into(),
@@ -135,6 +138,10 @@ impl FileProvider {
 impl IssueProvider for FileProvider {
     fn name(&self) -> &str {
         "file"
+    }
+
+    fn kind(&self) -> super::provider::ProviderKind {
+        Self::PROVIDER_KIND
     }
 
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {

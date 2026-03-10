@@ -1,6 +1,6 @@
 # Spawn preamble: provider-aware issue completion instructions
 
-**Status:** Planned
+**Status:** Complete
 **Auto:** true
 
 ## Objective
