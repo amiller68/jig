@@ -1,6 +1,6 @@
 # Communicate worker initialization state and on-create failures
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Labels:** auto
 
