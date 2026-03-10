@@ -1,10 +1,158 @@
 //! Shared rendering utilities for CLI output.
+//!
+//! Provides consistent status symbols, color helpers, truncation, table builders,
+//! and a global plain-mode flag for scriptable output.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 
 use jig_core::daemon::{WorkerDisplayInfo, WorkerTickInfo};
 use jig_core::spawn::TaskStatus;
 use jig_core::worker::WorkerStatus;
+
+// ---------------------------------------------------------------------------
+// Plain mode
+// ---------------------------------------------------------------------------
+
+static PLAIN_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Enable or disable plain (no-color, no-decoration) output.
+pub fn set_plain(enabled: bool) {
+    PLAIN_MODE.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true when `--plain` was passed.
+pub fn is_plain() -> bool {
+    PLAIN_MODE.load(Ordering::Relaxed)
+}
+
+// ---------------------------------------------------------------------------
+// Status symbols
+// ---------------------------------------------------------------------------
+
+/// Success symbol (green check mark).
+pub const SYM_OK: &str = "✓";
+/// Progress / action-in-flight symbol.
+pub const SYM_ARROW: &str = "→";
+/// Failure symbol.
+pub const SYM_FAIL: &str = "✗";
+/// Warning symbol.
+pub const SYM_WARN: &str = "!";
+
+// ---------------------------------------------------------------------------
+// Formatted status helpers — print to stderr
+// ---------------------------------------------------------------------------
+
+/// Print a success line to stderr: `✓ message`
+pub fn success(msg: &str) {
+    if is_plain() {
+        eprintln!("{}", msg);
+    } else {
+        eprintln!("{} {}", SYM_OK.green(), msg);
+    }
+}
+
+/// Print a progress line to stderr: `→ message`
+pub fn progress(msg: &str) {
+    if is_plain() {
+        eprintln!("{}", msg);
+    } else {
+        eprintln!("{} {}", SYM_ARROW.cyan(), msg);
+    }
+}
+
+/// Print a failure line to stderr: `✗ message`
+#[allow(dead_code)]
+pub fn failure(msg: &str) {
+    if is_plain() {
+        eprintln!("{}", msg);
+    } else {
+        eprintln!("{} {}", SYM_FAIL.red(), msg);
+    }
+}
+
+/// Print a warning line to stderr: `! message`
+pub fn warning(msg: &str) {
+    if is_plain() {
+        eprintln!("{}", msg);
+    } else {
+        eprintln!("{} {}", SYM_WARN.yellow(), msg);
+    }
+}
+
+/// Print an indented detail line to stderr: `  → detail`
+pub fn detail(msg: &str) {
+    if is_plain() {
+        eprintln!("  {}", msg);
+    } else {
+        eprintln!("  {} {}", SYM_ARROW.dimmed(), msg);
+    }
+}
+
+/// Print a section header to stderr.
+pub fn header(msg: &str) {
+    if is_plain() {
+        eprintln!("{}", msg);
+    } else {
+        eprintln!("{}", msg.bold());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Color helpers for Display impls (return colored strings)
+// ---------------------------------------------------------------------------
+
+/// Highlight a name/value (cyan).
+pub fn highlight(s: &str) -> String {
+    if is_plain() {
+        s.to_string()
+    } else {
+        s.cyan().to_string()
+    }
+}
+
+/// Bold text.
+pub fn bold(s: &str) -> String {
+    if is_plain() {
+        s.to_string()
+    } else {
+        s.bold().to_string()
+    }
+}
+
+/// Dimmed text for secondary info.
+pub fn dim(s: &str) -> String {
+    if is_plain() {
+        s.to_string()
+    } else {
+        s.dimmed().to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Table helpers
+// ---------------------------------------------------------------------------
+
+/// Create a new table with the standard preset (no borders) and dynamic arrangement.
+pub fn new_table(headers: &[&str]) -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(presets::NOTHING)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(
+            headers
+                .iter()
+                .map(|h| Cell::new(*h).add_attribute(Attribute::Bold))
+                .collect::<Vec<_>>(),
+        );
+    table
+}
+
+// ---------------------------------------------------------------------------
+// Truncation
+// ---------------------------------------------------------------------------
 
 /// Maximum display width for worker names.
 pub const NAME_MAX: usize = 36;
@@ -20,6 +168,28 @@ pub fn truncate(s: &str, max: usize) -> String {
             .map(|(i, _)| i)
             .unwrap_or(s.len());
         format!("{}…", &s[..end])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Error display
+// ---------------------------------------------------------------------------
+
+/// Print a formatted error chain to stderr.
+pub fn print_error(e: &dyn std::error::Error) {
+    if is_plain() {
+        eprintln!("error: {e}");
+    } else {
+        eprintln!("{} {e}", "error:".red().bold());
+    }
+    let mut source = e.source();
+    while let Some(cause) = source {
+        if is_plain() {
+            eprintln!("  caused by: {cause}");
+        } else {
+            eprintln!("  {} {cause}", "caused by:".yellow());
+        }
+        source = cause.source();
     }
 }
 

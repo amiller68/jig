@@ -1,13 +1,13 @@
 //! Create worktree command
 
 use clap::Args;
-use colored::Colorize;
 use std::path::PathBuf;
 
 use jig_core::git::Repo;
 use jig_core::{config, git, Error};
 
 use crate::op::{Op, RepoCtx};
+use crate::ui;
 
 /// Create a new worktree
 #[derive(Args, Debug, Clone)]
@@ -86,12 +86,11 @@ impl Op for Create {
         let git_repo = Repo::discover()?;
         git_repo.create_worktree(&worktree_path, branch, base)?;
 
-        eprintln!(
-            "{} Created worktree '{}' on branch '{}'",
-            "✓".green(),
-            self.name.cyan(),
-            branch.cyan()
-        );
+        ui::success(&format!(
+            "Created worktree '{}' on branch '{}'",
+            ui::highlight(&self.name),
+            ui::highlight(branch)
+        ));
 
         // Copy configured files (e.g., .env)
         let copy_files = config::get_copy_files(&repo.repo_root)?;
@@ -99,7 +98,7 @@ impl Op for Create {
             config::copy_worktree_files(&repo.repo_root, &worktree_path, &copy_files)?;
             for file in &copy_files {
                 if repo.repo_root.join(file).exists() {
-                    eprintln!("  {} Copied {}", "→".dimmed(), file);
+                    ui::detail(&format!("Copied {}", file));
                 }
             }
         }

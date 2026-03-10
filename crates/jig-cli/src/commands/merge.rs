@@ -1,12 +1,12 @@
 //! Merge command - merge reviewed worktree into current branch
 
 use clap::Args;
-use colored::Colorize;
 
 use jig_core::git::Repo;
 use jig_core::{spawn, Error};
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Merge reviewed worktree into current branch
 #[derive(Args, Debug, Clone)]
@@ -45,11 +45,10 @@ impl Op for Merge {
         let git_repo = Repo::discover()?;
         git_repo.merge_branch(&branch)?;
 
-        eprintln!(
-            "{} Merged branch '{}' into current branch",
-            "✓".green(),
-            branch.cyan()
-        );
+        ui::success(&format!(
+            "Merged branch '{}' into current branch",
+            ui::highlight(&branch)
+        ));
 
         // Unregister from spawn state
         spawn::unregister(repo, &self.name)?;
@@ -58,11 +57,10 @@ impl Op for Merge {
         spawn::kill_window(repo, &self.name)?;
 
         eprintln!();
-        eprintln!(
-            "  {} Remove worktree with: {}",
-            "→".dimmed(),
-            format!("jig remove {}", self.name).cyan()
-        );
+        ui::detail(&format!(
+            "Remove worktree with: {}",
+            ui::highlight(&format!("jig remove {}", self.name))
+        ));
 
         Ok(NoOutput)
     }

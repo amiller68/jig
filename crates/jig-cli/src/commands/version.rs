@@ -3,9 +3,9 @@
 use std::convert::Infallible;
 
 use clap::Args;
-use colored::Colorize;
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Show version information
 #[derive(Args, Debug, Clone)]
@@ -16,7 +16,11 @@ impl Op for Version {
     type Output = NoOutput;
 
     fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        eprintln!("{} {}", "jig".bold(), env!("CARGO_PKG_VERSION").cyan());
+        eprintln!(
+            "{} {}",
+            ui::bold("jig"),
+            ui::highlight(env!("CARGO_PKG_VERSION"))
+        );
         Ok(NoOutput)
     }
 }

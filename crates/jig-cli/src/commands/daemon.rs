@@ -1,11 +1,11 @@
 //! Daemon command — run the orchestrator loop
 
 use clap::Args;
-use colored::Colorize;
 
 use jig_core::daemon::{self, DaemonConfig};
 
 use crate::op::{NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Run the daemon loop to monitor workers and dispatch actions
 #[derive(Args, Debug, Clone)]
@@ -37,13 +37,13 @@ impl Op for Daemon {
         };
 
         if self.once {
-            eprintln!("{}", "Running single pass...".dimmed());
+            eprintln!("{}", ui::dim("Running single pass..."));
         } else {
-            eprintln!(
-                "{}",
-                format!("Daemon started (polling every {}s)", self.interval).green()
-            );
-            eprintln!("{}", "Press Ctrl+C to stop.".dimmed());
+            ui::success(&format!(
+                "Daemon started (polling every {}s)",
+                self.interval
+            ));
+            eprintln!("{}", ui::dim("Press Ctrl+C to stop."));
         }
 
         daemon::run(&config)?;

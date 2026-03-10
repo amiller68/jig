@@ -1,12 +1,12 @@
 //! Config command
 
 use clap::{Args, Subcommand};
-use colored::Colorize;
 
 use jig_core::config::{self, ConfigDisplay};
 use jig_core::Error as CoreError;
 
 use crate::op::{Op, RepoCtx};
+use crate::ui;
 
 /// Manage configuration
 #[derive(Args, Debug, Clone)]
@@ -95,31 +95,31 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     let repo = ctx.repo()?;
     let display = ConfigDisplay::load(&repo.repo_root)?;
 
-    eprintln!("{}", "Configuration".bold());
+    ui::header("Configuration");
     eprintln!();
     eprintln!(
         "  {} {}",
-        "Effective base branch:".dimmed(),
-        display.effective_base.cyan()
+        ui::dim("Effective base branch:"),
+        ui::highlight(&display.effective_base)
     );
 
     if let Some(ref toml) = display.toml_base {
-        eprintln!("    {} {}", "(jig.toml)".dimmed(), toml);
+        eprintln!("    {} {}", ui::dim("(jig.toml)"), toml);
     }
     if let Some(ref repo_base) = display.repo_base {
-        eprintln!("    {} {}", "(global config)".dimmed(), repo_base);
+        eprintln!("    {} {}", ui::dim("(global config)"), repo_base);
     }
     if let Some(ref global) = display.global_base {
-        eprintln!("    {} {}", "(global default)".dimmed(), global);
+        eprintln!("    {} {}", ui::dim("(global default)"), global);
     }
 
     if let Some(ref hook) = display.effective_on_create {
         eprintln!();
-        eprintln!("  {} {}", "On-create hook:".dimmed(), hook.cyan());
+        eprintln!("  {} {}", ui::dim("On-create hook:"), ui::highlight(hook));
         if display.toml_on_create.is_some() {
-            eprintln!("    {} jig.toml", "(from)".dimmed());
+            eprintln!("    {} jig.toml", ui::dim("(from)"));
         } else {
-            eprintln!("    {} global config", "(from)".dimmed());
+            eprintln!("    {} global config", ui::dim("(from)"));
         }
     }
 
@@ -135,7 +135,7 @@ fn show_list() -> Result<ConfigOutput, ConfigError> {
     }
 
     for (category, key, value) in entries {
-        eprintln!("{} {} = {}", category.dimmed(), key.cyan(), value);
+        eprintln!("{} {} = {}", ui::dim(&category), ui::highlight(&key), value);
     }
 
     Ok(ConfigOutput(None))
@@ -150,11 +150,11 @@ fn handle_base(
     if unset {
         if global {
             config::unset_global_base_branch()?;
-            eprintln!("{} Unset global base branch", "✓".green());
+            ui::success("Unset global base branch");
         } else {
             let repo = ctx.repo()?;
             config::unset_repo_base_branch(&repo.repo_root)?;
-            eprintln!("{} Unset repo base branch", "✓".green());
+            ui::success("Unset repo base branch");
         }
         return Ok(ConfigOutput(None));
     }
@@ -163,11 +163,11 @@ fn handle_base(
         Some(b) => {
             if global {
                 config::set_global_base_branch(b)?;
-                eprintln!("{} Set global base branch to '{}'", "✓".green(), b.cyan());
+                ui::success(&format!("Set global base branch to '{}'", ui::highlight(b)));
             } else {
                 let repo = ctx.repo()?;
                 config::set_repo_base_branch(&repo.repo_root, b)?;
-                eprintln!("{} Set repo base branch to '{}'", "✓".green(), b.cyan());
+                ui::success(&format!("Set repo base branch to '{}'", ui::highlight(b)));
             }
             Ok(ConfigOutput(None))
         }
@@ -204,14 +204,14 @@ fn handle_on_create(
 
     if unset {
         config::unset_on_create_hook(&repo.repo_root)?;
-        eprintln!("{} Unset on-create hook", "✓".green());
+        ui::success("Unset on-create hook");
         return Ok(ConfigOutput(None));
     }
 
     match command {
         Some(cmd) => {
             config::set_on_create_hook(&repo.repo_root, cmd)?;
-            eprintln!("{} Set on-create hook to '{}'", "✓".green(), cmd.cyan());
+            ui::success(&format!("Set on-create hook to '{}'", ui::highlight(cmd)));
             Ok(ConfigOutput(None))
         }
         None => match config::get_on_create_hook(&repo.repo_root)? {

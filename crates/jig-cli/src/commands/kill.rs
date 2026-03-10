@@ -1,11 +1,11 @@
 //! Kill command - kill a running tmux window
 
 use clap::Args;
-use colored::Colorize;
 
 use jig_core::spawn;
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Kill a running tmux window
 #[derive(Args, Debug, Clone)]
@@ -37,12 +37,12 @@ impl Op for Kill {
         if self.all {
             let tasks = spawn::list_tasks(repo)?;
             if tasks.is_empty() {
-                eprintln!("{}", "No workers to kill.".dimmed());
+                eprintln!("{}", ui::dim("No workers to kill."));
             }
             for task in &tasks {
                 let _ = spawn::kill_window(repo, &task.name);
                 spawn::unregister(repo, &task.name)?;
-                eprintln!("{} Killed '{}'", "✓".green(), task.name.cyan());
+                ui::success(&format!("Killed '{}'", ui::highlight(&task.name)));
             }
             return Ok(NoOutput);
         }
@@ -50,7 +50,7 @@ impl Op for Kill {
         let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
         spawn::kill_window(repo, name)?;
         spawn::unregister(repo, name)?;
-        eprintln!("{} Killed '{}'", "✓".green(), name.cyan());
+        ui::success(&format!("Killed '{}'", ui::highlight(name)));
         Ok(NoOutput)
     }
 
@@ -62,12 +62,12 @@ impl Op for Kill {
                 for task in &tasks {
                     let _ = spawn::kill_window(repo, &task.name);
                     spawn::unregister(repo, &task.name)?;
-                    eprintln!("{} Killed '{}'", "✓".green(), task.name.cyan());
+                    ui::success(&format!("Killed '{}'", ui::highlight(&task.name)));
                     killed += 1;
                 }
             }
             if killed == 0 {
-                eprintln!("{}", "No workers to kill.".dimmed());
+                eprintln!("{}", ui::dim("No workers to kill."));
             }
             return Ok(NoOutput);
         }
@@ -76,7 +76,7 @@ impl Op for Kill {
         let repo = ctx.repo_for_worktree(name)?;
         spawn::kill_window(repo, name)?;
         spawn::unregister(repo, name)?;
-        eprintln!("{} Killed '{}'", "✓".green(), name.cyan());
+        ui::success(&format!("Killed '{}'", ui::highlight(name)));
         Ok(NoOutput)
     }
 }

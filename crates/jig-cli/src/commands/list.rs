@@ -3,12 +3,12 @@
 use std::path::Path;
 
 use clap::Args;
-use colored::Colorize;
-use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
+use comfy_table::{Cell, CellAlignment, Color};
 
 use jig_core::git::{self, Repo};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
+use crate::ui;
 
 /// List worktrees
 #[derive(Args, Debug, Clone)]
@@ -53,7 +53,7 @@ impl Op for List {
             eprintln!("No worktrees found");
         }
 
-        if self.plain {
+        if self.plain || ui::is_plain() {
             let out = worktrees
                 .iter()
                 .map(|w| format!("{w}\n"))
@@ -71,7 +71,7 @@ impl Op for List {
             return self.list_all_git_worktrees();
         }
 
-        if self.plain {
+        if self.plain || ui::is_plain() {
             return self.run_global_plain(ctx);
         }
 
@@ -85,9 +85,9 @@ impl List {
         let worktrees = repo.list_all_worktrees()?;
         for (path, branch) in &worktrees {
             let branch_display = if branch.is_empty() {
-                "(detached)".dimmed().to_string()
+                ui::dim("(detached)")
             } else {
-                branch.cyan().to_string()
+                ui::highlight(branch)
             };
             eprintln!("{} {}", path.display(), branch_display);
         }
@@ -111,7 +111,7 @@ impl List {
                 out.push('\n');
             }
             first = false;
-            out.push_str(&format!("{}:\n", repo_name.bold()));
+            out.push_str(&format!("{}:\n", ui::bold(&repo_name)));
             for wt in &worktrees {
                 out.push_str(&format!("  {wt}\n"));
             }
@@ -135,7 +135,7 @@ impl List {
                 eprintln!();
             }
             first = false;
-            eprintln!("{}", repo_name.bold());
+            ui::header(&repo_name);
             let table = build_worktree_table(&worktrees, &repo.worktrees_dir, &repo.base_branch);
             eprintln!("{table}");
         }
@@ -143,16 +143,12 @@ impl List {
     }
 }
 
-fn build_worktree_table(names: &[String], worktrees_dir: &Path, base_branch: &str) -> Table {
-    let mut table = Table::new();
-    table
-        .load_preset(presets::NOTHING)
-        .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec![
-            Cell::new("NAME").add_attribute(Attribute::Bold),
-            Cell::new("BRANCH").add_attribute(Attribute::Bold),
-            Cell::new("COMMITS").add_attribute(Attribute::Bold),
-        ]);
+fn build_worktree_table(
+    names: &[String],
+    worktrees_dir: &Path,
+    base_branch: &str,
+) -> comfy_table::Table {
+    let mut table = ui::new_table(&["NAME", "BRANCH", "COMMITS"]);
 
     for name in names {
         let wt_path = worktrees_dir.join(name);

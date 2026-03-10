@@ -4,7 +4,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use clap::Args;
-use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
+use comfy_table::{Cell, Color};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 
@@ -13,6 +13,7 @@ use jig_core::global::GlobalConfig;
 use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
+use crate::ui;
 
 /// Discover and browse issues
 #[derive(Args, Debug, Clone)]
@@ -175,6 +176,15 @@ impl fmt::Display for IssuesOutput {
                 if issues.is_empty() {
                     return write!(f, "No issues found");
                 }
+                if ui::is_plain() {
+                    for issue in issues {
+                        let status = issue.status.as_str();
+                        let pri = issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-");
+                        let cat = issue.category.as_deref().unwrap_or("-");
+                        writeln!(f, "{}\t{}\t{}\t{}", status, pri, cat, issue.title)?;
+                    }
+                    return Ok(());
+                }
                 let table = render_table(issues);
                 write!(f, "{table}")
             }
@@ -192,20 +202,8 @@ impl fmt::Display for IssuesOutput {
     }
 }
 
-fn render_table(issues: &[CoreIssue]) -> Table {
-    let mut table = Table::new();
-    table
-        .load_preset(presets::NOTHING)
-        .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec![
-            Cell::new("STATUS").add_attribute(Attribute::Bold),
-            Cell::new("AUTO").add_attribute(Attribute::Bold),
-            Cell::new("PRI").add_attribute(Attribute::Bold),
-            Cell::new("CATEGORY")
-                .add_attribute(Attribute::Bold)
-                .set_alignment(CellAlignment::Left),
-            Cell::new("ISSUE").add_attribute(Attribute::Bold),
-        ]);
+fn render_table(issues: &[CoreIssue]) -> comfy_table::Table {
+    let mut table = ui::new_table(&["STATUS", "AUTO", "PRI", "CATEGORY", "ISSUE"]);
 
     for issue in issues {
         let (status_sym, status_color) = match issue.status {

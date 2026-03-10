@@ -3,12 +3,12 @@
 use std::fmt;
 
 use clap::Args;
-use colored::Colorize;
-use comfy_table::{presets, Attribute, Cell, Color, ContentArrangement, Table};
+use comfy_table::{Cell, Color};
 
 use jig_core::RepoRegistry;
 
 use crate::op::{Op, RepoCtx};
+use crate::ui;
 
 /// List tracked repositories
 #[derive(Args, Debug, Clone)]
@@ -64,17 +64,13 @@ impl fmt::Display for ReposOutput {
         match self {
             ReposOutput::List(entries) => {
                 if entries.is_empty() {
-                    write!(f, "{}", "No tracked repositories".dimmed())?;
+                    write!(f, "{}", ui::dim("No tracked repositories"))?;
+                } else if ui::is_plain() {
+                    for entry in entries {
+                        writeln!(f, "{}\t{}\t{}", entry.name, entry.path, entry.last_used)?;
+                    }
                 } else {
-                    let mut table = Table::new();
-                    table
-                        .load_preset(presets::NOTHING)
-                        .set_content_arrangement(ContentArrangement::Dynamic)
-                        .set_header(vec![
-                            Cell::new("NAME").add_attribute(Attribute::Bold),
-                            Cell::new("PATH").add_attribute(Attribute::Bold),
-                            Cell::new("LAST USED").add_attribute(Attribute::Bold),
-                        ]);
+                    let mut table = ui::new_table(&["NAME", "PATH", "LAST USED"]);
 
                     for entry in entries {
                         table.add_row(vec![

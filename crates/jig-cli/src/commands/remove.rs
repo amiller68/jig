@@ -1,7 +1,6 @@
 //! Remove worktree command
 
 use clap::Args;
-use colored::Colorize;
 use glob::Pattern;
 use std::path::Path;
 
@@ -9,6 +8,7 @@ use jig_core::git::Repo;
 use jig_core::{git, Error, RepoContext};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Remove worktree(s)
 #[derive(Args, Debug, Clone)]
@@ -107,6 +107,6 @@ fn remove_single(
         parent = p.parent();
     }
 
-    eprintln!("{} Removed worktree '{}'", "✓".green(), name.cyan());
+    ui::success(&format!("Removed worktree '{}'", ui::highlight(name)));
     Ok(())
 }

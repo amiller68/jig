@@ -8,7 +8,6 @@ mod commands;
 mod ui;
 
 use clap::Parser;
-use colored::Colorize;
 
 use cli::Cli;
 use op::{GlobalCtx, Op, RepoCtx};
@@ -23,13 +22,16 @@ fn main() {
         .init();
 
     if let Err(e) = run() {
-        eprintln!("{} {}", "error:".red().bold(), e);
+        ui::print_error(e.as_ref());
         std::process::exit(1);
     }
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    // Set global plain mode before any output
+    ui::set_plain(cli.plain);
 
     // Best-effort global directory setup
     let _ = jig_core::ensure_global_dirs();
@@ -60,7 +62,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let pruned = registry.prune();
                         if cli.verbose && !pruned.is_empty() {
                             for p in &pruned {
-                                eprintln!("{} {}", "pruned:".dimmed(), p.display());
+                                eprintln!("{} {}", ui::dim("pruned:"), p.display());
                             }
                         }
                         let _ = registry.save();
@@ -80,65 +82,99 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_help() {
-    eprintln!("{}", "jig - Git worktree manager".bold());
+    eprintln!("{}", ui::bold("jig - Git worktree manager"));
     eprintln!();
-    eprintln!("{}", "USAGE:".bold());
+    eprintln!("{}", ui::bold("USAGE:"));
     eprintln!("  jig <COMMAND> [OPTIONS]");
     eprintln!();
-    eprintln!("{}", "WORKTREE COMMANDS:".bold());
-    eprintln!("  {}      Create a new worktree", "create".cyan());
-    eprintln!("  {}        List worktrees", "list".cyan());
-    eprintln!("  {}        Open/cd into a worktree", "open".cyan());
-    eprintln!("  {}      Remove worktree(s)", "remove".cyan());
-    eprintln!("  {}        Exit current worktree", "exit".cyan());
+    eprintln!("{}", ui::bold("WORKTREE COMMANDS:"));
+    eprintln!("  {}      Create a new worktree", ui::highlight("create"));
+    eprintln!("  {}        List worktrees", ui::highlight("list"));
+    eprintln!("  {}        Open/cd into a worktree", ui::highlight("open"));
+    eprintln!("  {}      Remove worktree(s)", ui::highlight("remove"));
+    eprintln!("  {}        Exit current worktree", ui::highlight("exit"));
     eprintln!();
-    eprintln!("{}", "CONFIGURATION:".bold());
-    eprintln!("  {}      Manage configuration", "config".cyan());
+    eprintln!("{}", ui::bold("CONFIGURATION:"));
+    eprintln!("  {}      Manage configuration", ui::highlight("config"));
     eprintln!();
-    eprintln!("{}", "WORKER COMMANDS:".bold());
+    eprintln!("{}", ui::bold("WORKER COMMANDS:"));
     eprintln!(
         "  {}       Create worktree + launch Claude in tmux",
-        "spawn".cyan()
+        ui::highlight("spawn")
     );
-    eprintln!("  {}          Show status of spawned workers", "ps".cyan());
-    eprintln!("  {}      Attach to tmux session", "attach".cyan());
-    eprintln!("  {}      Show diff for parent review", "review".cyan());
+    eprintln!(
+        "  {}          Show status of spawned workers",
+        ui::highlight("ps")
+    );
+    eprintln!("  {}      Attach to tmux session", ui::highlight("attach"));
+    eprintln!(
+        "  {}      Show diff for parent review",
+        ui::highlight("review")
+    );
     eprintln!(
         "  {}       Merge reviewed worktree into current branch",
-        "merge".cyan()
+        ui::highlight("merge")
     );
-    eprintln!("  {}        Kill a running tmux window", "kill".cyan());
+    eprintln!(
+        "  {}        Kill a running tmux window",
+        ui::highlight("kill")
+    );
     eprintln!(
         "  {}        Nuke all workers and state (keeps config)",
-        "nuke".cyan()
+        ui::highlight("nuke")
     );
     eprintln!();
-    eprintln!("{}", "ISSUES:".bold());
-    eprintln!("  {}      Browse and filter issues", "issues".cyan());
+    eprintln!("{}", ui::bold("ISSUES:"));
+    eprintln!(
+        "  {}      Browse and filter issues",
+        ui::highlight("issues")
+    );
     eprintln!();
-    eprintln!("{}", "REPOSITORY TRACKING:".bold());
-    eprintln!("  {}       List tracked repositories", "repos".cyan());
+    eprintln!("{}", ui::bold("REPOSITORY TRACKING:"));
+    eprintln!(
+        "  {}       List tracked repositories",
+        ui::highlight("repos")
+    );
     eprintln!();
-    eprintln!("{}", "UTILITY:".bold());
-    eprintln!("  {}        Initialize repository for jig", "init".cyan());
-    eprintln!("  {}      Update jig to latest version", "update".cyan());
-    eprintln!("  {}     Show version information", "version".cyan());
-    eprintln!("  {}       Show path to jig executable", "which".cyan());
+    eprintln!("{}", ui::bold("UTILITY:"));
+    eprintln!(
+        "  {}        Initialize repository for jig",
+        ui::highlight("init")
+    );
+    eprintln!(
+        "  {}      Update jig to latest version",
+        ui::highlight("update")
+    );
+    eprintln!(
+        "  {}     Show version information",
+        ui::highlight("version")
+    );
+    eprintln!(
+        "  {}       Show path to jig executable",
+        ui::highlight("which")
+    );
     eprintln!(
         "  {}      Show terminal and dependency status",
-        "health".cyan()
+        ui::highlight("health")
     );
-    eprintln!("  {} Configure shell integration", "shell-setup".cyan());
+    eprintln!(
+        "  {} Configure shell integration",
+        ui::highlight("shell-setup")
+    );
     eprintln!();
-    eprintln!("{}", "GLOBAL OPTIONS:".bold());
+    eprintln!("{}", ui::bold("GLOBAL OPTIONS:"));
     eprintln!(
         "  {}  Run command across all tracked repos",
-        "-g, --global".cyan()
+        ui::highlight("-g, --global")
     );
-    eprintln!("  {} Show verbose output", "-v, --verbose".cyan());
+    eprintln!("  {} Show verbose output", ui::highlight("-v, --verbose"));
+    eprintln!(
+        "  {}    Plain output for scripting",
+        ui::highlight("--plain")
+    );
     eprintln!();
     eprintln!(
         "Use '{}' for more information about a command.",
-        "jig <command> --help".cyan()
+        ui::highlight("jig <command> --help")
     );
 }

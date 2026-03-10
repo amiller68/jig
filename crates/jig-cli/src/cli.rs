@@ -18,6 +18,10 @@ pub struct Cli {
     #[arg(short = 'v', long = "verbose", global = true)]
     pub verbose: bool,
 
+    /// Plain output: no colors, no decorations (for scripting)
+    #[arg(long = "plain", global = true)]
+    pub plain: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

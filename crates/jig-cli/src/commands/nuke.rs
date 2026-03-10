@@ -1,11 +1,10 @@
 //! Nuke command — kill all workers, remove worktrees, clear state
 
-use colored::Colorize;
-
 use jig_core::git::Repo;
 use jig_core::{git, global_state_dir, OrchestratorState, TmuxClient, WorkersState};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
+use crate::ui;
 
 /// Nuke all workers and state for this repo (keeps config)
 #[derive(clap::Args, Debug, Clone)]
@@ -28,10 +27,7 @@ impl Op for Nuke {
         nuke_repo(repo)?;
 
         eprintln!();
-        eprintln!(
-            "{}",
-            "Nuked. Config and hooks are untouched.".green().bold()
-        );
+        ui::success(&ui::bold("Nuked. Config and hooks are untouched."));
 
         Ok(NoOutput)
     }
@@ -46,10 +42,7 @@ impl Op for Nuke {
         }
 
         eprintln!();
-        eprintln!(
-            "{}",
-            "Nuked. Config and hooks are untouched.".green().bold()
-        );
+        ui::success(&ui::bold("Nuked. Config and hooks are untouched."));
 
         Ok(NoOutput)
     }
@@ -66,11 +59,10 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
     let tmux = TmuxClient::new();
     if tmux.has_session(&repo.session_name) {
         tmux.kill_session(&repo.session_name)?;
-        eprintln!(
-            "{} Killed tmux session '{}'",
-            "✓".green(),
-            repo.session_name.cyan()
-        );
+        ui::success(&format!(
+            "Killed tmux session '{}'",
+            ui::highlight(&repo.session_name)
+        ));
     }
 
     // 2. Clean up ALL event dirs for this repo (prefix match)
@@ -85,11 +77,10 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
                 }
             }
         }
-        eprintln!(
-            "{} Cleared event logs for {}",
-            "✓".green(),
-            repo_name.cyan()
-        );
+        ui::success(&format!(
+            "Cleared event logs for {}",
+            ui::highlight(&repo_name)
+        ));
     }
 
     // 3. Remove git worktrees
@@ -100,14 +91,14 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
             // Stale directory — git doesn't track it anymore, just rm it
             let _ = std::fs::remove_dir_all(&path);
         }
-        eprintln!("{} Removed worktree '{}'", "✓".green(), name.cyan());
+        ui::success(&format!("Removed worktree '{}'", ui::highlight(name)));
     }
 
     // 4. Clear orchestrator state file
     let state_path = OrchestratorState::state_file_path(&repo.repo_root);
     if state_path.exists() {
         std::fs::remove_file(&state_path)?;
-        eprintln!("{} Cleared orchestrator state", "✓".green());
+        ui::success("Cleared orchestrator state");
     }
 
     // 5. Clear global worker entries for this repo
@@ -122,11 +113,7 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
                 global.remove_worker(key);
             }
             let _ = global.save();
-            eprintln!(
-                "{} Cleared {} global worker entries",
-                "✓".green(),
-                keys.len()
-            );
+            ui::success(&format!("Cleared {} global worker entries", keys.len()));
         }
     }
 

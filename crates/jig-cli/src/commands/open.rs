@@ -1,12 +1,12 @@
 //! Open worktree command
 
 use clap::Args;
-use colored::Colorize;
 use std::path::PathBuf;
 
 use jig_core::{git, terminal, Error, RepoContext};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
+use crate::ui;
 
 /// Open/cd into a worktree
 #[derive(Args, Debug, Clone)]
@@ -80,7 +80,7 @@ impl Open {
                 if path.exists() {
                     let opened = terminal::open_tab(&path)?;
                     if opened {
-                        eprintln!("{} Opened '{}' in new tab", "✓".green(), wt_name.cyan());
+                        ui::success(&format!("Opened '{}' in new tab", ui::highlight(&wt_name)));
                     }
                 }
             }
