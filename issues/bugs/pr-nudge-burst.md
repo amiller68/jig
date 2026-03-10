@@ -1,6 +1,6 @@
 # PR nudges fire in rapid burst instead of spacing out
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Urgent
 **Labels:** auto
 
