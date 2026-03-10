@@ -1,13 +1,36 @@
 //! Issue provider trait.
 
+use std::fmt;
+
 use crate::error::Result;
 
 use super::types::{Issue, IssueFilter, IssueStatus};
+
+/// Identifies the type of issue provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderKind {
+    /// File-based provider (reads `issues/` markdown files).
+    File,
+    /// Linear integration provider.
+    Linear,
+}
+
+impl fmt::Display for ProviderKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProviderKind::File => write!(f, "file"),
+            ProviderKind::Linear => write!(f, "linear"),
+        }
+    }
+}
 
 /// Trait for issue backends (file-based, Linear, GitHub, etc.).
 pub trait IssueProvider {
     /// Provider name (e.g. "file").
     fn name(&self) -> &str;
+
+    /// The kind of provider.
+    fn kind(&self) -> ProviderKind;
 
     /// List issues matching the given filter.
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>>;

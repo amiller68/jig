@@ -57,6 +57,10 @@ impl IssueProvider for LinearProvider {
         "linear"
     }
 
+    fn kind(&self) -> super::provider::ProviderKind {
+        super::provider::ProviderKind::Linear
+    }
+
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
         // Use project filter from IssueFilter if provided, else fall back to config.
         let projects = if let Some(ref cat) = filter.category {

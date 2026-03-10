@@ -878,18 +878,17 @@ impl<'a> Daemon<'a> {
         )?;
 
         // Register worker with issue context and provider-specific completion instructions
-        let completion_instructions = match issue.provider_name.as_str() {
-            "file" => format!(
+        let completion_instructions = match issue.provider_kind {
+            crate::issues::ProviderKind::File => format!(
                 "\n\nISSUE COMPLETION: This issue is tracked by the file provider. \
                  After your PR is created, mark the issue as done by changing \
                  `**Status:** Planned` to `**Status:** Complete` in the issue file \
                  (`issues/{}.md`) and committing the change.",
                 issue.issue_id
             ),
-            "linear" => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
+            crate::issues::ProviderKind::Linear => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
                  Status sync is handled automatically — no manual status update is needed."
                 .to_string(),
-            _ => String::new(),
         };
         let context = format!(
             "{}\n\n{}{}",

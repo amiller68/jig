@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use crate::issues::ProviderKind;
+
 /// Request sent to the sync actor to fetch repos.
 pub struct SyncRequest {
     /// (repo_name, repo_path, base_branch)
@@ -90,6 +92,6 @@ pub struct SpawnableIssue {
     pub issue_body: String,
     /// Derived worker name (e.g., "eng-123").
     pub worker_name: String,
-    /// Provider name (e.g., "file", "linear") for completion instructions.
-    pub provider_name: String,
+    /// Provider kind for completion instructions.
+    pub provider_kind: ProviderKind,
 }

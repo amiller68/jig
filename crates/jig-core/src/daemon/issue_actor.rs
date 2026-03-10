@@ -96,7 +96,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             }
         };
 
-        let provider_name = provider.name().to_string();
+        let provider_kind = provider.kind();
 
         let mut repo_spawned = 0;
         for issue in issues {
@@ -118,7 +118,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
                 issue_title: issue.title,
                 issue_body: issue.body,
                 worker_name,
-                provider_name: provider_name.clone(),
+                provider_kind,
             });
             repo_spawned += 1;
         }

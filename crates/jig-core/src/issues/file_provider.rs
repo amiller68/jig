@@ -137,6 +137,10 @@ impl IssueProvider for FileProvider {
         "file"
     }
 
+    fn kind(&self) -> super::provider::ProviderKind {
+        super::provider::ProviderKind::File
+    }
+
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
         let all = self.scan_all()?;
         Ok(all.into_iter().filter(|i| i.matches(filter)).collect())
