@@ -90,4 +90,6 @@ pub struct SpawnableIssue {
     pub issue_body: String,
     /// Derived worker name (e.g., "eng-123").
     pub worker_name: String,
+    /// Provider name (e.g., "file", "linear") for completion instructions.
+    pub provider_name: String,
 }

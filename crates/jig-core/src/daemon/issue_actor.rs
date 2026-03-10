@@ -96,6 +96,8 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             }
         };
 
+        let provider_name = provider.name().to_string();
+
         let mut repo_spawned = 0;
         for issue in issues {
             if repo_spawned >= budget {
@@ -116,6 +118,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
                 issue_title: issue.title,
                 issue_body: issue.body,
                 worker_name,
+                provider_name: provider_name.clone(),
             });
             repo_spawned += 1;
         }

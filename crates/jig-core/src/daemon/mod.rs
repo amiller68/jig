@@ -877,8 +877,24 @@ impl<'a> Daemon<'a> {
             true, // auto_spawned
         )?;
 
-        // Register worker with issue context
-        let context = format!("{}\n\n{}", issue.issue_title, issue.issue_body);
+        // Register worker with issue context and provider-specific completion instructions
+        let completion_instructions = match issue.provider_name.as_str() {
+            "file" => format!(
+                "\n\nISSUE COMPLETION: This issue is tracked by the file provider. \
+                 After your PR is created, mark the issue as done by changing \
+                 `**Status:** Planned` to `**Status:** Complete` in the issue file \
+                 (`issues/{}.md`) and committing the change.",
+                issue.issue_id
+            ),
+            "linear" => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
+                 Status sync is handled automatically — no manual status update is needed."
+                .to_string(),
+            _ => String::new(),
+        };
+        let context = format!(
+            "{}\n\n{}{}",
+            issue.issue_title, issue.issue_body, completion_instructions
+        );
         wt.register(Some(&context), Some(&issue.issue_id))?;
 
         // Launch tmux window — always auto-start for daemon-spawned workers

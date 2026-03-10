@@ -13,7 +13,7 @@ pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
 
 const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
 
-YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), pushed, draft PR created via `gh pr create --draft`. Call /review when ready.
+YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), pushed, draft PR created via `gh pr create --draft`, and issue marked complete (see completion instructions in the task). Call /review when ready.
 
 HOW MONITORING WORKS: A daemon watches your activity via tool-use events. If you go idle or get stuck for ~5 minutes, you'll receive automated nudge messages (up to {{max_nudges}}). After that, a human is notified. Do not wait for input.
 
