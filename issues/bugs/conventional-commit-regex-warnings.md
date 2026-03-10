@@ -3,7 +3,6 @@
 **Status:** Done
 **Priority:** Low
 **Category:** Bugs
-**Auto:** true
 
 ## Objective
 

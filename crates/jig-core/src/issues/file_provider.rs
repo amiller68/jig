@@ -146,7 +146,7 @@ impl IssueProvider for FileProvider {
         let all = self.scan_all()?;
         Ok(all
             .into_iter()
-            .filter(|i| i.auto && i.status == IssueStatus::Planned)
+            .filter(|i| i.status == IssueStatus::Planned)
             .filter(|i| {
                 spawn_labels
                     .iter()
@@ -273,10 +273,6 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         })
         .unwrap_or_default();
 
-    let auto = extract_field(content, "Auto")
-        .map(|s| s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes"))
-        .unwrap_or(false);
-
     Ok(Issue {
         id,
         title,
@@ -287,7 +283,6 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         body: content.to_string(),
         source: rel_path.to_string(),
         children,
-        auto,
         labels,
     })
 }
@@ -360,10 +355,6 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         })
         .unwrap_or_default();
 
-    let auto = extract_field(&content, "Auto")
-        .map(|s| s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes"))
-        .unwrap_or(false);
-
     Ok(Issue {
         id,
         title,
@@ -374,7 +365,6 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         body: content,
         source: path.to_string_lossy().to_string(),
         children,
-        auto,
         labels,
     })
 }
@@ -633,14 +623,14 @@ mod tests {
         // Issue B: no dependencies, auto, planned → spawnable
         std::fs::write(
             bugs.join("fix-first.md"),
-            "# Fix First\n\n**Status:** Planned\n**Auto:** true\n",
+            "# Fix First\n\n**Status:** Planned\n",
         )
         .unwrap();
 
         // Issue A: depends on B, auto, planned → NOT spawnable (B is Planned, not Complete)
         std::fs::write(
             bugs.join("depends-on-b.md"),
-            "# Depends On B\n\n**Status:** Planned\n**Auto:** true\n**Depends-On:** bugs/fix-first\n",
+            "# Depends On B\n\n**Status:** Planned\n**Depends-On:** bugs/fix-first\n",
         )
         .unwrap();
 
@@ -654,7 +644,7 @@ mod tests {
         // Mark B as Complete → A should now also be spawnable
         std::fs::write(
             bugs.join("fix-first.md"),
-            "# Fix First\n\n**Status:** Complete\n**Auto:** true\n",
+            "# Fix First\n\n**Status:** Complete\n",
         )
         .unwrap();
 
@@ -671,7 +661,7 @@ mod tests {
 
         std::fs::write(
             features.join("needs-ghost.md"),
-            "# Needs Ghost\n\n**Status:** Planned\n**Auto:** true\n**Depends-On:** nonexistent/issue\n",
+            "# Needs Ghost\n\n**Status:** Planned\n**Depends-On:** nonexistent/issue\n",
         )
         .unwrap();
 
@@ -688,17 +678,17 @@ mod tests {
 
         std::fs::write(
             features.join("backend-task.md"),
-            "# Backend Task\n\n**Status:** Planned\n**Auto:** true\n**Labels:** backend, sprint-1\n",
+            "# Backend Task\n\n**Status:** Planned\n**Labels:** backend, sprint-1\n",
         )
         .unwrap();
         std::fs::write(
             features.join("frontend-task.md"),
-            "# Frontend Task\n\n**Status:** Planned\n**Auto:** true\n**Labels:** frontend, sprint-1\n",
+            "# Frontend Task\n\n**Status:** Planned\n**Labels:** frontend, sprint-1\n",
         )
         .unwrap();
         std::fs::write(
             features.join("unlabeled.md"),
-            "# Unlabeled\n\n**Status:** Planned\n**Auto:** true\n",
+            "# Unlabeled\n\n**Status:** Planned\n",
         )
         .unwrap();
 
@@ -753,7 +743,7 @@ mod tests {
 
         std::fs::write(
             features.join("standalone.md"),
-            "# Standalone\n\n**Status:** Planned\n**Auto:** true\n",
+            "# Standalone\n\n**Status:** Planned\n",
         )
         .unwrap();
 
@@ -776,7 +766,7 @@ mod tests {
                 body: String::new(),
                 source: String::new(),
                 children: vec![],
-                auto: false,
+
                 labels: vec![],
             },
             Issue {
@@ -789,7 +779,7 @@ mod tests {
                 body: String::new(),
                 source: String::new(),
                 children: vec![],
-                auto: false,
+
                 labels: vec![],
             },
         ];

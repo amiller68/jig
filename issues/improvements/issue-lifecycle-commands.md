@@ -3,7 +3,6 @@
 **Status:** Planned
 **Priority:** Low
 **Category:** Improvements
-**Auto:** true
 
 ## Objective
 

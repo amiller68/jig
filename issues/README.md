@@ -99,6 +99,7 @@ issues/epics/plan-and-execute/
 # [Title]
 
 **Status:** Planned | In Progress | Complete | Blocked
+**Labels:** backend, sprint-1
 
 ## Objective
 

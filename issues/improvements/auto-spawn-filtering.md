@@ -3,27 +3,25 @@
 **Status:** Planned
 **Priority:** High
 **Category:** Improvements
-**Auto:** true
 **Depends-On:** improvements/labels-and-tags
 
 ## Objective
 
-Make the daemon's auto-spawn smarter. Today it spawns any issue with `auto=true` + `status=Planned`. It should respect priority thresholds, target labels, and assignee filters — all configurable in `jig.toml`.
+Make the daemon's auto-spawn smarter. Today it spawns any `status=Planned` issue whose labels match `spawn_labels` in `jig.toml`. It should also respect priority thresholds and assignee filters.
 
 ## Current State
 
 **What works:**
-- `issue_actor.rs` calls `provider.list_spawnable()` which returns `auto=true` + `status=Planned`
+- `issue_actor.rs` calls `provider.list_spawnable(spawn_labels)` which returns `status=Planned` issues matching the configured labels
 - Respects `max_concurrent_workers` budget
 - Skips issues that already have a worker
 - Issue files are read from the git ref (`origin/main`), not the working tree
 - Config (`jig.toml`) is read from the local working tree
+- Label-based filtering via `[issues] spawn_labels` already implemented
 
 **What's missing:**
 - No priority threshold (spawns Low issues just as eagerly as Urgent)
-- No label/tag targeting (can't say "only spawn issues tagged `backend`")
 - No assignee filter (can't say "only spawn unassigned issues")
-- `list_spawnable()` takes no filter arguments — it's all-or-nothing
 
 ## Design
 

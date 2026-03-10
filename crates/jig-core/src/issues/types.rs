@@ -104,8 +104,6 @@ pub struct Issue {
     pub source: String,
     /// Child ticket IDs (for epic indices with a `## Tickets` table).
     pub children: Vec<String>,
-    /// Whether this issue is auto-spawnable by the daemon.
-    pub auto: bool,
     /// Labels/tags attached to this issue.
     pub labels: Vec<String>,
 }
@@ -182,7 +180,7 @@ mod tests {
             body: String::new(),
             source: String::new(),
             children: vec![],
-            auto: false,
+
             labels: vec![],
         };
 
@@ -209,7 +207,7 @@ mod tests {
             body: String::new(),
             source: String::new(),
             children: vec![],
-            auto: false,
+
             labels: vec!["backend".into(), "Auth".into()],
         };
 

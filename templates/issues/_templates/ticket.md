@@ -1,6 +1,7 @@
 # [Ticket Title]
 
 **Status:** Planned
+**Labels:**
 
 ## Objective
 

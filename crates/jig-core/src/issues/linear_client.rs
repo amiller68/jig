@@ -203,8 +203,6 @@ impl From<RawIssue> for Issue {
 
         let labels: Vec<String> = raw.labels.nodes.into_iter().map(|l| l.name).collect();
 
-        let auto = labels.iter().any(|l| l.eq_ignore_ascii_case("jig-auto"));
-
         Issue {
             id: raw.identifier,
             title: raw.title,
@@ -215,7 +213,6 @@ impl From<RawIssue> for Issue {
             body,
             source: raw.url,
             children,
-            auto,
             labels,
         }
     }
