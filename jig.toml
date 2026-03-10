@@ -11,3 +11,7 @@ auto = true
 # Agent configuration
 [agent]
 type = "claude"
+
+# Issues configuration
+[issues]
+spawn_labels = ["auto"]

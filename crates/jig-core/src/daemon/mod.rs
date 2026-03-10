@@ -16,6 +16,7 @@ pub mod messages;
 mod pr;
 pub mod prune_actor;
 pub mod runtime;
+pub mod spawn_actor;
 pub mod sync_actor;
 
 use std::collections::HashMap;
@@ -120,8 +121,10 @@ pub struct TickResult {
     pub errors: Vec<String>,
     /// Per-worker PR health info, keyed by "repo/worker".
     pub worker_info: HashMap<String, WorkerTickInfo>,
-    /// Issues auto-spawned this tick.
+    /// Issues auto-spawned this tick (completed).
     pub auto_spawned: Vec<String>,
+    /// Worker names currently being spawned in the background.
+    pub spawning: Vec<String>,
     /// Workers pruned (worktree removed) this tick.
     pub pruned: Vec<String>,
     /// Pre-computed display data for the render callback (zero I/O).
@@ -198,6 +201,19 @@ impl<'a> Daemon<'a> {
                     result.errors.push(format!("prune {}: {}", pr.key, err));
                 } else {
                     result.pruned.push(pr.key);
+                }
+            }
+        }
+
+        // Drain spawn results from previous tick
+        if let Some(spawn_complete) = runtime.drain_spawn() {
+            for sr in spawn_complete.results {
+                if let Some(err) = sr.error {
+                    result
+                        .errors
+                        .push(format!("auto-spawn {}: {}", sr.worker_name, err));
+                } else {
+                    result.auto_spawned.push(sr.worker_name);
                 }
             }
         }
@@ -303,24 +319,12 @@ impl<'a> Daemon<'a> {
         // 4. Trigger issue poll if auto-spawn enabled (polls all repos)
         runtime.maybe_trigger_issue_poll(&registry, &worker_list);
 
-        // 5. Auto-spawn from drained spawnable issues
-        for issue in spawnable {
-            match self.auto_spawn_worker(&issue) {
-                Ok(()) => {
-                    tracing::info!(
-                        worker = %issue.worker_name,
-                        issue = %issue.issue_id,
-                        "auto-spawned worker"
-                    );
-                    result.auto_spawned.push(issue.worker_name.clone());
-                }
-                Err(e) => {
-                    result
-                        .errors
-                        .push(format!("auto-spawn {}: {}", issue.issue_id, e));
-                }
-            }
+        // 5. Send spawnable issues to background spawn actor (non-blocking)
+        if !spawnable.is_empty() {
+            runtime.send_spawn(spawnable);
         }
+
+        result.spawning = runtime.spawning_workers().to_vec();
 
         Ok(result)
     }

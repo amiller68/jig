@@ -8,7 +8,7 @@ use crate::context::RepoContext;
 use crate::registry::RepoRegistry;
 
 use super::messages::*;
-use super::{github_actor, issue_actor, prune_actor, sync_actor};
+use super::{github_actor, issue_actor, prune_actor, spawn_actor, sync_actor};
 
 /// Runtime configuration for the daemon actors.
 #[derive(Debug, Clone)]
@@ -58,6 +58,13 @@ pub struct DaemonRuntime {
     prune_rx: flume::Receiver<PruneComplete>,
     prune_pending: bool,
 
+    // Spawn actor
+    spawn_tx: flume::Sender<SpawnRequest>,
+    spawn_rx: flume::Receiver<SpawnComplete>,
+    spawn_pending: bool,
+    /// Worker names currently being spawned in the background (for display).
+    spawning_workers: Vec<String>,
+
     config: RuntimeConfig,
 
     // Thread handles (kept alive for clean shutdown)
@@ -83,6 +90,10 @@ impl DaemonRuntime {
         let (prune_resp_tx, prune_resp_rx) = flume::bounded(1);
         let prune_handle = prune_actor::spawn(prune_req_rx, prune_resp_tx);
 
+        let (spawn_req_tx, spawn_req_rx) = flume::bounded(1);
+        let (spawn_resp_tx, spawn_resp_rx) = flume::bounded(1);
+        let spawn_handle = spawn_actor::spawn(spawn_req_rx, spawn_resp_tx);
+
         // Start with past timestamps so first tick triggers sync/poll immediately
         let past = Instant::now();
 
@@ -105,8 +116,19 @@ impl DaemonRuntime {
             prune_rx: prune_resp_rx,
             prune_pending: false,
 
+            spawn_tx: spawn_req_tx,
+            spawn_rx: spawn_resp_rx,
+            spawn_pending: false,
+            spawning_workers: Vec::new(),
+
             config,
-            _handles: vec![sync_handle, gh_handle, issue_handle, prune_handle],
+            _handles: vec![
+                sync_handle,
+                gh_handle,
+                issue_handle,
+                prune_handle,
+                spawn_handle,
+            ],
         }
     }
 
@@ -268,6 +290,42 @@ impl DaemonRuntime {
     /// Whether a prune request is currently in flight.
     pub fn prune_pending(&self) -> bool {
         self.prune_pending
+    }
+
+    /// Send spawnable issues to the spawn actor (non-blocking).
+    pub fn send_spawn(&mut self, issues: Vec<SpawnableIssue>) {
+        if self.spawn_pending || issues.is_empty() {
+            return;
+        }
+        self.spawning_workers = issues.iter().map(|i| i.worker_name.clone()).collect();
+        if self.spawn_tx.try_send(SpawnRequest { issues }).is_ok() {
+            self.spawn_pending = true;
+            tracing::debug!("triggered spawn");
+        } else {
+            self.spawning_workers.clear();
+        }
+    }
+
+    /// Drain any completed spawn response (non-blocking).
+    pub fn drain_spawn(&mut self) -> Option<SpawnComplete> {
+        match self.spawn_rx.try_recv() {
+            Ok(result) => {
+                self.spawn_pending = false;
+                self.spawning_workers.clear();
+                Some(result)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Whether a spawn request is currently in flight.
+    pub fn spawn_pending(&self) -> bool {
+        self.spawn_pending
+    }
+
+    /// Worker names currently being spawned in the background.
+    pub fn spawning_workers(&self) -> &[String] {
+        &self.spawning_workers
     }
 
     /// Get runtime config reference.

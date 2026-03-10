@@ -98,3 +98,19 @@ pub struct SpawnableIssue {
     /// Provider kind for completion instructions.
     pub provider_kind: ProviderKind,
 }
+
+/// Request sent to the spawn actor to create workers.
+pub struct SpawnRequest {
+    pub issues: Vec<SpawnableIssue>,
+}
+
+/// Result of spawning a single worker.
+pub struct SpawnResult {
+    pub worker_name: String,
+    pub error: Option<String>,
+}
+
+/// Response from the spawn actor.
+pub struct SpawnComplete {
+    pub results: Vec<SpawnResult>,
+}

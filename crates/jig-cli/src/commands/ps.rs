@@ -284,8 +284,17 @@ fn run_watch(
                     } else {
                         ""
                     };
+                    let spawning_section = if tick.spawning.is_empty() {
+                        String::new()
+                    } else {
+                        let names: Vec<&str> = tick.spawning.iter().map(|s| s.as_str()).collect();
+                        format!(
+                            "\n\x1B[2mspawning:\x1B[0m \x1B[33m{}\x1B[0m\n",
+                            names.join(", ")
+                        )
+                    };
                     let output = format!(
-                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table_output}\n\n\x1B[2m[l]ogs  [q]uit\x1B[0m",
+                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table_output}{spawning_section}\n\x1B[2m[l]ogs  [q]uit\x1B[0m",
                         tick.worker_display.len(), interval,
                     );
                     for line in output.lines() {
@@ -362,6 +371,9 @@ fn format_tick_status(tick: &Option<&TickResult>) -> String {
     }
     if !tick.auto_spawned.is_empty() {
         parts.push(format!("{} spawned", tick.auto_spawned.len()));
+    }
+    if !tick.spawning.is_empty() {
+        parts.push(format!("spawning {}", tick.spawning.len()));
     }
     if !tick.pruned.is_empty() {
         parts.push(format!("{} pruned", tick.pruned.len()));

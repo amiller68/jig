@@ -196,6 +196,7 @@ pub fn print_error(e: &dyn std::error::Error) {
 /// Single source of truth: WorkerStatus → comfy_table color.
 pub fn worker_state_color(status: &WorkerStatus) -> Color {
     match status {
+        WorkerStatus::Initializing => Color::Blue,
         WorkerStatus::Running => Color::Green,
         WorkerStatus::Spawned => Color::Blue,
         WorkerStatus::Idle => Color::Yellow,
@@ -212,6 +213,7 @@ pub fn worker_state_color(status: &WorkerStatus) -> Color {
 /// Single source of truth: WorkerStatus → display label.
 pub fn worker_state_str(status: &WorkerStatus) -> &'static str {
     match status {
+        WorkerStatus::Initializing => "initializing",
         WorkerStatus::Running => "running",
         WorkerStatus::Spawned => "spawned",
         WorkerStatus::Idle => "idle",

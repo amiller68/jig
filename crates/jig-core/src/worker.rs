@@ -146,6 +146,8 @@ impl TaskContext {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerStatus {
+    /// Worker is being created (worktree + on-create hook running)
+    Initializing,
     /// Worker just spawned, no events yet
     Spawned,
     /// Tool use events flowing, actively working
@@ -171,6 +173,7 @@ pub enum WorkerStatus {
 impl WorkerStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Initializing => "initializing",
             Self::Spawned => "spawned",
             Self::Running => "running",
             Self::Idle => "idle",
