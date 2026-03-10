@@ -4,6 +4,7 @@ use clap::Args;
 use colored::Colorize;
 use std::path::PathBuf;
 
+use jig_core::git::Repo;
 use jig_core::{config, git, Error};
 
 use crate::op::{Op, RepoCtx};
@@ -82,7 +83,8 @@ impl Op for Create {
 
         // Create the worktree
         let base = self.base.as_deref().unwrap_or(&repo.base_branch);
-        git::create_worktree(&worktree_path, branch, base)?;
+        let git_repo = Repo::discover()?;
+        git_repo.create_worktree(&worktree_path, branch, base)?;
 
         eprintln!(
             "{} Created worktree '{}' on branch '{}'",

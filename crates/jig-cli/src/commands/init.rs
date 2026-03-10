@@ -5,7 +5,8 @@ use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
-use jig_core::{adapter, git, session, terminal, Error, JigToml};
+use jig_core::git::Repo;
+use jig_core::{adapter, session, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 
@@ -78,7 +79,10 @@ impl Op for Init {
         // (init is often the first jig command run in a repo)
         let repo_root = match ctx.repo() {
             Ok(repo) => repo.repo_root.clone(),
-            Err(_) => git::get_base_repo()?,
+            Err(_) => {
+                let git_repo = Repo::discover()?;
+                git_repo.base_repo_dir()
+            }
         };
 
         // Validate agent argument

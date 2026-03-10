@@ -3,7 +3,8 @@
 use clap::Args;
 use colored::Colorize;
 
-use jig_core::{git, Error};
+use jig_core::git::Repo;
+use jig_core::Error;
 
 use crate::op::{Op, RepoCtx};
 
@@ -49,9 +50,9 @@ impl Op for Review {
             return Err(Error::WorktreeNotFound(self.name.clone()).into());
         }
 
-        let branch = git::get_worktree_branch(&worktree_path)?;
-        let commits = git::get_commits_ahead(&worktree_path, &repo.base_branch)?;
-        let is_dirty = git::has_uncommitted_changes(&worktree_path)?;
+        let branch = Repo::worktree_branch(&worktree_path)?;
+        let commits = Repo::commits_ahead(&worktree_path, &repo.base_branch)?;
+        let is_dirty = Repo::has_uncommitted_changes(&worktree_path)?;
 
         // Header
         eprintln!("{}", format!("Review: {}", self.name).bold());
@@ -86,7 +87,7 @@ impl Op for Review {
         eprintln!();
         if self.full {
             eprintln!("{}", "Full diff:".bold());
-            let diff = git::get_diff(&worktree_path, &repo.base_branch)?;
+            let diff = Repo::diff(&worktree_path, &repo.base_branch)?;
             if diff.is_empty() {
                 eprintln!("  No changes");
                 Ok(ReviewOutput(String::new()))
@@ -95,7 +96,7 @@ impl Op for Review {
             }
         } else {
             eprintln!("{}", "Changed files:".bold());
-            let stat = git::get_diff_stat(&worktree_path, &repo.base_branch)?;
+            let stat = Repo::diff_stat(&worktree_path, &repo.base_branch)?;
             if stat.is_empty() {
                 eprintln!("  No changes");
                 Ok(ReviewOutput(String::new()))

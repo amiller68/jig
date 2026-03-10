@@ -9,7 +9,7 @@ use crate::config::{JigToml, RepoConfig};
 use crate::context::RepoContext;
 use crate::error::{Error, Result};
 use crate::events::{Event, EventLog, EventType};
-use crate::git;
+use crate::git::Repo;
 use crate::global::GlobalConfig;
 use crate::session;
 use crate::state::OrchestratorState;
@@ -165,10 +165,10 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
             let worktree_path = repo.worktrees_dir.join(&worker.name);
 
             let (commits_ahead, is_dirty) = if worktree_path.exists() {
-                let commits = git::get_commits_ahead(&worktree_path, &repo.base_branch)
+                let commits = Repo::commits_ahead(&worktree_path, &repo.base_branch)
                     .unwrap_or_default()
                     .len();
-                let dirty = git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+                let dirty = Repo::has_uncommitted_changes(&worktree_path).unwrap_or(false);
                 (commits, dirty)
             } else {
                 (0, false)
@@ -196,12 +196,12 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
             }
 
             let status = get_worker_status(&repo.session_name, &window_name);
-            let branch = git::get_worktree_branch(&worktree_path).unwrap_or_default();
+            let branch = Repo::worktree_branch(&worktree_path).unwrap_or_default();
 
-            let commits_ahead = git::get_commits_ahead(&worktree_path, &repo.base_branch)
+            let commits_ahead = Repo::commits_ahead(&worktree_path, &repo.base_branch)
                 .unwrap_or_default()
                 .len();
-            let is_dirty = git::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+            let is_dirty = Repo::has_uncommitted_changes(&worktree_path).unwrap_or(false);
 
             tasks.push(TaskInfo {
                 name: window_name,

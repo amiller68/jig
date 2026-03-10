@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::config::{Config, JigToml, JIG_DIR};
 use crate::error::Result;
-use crate::git;
+use crate::git::Repo;
 
 /// All repo-derived state needed by jig operations.
 /// Created once at startup to avoid redundant git subprocess calls.
@@ -24,7 +24,8 @@ pub struct RepoContext {
 impl RepoContext {
     /// Derive full repo context from the current working directory.
     pub fn from_cwd() -> Result<Self> {
-        let git_common_dir = git::get_git_common_dir()?;
+        let repo = Repo::discover()?;
+        let git_common_dir = repo.common_dir();
         let repo_root = git_common_dir
             .parent()
             .unwrap_or(&git_common_dir)
@@ -34,7 +35,8 @@ impl RepoContext {
 
     /// Derive full repo context from a specific path.
     pub fn from_path(path: &std::path::Path) -> Result<Self> {
-        let git_common_dir = git::get_git_common_dir_for(path)?;
+        let repo = Repo::open(path)?;
+        let git_common_dir = repo.common_dir();
         let repo_root = git_common_dir
             .parent()
             .unwrap_or(&git_common_dir)

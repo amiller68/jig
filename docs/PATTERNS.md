@@ -50,7 +50,7 @@ impl Op for Create {
   - `jig-cli` — CLI binary, depends on jig-core
 
 - **Within crates**: One module per domain concept
-  - `git.rs` — Low-level git operations via shell commands
+  - `git.rs` — Git operations via git2 (libgit2) `Repo` wrapper
   - `worktree.rs` — High-level worktree abstraction
   - `config.rs` — Configuration loading and management
   - `worker.rs` — Worker state and lifecycle
@@ -113,9 +113,10 @@ fn test_create_worktree() {
 
 ## Common Idioms
 
-- **Git operations**: Shell out to `git` command via `std::process::Command`
-  - Parse output with `String::from_utf8_lossy`
-  - Check `output.status.success()` before using output
+- **Git operations**: Use `git::Repo` wrapper around `git2::Repository`
+  - Instance methods for operations requiring repo context (branch, worktree, merge)
+  - Associated functions for path-scoped operations (diff, status, commits ahead)
+  - Errors propagate via `#[from] git2::Error` in the `Error` enum
 
 - **Path handling**: Use `PathBuf` for owned paths, `&Path` for references
   - Canonicalize paths before displaying to users

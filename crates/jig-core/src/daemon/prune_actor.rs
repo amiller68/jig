@@ -1,6 +1,7 @@
 //! Prune actor — removes worktrees for merged/closed PRs in a background thread.
 
 use super::messages::{PruneComplete, PruneRequest, PruneResult};
+use crate::git::Repo;
 
 /// Spawn the prune actor thread. Returns immediately.
 ///
@@ -46,26 +47,14 @@ pub fn spawn(
 fn prune_single(target: &super::messages::PruneTarget) -> std::result::Result<(), String> {
     let worktree_path = crate::config::worktree_path(&target.repo_path, &target.worker_name);
 
-    let repo = git2::Repository::open(&target.repo_path)
-        .map_err(|e| format!("failed to open repo: {}", e))?;
+    let repo = Repo::open(&target.repo_path).map_err(|e| format!("failed to open repo: {}", e))?;
 
     if worktree_path.exists() {
-        // Find the worktree name that matches this path
-        let canonical = worktree_path
-            .canonicalize()
-            .unwrap_or_else(|_| worktree_path.clone());
+        let wt_name = repo
+            .find_worktree_name_for_path(&worktree_path)
+            .map_err(|e| format!("failed to find worktree: {}", e))?;
 
-        let wt_name = find_worktree_by_path(&repo, &canonical)?;
-
-        let wt = repo
-            .find_worktree(&wt_name)
-            .map_err(|e| format!("failed to find worktree '{}': {}", wt_name, e))?;
-
-        let mut opts = git2::WorktreePruneOptions::new();
-        opts.valid(true); // prune even though it's valid
-        opts.working_tree(true); // remove the working directory
-
-        wt.prune(Some(&mut opts))
+        repo.prune_worktree(&wt_name)
             .map_err(|e| format!("git worktree prune failed: {}", e))?;
 
         // Clean up empty parent dirs (for nested paths like feature/foo)
@@ -73,8 +62,7 @@ fn prune_single(target: &super::messages::PruneTarget) -> std::result::Result<()
         cleanup_empty_parents(&worktree_path, &worktrees_dir);
     } else {
         // Directory already gone but git may still have a stale registration.
-        // Prune entries whose directories no longer exist.
-        prune_stale_worktrees(&repo);
+        repo.prune_stale_worktrees();
     }
 
     // Remove event logs
@@ -102,49 +90,6 @@ fn prune_single(target: &super::messages::PruneTarget) -> std::result::Result<()
     });
 
     Ok(())
-}
-
-/// Find the worktree name that corresponds to a given canonical path.
-fn find_worktree_by_path(
-    repo: &git2::Repository,
-    canonical_path: &std::path::Path,
-) -> std::result::Result<String, String> {
-    let wt_names = repo
-        .worktrees()
-        .map_err(|e| format!("failed to list worktrees: {}", e))?;
-
-    for i in 0..wt_names.len() {
-        if let Some(name) = wt_names.get(i) {
-            if let Ok(wt) = repo.find_worktree(name) {
-                let wt_path = wt.path().to_path_buf();
-                let wt_canonical = wt_path.canonicalize().unwrap_or(wt_path);
-                if wt_canonical == canonical_path {
-                    return Ok(name.to_string());
-                }
-            }
-        }
-    }
-
-    Err(format!(
-        "no worktree found for path: {}",
-        canonical_path.display()
-    ))
-}
-
-/// Prune stale (invalid) worktree registrations.
-fn prune_stale_worktrees(repo: &git2::Repository) {
-    if let Ok(wt_names) = repo.worktrees() {
-        for i in 0..wt_names.len() {
-            if let Some(name) = wt_names.get(i) {
-                if let Ok(wt) = repo.find_worktree(name) {
-                    if wt.validate().is_err() {
-                        let mut opts = git2::WorktreePruneOptions::new();
-                        let _ = wt.prune(Some(&mut opts));
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Remove empty parent directories up to (but not including) the stop directory.
