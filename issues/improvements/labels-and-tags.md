@@ -1,6 +1,6 @@
 # Labels and Tags
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Category:** Improvements
 **Auto:** true

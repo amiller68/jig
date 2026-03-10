@@ -16,7 +16,9 @@ pub trait IssueProvider {
     fn get(&self, id: &str) -> Result<Option<Issue>>;
 
     /// List issues eligible for auto-spawning (status=Planned + auto=true).
-    fn list_spawnable(&self) -> Result<Vec<Issue>>;
+    /// When `spawn_labels` is non-empty, only issues carrying all of those
+    /// labels are returned.
+    fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>>;
 
     /// Check whether all dependencies of an issue are satisfied (Complete).
     ///

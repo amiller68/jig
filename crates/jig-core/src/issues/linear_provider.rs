@@ -87,7 +87,7 @@ impl IssueProvider for LinearProvider {
         Ok(issues)
     }
 
-    fn list_spawnable(&self) -> Result<Vec<Issue>> {
+    fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>> {
         // List planned issues, then filter to those with jig-auto label
         let all = self.list(&IssueFilter {
             status: Some(IssueStatus::Planned),
@@ -96,6 +96,13 @@ impl IssueProvider for LinearProvider {
         Ok(all
             .into_iter()
             .filter(|i| i.auto)
+            .filter(|i| {
+                spawn_labels.iter().all(|required| {
+                    i.labels
+                        .iter()
+                        .any(|l| l.eq_ignore_ascii_case(required))
+                })
+            })
             .filter(|i| self.is_spawnable_with_deps(i))
             .collect())
     }

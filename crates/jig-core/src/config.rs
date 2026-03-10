@@ -271,6 +271,10 @@ pub struct IssuesConfig {
     /// Linear-specific configuration (required when provider = "linear").
     #[serde(default)]
     pub linear: Option<LinearIssuesConfig>,
+    /// Labels required for auto-spawn (all must match). When set, only issues
+    /// carrying all of these labels are eligible for daemon auto-spawning.
+    #[serde(default)]
+    pub spawn_labels: Vec<String>,
 }
 
 /// Linear issue provider configuration in jig.toml.
@@ -301,6 +305,7 @@ impl Default for IssuesConfig {
             provider: default_issues_provider(),
             directory: default_issues_directory(),
             linear: None,
+            spawn_labels: Vec::new(),
         }
     }
 }

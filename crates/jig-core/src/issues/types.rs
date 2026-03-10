@@ -196,4 +196,48 @@ mod tests {
             ..Default::default()
         }));
     }
+
+    #[test]
+    fn filter_matches_labels() {
+        let issue = Issue {
+            id: "test".into(),
+            title: "Test".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            auto: false,
+            labels: vec!["backend".into(), "Auth".into()],
+        };
+
+        // Single label match (case-insensitive)
+        assert!(issue.matches(&IssueFilter {
+            labels: vec!["Backend".into()],
+            ..Default::default()
+        }));
+
+        // Multiple labels — all must match
+        assert!(issue.matches(&IssueFilter {
+            labels: vec!["backend".into(), "auth".into()],
+            ..Default::default()
+        }));
+
+        // Missing label → no match
+        assert!(!issue.matches(&IssueFilter {
+            labels: vec!["frontend".into()],
+            ..Default::default()
+        }));
+
+        // One present, one missing → no match
+        assert!(!issue.matches(&IssueFilter {
+            labels: vec!["backend".into(), "frontend".into()],
+            ..Default::default()
+        }));
+
+        // Empty filter labels → matches everything
+        assert!(issue.matches(&IssueFilter::default()));
+    }
 }

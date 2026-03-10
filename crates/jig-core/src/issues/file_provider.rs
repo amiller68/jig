@@ -142,11 +142,18 @@ impl IssueProvider for FileProvider {
         Ok(all.into_iter().filter(|i| i.matches(filter)).collect())
     }
 
-    fn list_spawnable(&self) -> Result<Vec<Issue>> {
+    fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>> {
         let all = self.scan_all()?;
         Ok(all
             .into_iter()
             .filter(|i| i.auto && i.status == IssueStatus::Planned)
+            .filter(|i| {
+                spawn_labels.iter().all(|required| {
+                    i.labels
+                        .iter()
+                        .any(|l| l.eq_ignore_ascii_case(required))
+                })
+            })
             .filter(|i| self.is_spawnable_with_deps(i))
             .collect())
     }
@@ -642,7 +649,7 @@ mod tests {
         let provider = FileProvider::new(tmp.path());
 
         // Only B should be spawnable
-        let spawnable = provider.list_spawnable().unwrap();
+        let spawnable = provider.list_spawnable(&[]).unwrap();
         assert_eq!(spawnable.len(), 1);
         assert_eq!(spawnable[0].id, "bugs/fix-first");
 
@@ -653,7 +660,7 @@ mod tests {
         )
         .unwrap();
 
-        let spawnable = provider.list_spawnable().unwrap();
+        let spawnable = provider.list_spawnable(&[]).unwrap();
         assert_eq!(spawnable.len(), 1);
         assert_eq!(spawnable[0].id, "bugs/depends-on-b");
     }
@@ -671,8 +678,80 @@ mod tests {
         .unwrap();
 
         let provider = FileProvider::new(tmp.path());
-        let spawnable = provider.list_spawnable().unwrap();
+        let spawnable = provider.list_spawnable(&[]).unwrap();
         assert!(spawnable.is_empty());
+    }
+
+    #[test]
+    fn list_spawnable_filters_by_spawn_labels() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+
+        std::fs::write(
+            features.join("backend-task.md"),
+            "# Backend Task\n\n**Status:** Planned\n**Auto:** true\n**Labels:** backend, sprint-1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            features.join("frontend-task.md"),
+            "# Frontend Task\n\n**Status:** Planned\n**Auto:** true\n**Labels:** frontend, sprint-1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            features.join("unlabeled.md"),
+            "# Unlabeled\n\n**Status:** Planned\n**Auto:** true\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+
+        // No spawn_labels → all auto issues returned
+        let all = provider.list_spawnable(&[]).unwrap();
+        assert_eq!(all.len(), 3);
+
+        // Filter to backend only
+        let backend = provider
+            .list_spawnable(&["backend".to_string()])
+            .unwrap();
+        assert_eq!(backend.len(), 1);
+        assert_eq!(backend[0].title, "Backend Task");
+
+        // Filter requiring both backend + sprint-1
+        let both = provider
+            .list_spawnable(&["backend".to_string(), "sprint-1".to_string()])
+            .unwrap();
+        assert_eq!(both.len(), 1);
+
+        // Filter to sprint-1 → matches both labeled issues
+        let sprint = provider
+            .list_spawnable(&["sprint-1".to_string()])
+            .unwrap();
+        assert_eq!(sprint.len(), 2);
+
+        // Filter to nonexistent label → empty
+        let none = provider
+            .list_spawnable(&["nonexistent".to_string()])
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn parse_labels_from_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("labeled.md"),
+            "# Labeled Issue\n\n**Status:** Planned\n**Labels:** backend, auth, sprint-12\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let issues = provider.list(&IssueFilter::default()).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(
+            issues[0].labels,
+            vec!["backend", "auth", "sprint-12"]
+        );
     }
 
     #[test]
