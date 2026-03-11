@@ -167,6 +167,23 @@ impl<'a> PrMonitor<'a> {
                                     );
                                     continue;
                                 }
+                                // Cooldown: skip if last nudge of this type was too recent
+                                if let Some(&last_ts) =
+                                    worker_state.last_nudge_at.get(nudge_type.count_key())
+                                {
+                                    let now = chrono::Utc::now().timestamp();
+                                    let elapsed = now - last_ts;
+                                    if elapsed < self.config.health.silence_threshold_seconds as i64
+                                    {
+                                        tracing::debug!(
+                                            nudge_type = nudge_type.count_key(),
+                                            elapsed,
+                                            cooldown = self.config.health.silence_threshold_seconds,
+                                            "PR nudge cooldown active, skipping"
+                                        );
+                                        continue;
+                                    }
+                                }
                                 actions.push(Action::Nudge {
                                     worker_id: worker_name.to_string(),
                                     nudge_type,

@@ -558,6 +558,21 @@ impl<'a> Daemon<'a> {
                         );
                         continue;
                     }
+                    // Cooldown: skip if last nudge of this type was too recent
+                    if let Some(&last_ts) = new_state.last_nudge_at.get(nudge_type.count_key()) {
+                        let now = chrono::Utc::now().timestamp();
+                        let elapsed = now - last_ts;
+                        if elapsed < self.config.health.silence_threshold_seconds as i64 {
+                            tracing::debug!(
+                                worker = key,
+                                nudge_type = nudge_type.count_key(),
+                                elapsed,
+                                cooldown = self.config.health.silence_threshold_seconds,
+                                "PR nudge cooldown active, skipping"
+                            );
+                            continue;
+                        }
+                    }
                     actions.push(Action::Nudge {
                         worker_id: worker_name.to_string(),
                         nudge_type,
@@ -1103,6 +1118,7 @@ fn entry_to_worker_state(entry: &WorkerEntry) -> WorkerState {
         last_commit_at: None,
         pr_url: entry.pr_url.clone(),
         nudge_counts: entry.nudge_counts.clone(),
+        last_nudge_at: HashMap::new(),
         issue_ref: entry.issue.clone(),
         started_at: Some(entry.started_at),
         last_event_at: Some(entry.last_event_at),
