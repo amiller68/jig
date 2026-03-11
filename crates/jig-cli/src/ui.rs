@@ -3,10 +3,12 @@
 //! Provides consistent status symbols, color helpers, truncation, table builders,
 //! and a global plain-mode flag for scriptable output.
 
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
+use crossterm::terminal;
 
 use jig_core::daemon::{WorkerDisplayInfo, WorkerTickInfo};
 use jig_core::spawn::TaskStatus;
@@ -422,4 +424,30 @@ pub fn render_worker_table_grouped(workers: &[WorkerDisplayInfo], borders: bool)
     }
 
     sections.join("\n\n")
+}
+
+// ---------------------------------------------------------------------------
+// Alternate screen
+// ---------------------------------------------------------------------------
+
+/// Run a closure in the alternate screen with raw mode enabled.
+///
+/// Enters the alternate screen buffer (like `less` or `git diff`), enables
+/// raw mode for keypress handling, then runs `f`. On return (or error),
+/// raw mode and the alternate screen are always restored.
+pub fn with_alternate_screen<F, T, E>(f: F) -> Result<T, E>
+where
+    F: FnOnce(&mut io::Stderr) -> Result<T, E>,
+    E: From<io::Error>,
+{
+    let mut w = io::stderr();
+    crossterm::execute!(w, terminal::EnterAlternateScreen).map_err(io::Error::from)?;
+    terminal::enable_raw_mode()?;
+
+    let result = f(&mut w);
+
+    let _ = terminal::disable_raw_mode();
+    let _ = crossterm::execute!(w, terminal::LeaveAlternateScreen);
+
+    result
 }

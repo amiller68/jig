@@ -42,8 +42,8 @@ query ListIssues($filter: IssueFilter, $first: Int) {
 "#;
 
 const GET_ISSUE_QUERY: &str = r#"
-query GetIssue($identifier: String!) {
-  issueSearch(filter: { identifier: { eq: $identifier } }, first: 1) {
+query GetIssue($filter: IssueFilter, $first: Int) {
+  issues(filter: $filter, first: $first) {
     nodes {
       identifier
       title
@@ -60,10 +60,19 @@ query GetIssue($identifier: String!) {
         nodes {
           type
           relatedIssue { identifier }
+        }
+      }
     }
   }
 }
 "#;
+
+/// Parse an identifier like "AUT-62" into (team_key, number).
+fn parse_identifier(identifier: &str) -> Option<(&str, i64)> {
+    let (team, num) = identifier.rsplit_once('-')?;
+    let n = num.parse::<i64>().ok()?;
+    Some((team, n))
+}
 
 // -- Raw API response types ---------------------------------------------------
 
@@ -81,12 +90,6 @@ struct GqlError {
 #[derive(Debug, Deserialize)]
 struct ListData {
     issues: NodeList<RawIssue>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchData {
-    issue_search: NodeList<RawIssue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,7 +191,7 @@ impl From<RawIssue> for Issue {
             .relations
             .nodes
             .into_iter()
-            .filter(|r| r.relation_type == "blocks")
+            .filter(|r| r.relation_type == "is_blocked_by")
             .map(|r| r.related_issue.identifier)
             .collect();
 
@@ -328,10 +331,19 @@ impl LinearClient {
         Ok(data.issues.nodes.into_iter().map(Issue::from).collect())
     }
 
-    /// Get a single issue by its identifier (e.g. "ENG-123").
+    /// Get a single issue by its identifier (e.g. "AUT-123").
     pub fn get_issue(&self, identifier: &str) -> Result<Option<Issue>> {
+        let (team_key, number) = parse_identifier(identifier)
+            .ok_or_else(|| Error::Linear(format!("invalid issue identifier: {identifier}")))?;
+
+        let filter = serde_json::json!({
+            "team": { "key": { "eq": team_key } },
+            "number": { "eq": number }
+        });
+
         let variables = serde_json::json!({
-            "identifier": identifier,
+            "filter": filter,
+            "first": 1,
         });
 
         let request = GqlRequest {
@@ -339,7 +351,7 @@ impl LinearClient {
             variables,
         };
 
-        let data: SearchData = self.execute(&request)?;
-        Ok(data.issue_search.nodes.into_iter().next().map(Issue::from))
+        let data: ListData = self.execute(&request)?;
+        Ok(data.issues.nodes.into_iter().next().map(Issue::from))
     }
 }

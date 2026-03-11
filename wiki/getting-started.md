@@ -166,7 +166,7 @@ jig remove hello-world    # Clean up
 | `jig init <agent>` | Initialize jig in a repository (`--audit` to auto-populate docs) |
 | `jig config` | View/edit configuration (`base`, `on-create`, `show`) |
 | `jig repos` | List registered repos |
-| `jig issues` | Browse issues (`-i` interactive, `--auto` spawnable only) |
+| `jig issues` | Browse issues (`-i` interactive, `--auto` spawnable, `--all` include completed) |
 
 ### System
 

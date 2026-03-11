@@ -54,6 +54,10 @@ pub struct Issues {
     #[arg(long)]
     pub auto: bool,
 
+    /// Include completed/canceled issues (excluded by default)
+    #[arg(long)]
+    pub all: bool,
+
     /// Print issue IDs only (one per line, for scripting)
     #[arg(long)]
     pub ids: bool,
@@ -90,6 +94,17 @@ impl Issues {
         }
     }
 
+    /// Filter out completed issues unless --all or --status was specified.
+    fn exclude_completed(&self, issues: Vec<CoreIssue>) -> Vec<CoreIssue> {
+        if self.all || self.status.is_some() {
+            return issues;
+        }
+        issues
+            .into_iter()
+            .filter(|i| i.status != IssueStatus::Complete)
+            .collect()
+    }
+
     fn apply_dep_filter(
         &self,
         issues: Vec<CoreIssue>,
@@ -121,7 +136,7 @@ impl Issues {
         }
 
         if self.interactive {
-            run_interactive(&all_issues)?;
+            run_interactive(&all_issues, &spawn_labels)?;
             return Ok(IssuesOutput::Interactive);
         }
 
@@ -155,6 +170,7 @@ impl Op for Issues {
         } else {
             provider.list(&filter)?
         };
+        let all_issues = self.exclude_completed(all_issues);
         let all_issues = self.apply_dep_filter(all_issues, provider.as_ref());
         self.finish(all_issues, jig_toml.issues.spawn_labels.clone())
     }
@@ -189,6 +205,7 @@ impl Op for Issues {
             return Err(IssuesError::Usage(format!("issue not found: {}", id)));
         }
 
+        let all_issues = self.exclude_completed(all_issues);
         self.finish(all_issues, Vec::new())
     }
 }
@@ -267,35 +284,46 @@ fn render_table(issues: &[CoreIssue], spawn_labels: &[String]) -> comfy_table::T
     table
 }
 
-/// Interactive expand/collapse mode using crossterm.
-fn run_interactive(issues: &[CoreIssue]) -> Result<(), IssuesError> {
+/// Interactive browse mode using alternate screen.
+fn run_interactive(issues: &[CoreIssue], spawn_labels: &[String]) -> Result<(), IssuesError> {
     if issues.is_empty() {
         eprintln!("No issues found");
         return Ok(());
     }
 
-    terminal::enable_raw_mode().map_err(io::Error::other)?;
-    let result = interactive_loop(issues);
-    terminal::disable_raw_mode().map_err(io::Error::other)?;
-
-    result
+    ui::with_alternate_screen(|w| interactive_loop(w, issues, spawn_labels))
 }
 
-fn interactive_loop(issues: &[CoreIssue]) -> Result<(), IssuesError> {
+fn interactive_loop(
+    w: &mut io::Stderr,
+    issues: &[CoreIssue],
+    spawn_labels: &[String],
+) -> Result<(), IssuesError> {
     let mut cursor = 0usize;
-    let mut stderr = io::stderr();
+    let mut scroll = 0usize;
 
     loop {
-        // Clear screen and move to top
-        write!(stderr, "\x1B[2J\x1B[H")?;
+        let (cols, rows) = terminal::size().unwrap_or((80, 24));
+        let visible = (rows as usize).saturating_sub(3); // header + footer + padding
+        let max_title = (cols as usize).saturating_sub(30);
+
+        // Keep cursor in view
+        if cursor < scroll {
+            scroll = cursor;
+        } else if cursor >= scroll + visible {
+            scroll = cursor - visible + 1;
+        }
+
+        write!(w, "\x1B[2J\x1B[H")?;
         write!(
-            stderr,
+            w,
             "\x1B[1mjig issues\x1B[0m — {} issues  \x1B[2m(j/k navigate, enter view, q quit)\x1B[0m\r\n\r\n",
             issues.len()
         )?;
 
-        for (i, issue) in issues.iter().enumerate() {
-            let marker = if i == cursor { ">" } else { " " };
+        for (i, issue) in issues.iter().skip(scroll).take(visible).enumerate() {
+            let idx = scroll + i;
+            let marker = if idx == cursor { ">" } else { " " };
 
             let status_sym = match issue.status {
                 IssueStatus::Planned => "[ ]",
@@ -306,17 +334,25 @@ fn interactive_loop(issues: &[CoreIssue]) -> Result<(), IssuesError> {
 
             let pri = issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-");
 
-            let highlight = if i == cursor { "\x1B[1m" } else { "" };
-            let reset = if i == cursor { "\x1B[0m" } else { "" };
+            let auto = if issue.auto(spawn_labels) {
+                " ✓"
+            } else {
+                "  "
+            };
+
+            let title = ui::truncate(&issue.title, max_title);
+
+            let highlight = if idx == cursor { "\x1B[1;36m" } else { "" };
+            let reset = if idx == cursor { "\x1B[0m" } else { "" };
 
             write!(
-                stderr,
-                "{}{} {} {:6} {}{}\r\n",
-                highlight, marker, status_sym, pri, issue.title, reset
+                w,
+                "{}{} {} {:6}{} {}{}\r\n",
+                highlight, marker, status_sym, pri, auto, title, reset
             )?;
         }
 
-        stderr.flush()?;
+        w.flush()?;
 
         if let Ok(Event::Key(key)) = event::read() {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
@@ -332,17 +368,20 @@ fn interactive_loop(issues: &[CoreIssue]) -> Result<(), IssuesError> {
                 KeyCode::Char('k') | KeyCode::Up => {
                     cursor = cursor.saturating_sub(1);
                 }
+                KeyCode::Char('G') | KeyCode::End => {
+                    cursor = issues.len().saturating_sub(1);
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    cursor = 0;
+                }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    view_issue(&issues[cursor], &mut stderr)?;
+                    view_issue(&issues[cursor], w)?;
                 }
                 _ => {}
             }
         }
     }
 
-    // Clear screen on exit
-    write!(stderr, "\x1B[2J\x1B[H")?;
-    stderr.flush()?;
     Ok(())
 }
 
