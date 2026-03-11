@@ -3,9 +3,9 @@
 //! Ties together the dispatch system (which decides *when* to nudge)
 //! with templates (which decide *what* to say) and tmux (which delivers it).
 
+use crate::config::ResolvedNudgeConfig;
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
-use crate::global::GlobalConfig;
 use crate::templates::{TemplateContext, TemplateEngine};
 use crate::tmux::{TmuxClient, TmuxTarget};
 use crate::worker::WorkerStatus;
@@ -54,7 +54,12 @@ impl NudgeType {
 }
 
 /// Determine what kind of nudge a worker needs, if any.
-pub fn classify_nudge(state: &WorkerState, config: &GlobalConfig) -> Option<NudgeType> {
+///
+/// Accepts a closure that resolves per-type nudge config, enabling per-repo overrides.
+pub fn classify_nudge<F>(state: &WorkerState, resolve: F) -> Option<NudgeType>
+where
+    F: Fn(&str) -> ResolvedNudgeConfig,
+{
     // Terminal states never get nudged
     if state.status.is_terminal() {
         return None;
@@ -72,6 +77,8 @@ pub fn classify_nudge(state: &WorkerState, config: &GlobalConfig) -> Option<Nudg
         _ => return None,
     };
 
+    let resolved = resolve(nudge_type.count_key());
+
     // Check if we've exceeded max nudges for this type
     let count = state
         .nudge_counts
@@ -79,22 +86,38 @@ pub fn classify_nudge(state: &WorkerState, config: &GlobalConfig) -> Option<Nudg
         .copied()
         .unwrap_or(0);
 
-    if count >= config.health.max_nudges {
+    if count >= resolved.max {
         tracing::debug!(
             status = state.status.as_str(),
             nudge_type = nudge_type.count_key(),
             count = count,
-            max = config.health.max_nudges,
+            max = resolved.max,
             "max nudges reached, skipping"
         );
         return None; // Escalate via notification instead
+    }
+
+    // Check cooldown
+    if let Some(&last_ts) = state.last_nudge_at.get(nudge_type.count_key()) {
+        let now = chrono::Utc::now().timestamp();
+        let elapsed = now - last_ts;
+        if elapsed < resolved.cooldown_seconds as i64 {
+            tracing::debug!(
+                status = state.status.as_str(),
+                nudge_type = nudge_type.count_key(),
+                elapsed,
+                cooldown = resolved.cooldown_seconds,
+                "nudge cooldown active, skipping"
+            );
+            return None;
+        }
     }
 
     tracing::debug!(
         status = state.status.as_str(),
         nudge_type = nudge_type.count_key(),
         count = count,
-        max = config.health.max_nudges,
+        max = resolved.max,
         "classified nudge"
     );
 
@@ -105,7 +128,7 @@ pub fn classify_nudge(state: &WorkerState, config: &GlobalConfig) -> Option<Nudg
 pub fn build_nudge_context(
     nudge_type: NudgeType,
     state: &WorkerState,
-    config: &GlobalConfig,
+    resolved: ResolvedNudgeConfig,
 ) -> TemplateContext {
     let count = state
         .nudge_counts
@@ -115,8 +138,8 @@ pub fn build_nudge_context(
 
     let mut ctx = TemplateContext::new();
     ctx.set_num("nudge_count", count + 1);
-    ctx.set_num("max_nudges", config.health.max_nudges);
-    ctx.set_bool("is_final_nudge", count + 1 >= config.health.max_nudges);
+    ctx.set_num("max_nudges", resolved.max);
+    ctx.set_bool("is_final_nudge", count + 1 >= resolved.max);
 
     match nudge_type {
         NudgeType::Idle => {
@@ -142,12 +165,12 @@ pub fn execute_nudge(
     target: &TmuxTarget,
     nudge_type: NudgeType,
     state: &WorkerState,
-    config: &GlobalConfig,
+    resolved: ResolvedNudgeConfig,
     engine: &TemplateEngine<'_>,
     tmux: &TmuxClient,
     event_log: &EventLog,
 ) -> Result<()> {
-    let ctx = build_nudge_context(nudge_type, state, config);
+    let ctx = build_nudge_context(nudge_type, state, resolved);
     let message = engine.render(nudge_type.template_name(), &ctx)?;
 
     tracing::info!(
@@ -181,16 +204,19 @@ pub fn execute_nudge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::global::HealthConfig;
     use std::collections::HashMap;
 
-    fn config_with_max(max: u32) -> GlobalConfig {
-        GlobalConfig {
-            health: HealthConfig {
-                max_nudges: max,
-                ..Default::default()
-            },
-            ..Default::default()
+    fn resolve_with_max(max: u32) -> impl Fn(&str) -> ResolvedNudgeConfig {
+        move |_| ResolvedNudgeConfig {
+            max,
+            cooldown_seconds: 300,
+        }
+    }
+
+    fn resolved(max: u32) -> ResolvedNudgeConfig {
+        ResolvedNudgeConfig {
+            max,
+            cooldown_seconds: 300,
         }
     }
 
@@ -201,7 +227,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_nudge(&state, &config_with_max(3)),
+            classify_nudge(&state, resolve_with_max(3)),
             Some(NudgeType::Idle)
         );
     }
@@ -213,7 +239,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_nudge(&state, &config_with_max(3)),
+            classify_nudge(&state, resolve_with_max(3)),
             Some(NudgeType::Idle)
         );
     }
@@ -225,7 +251,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_nudge(&state, &config_with_max(3)),
+            classify_nudge(&state, resolve_with_max(3)),
             Some(NudgeType::Stuck)
         );
     }
@@ -236,7 +262,7 @@ mod tests {
             status: WorkerStatus::Running,
             ..Default::default()
         };
-        assert_eq!(classify_nudge(&state, &config_with_max(3)), None);
+        assert_eq!(classify_nudge(&state, resolve_with_max(3)), None);
     }
 
     #[test]
@@ -245,7 +271,7 @@ mod tests {
             status: WorkerStatus::Merged,
             ..Default::default()
         };
-        assert_eq!(classify_nudge(&state, &config_with_max(3)), None);
+        assert_eq!(classify_nudge(&state, resolve_with_max(3)), None);
     }
 
     #[test]
@@ -257,7 +283,7 @@ mod tests {
             nudge_counts: counts,
             ..Default::default()
         };
-        assert_eq!(classify_nudge(&state, &config_with_max(3)), None);
+        assert_eq!(classify_nudge(&state, resolve_with_max(3)), None);
     }
 
     #[test]
@@ -270,7 +296,38 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            classify_nudge(&state, &config_with_max(3)),
+            classify_nudge(&state, resolve_with_max(3)),
+            Some(NudgeType::Idle)
+        );
+    }
+
+    #[test]
+    fn cooldown_prevents_nudge() {
+        let now = chrono::Utc::now().timestamp();
+        let mut last_nudge_at = HashMap::new();
+        last_nudge_at.insert("idle".to_string(), now - 100); // 100s ago
+        let state = WorkerState {
+            status: WorkerStatus::Idle,
+            last_nudge_at,
+            ..Default::default()
+        };
+        // Cooldown is 300s, last nudge was 100s ago → should skip
+        assert_eq!(classify_nudge(&state, resolve_with_max(3)), None);
+    }
+
+    #[test]
+    fn cooldown_expired_allows_nudge() {
+        let now = chrono::Utc::now().timestamp();
+        let mut last_nudge_at = HashMap::new();
+        last_nudge_at.insert("idle".to_string(), now - 400); // 400s ago
+        let state = WorkerState {
+            status: WorkerStatus::Idle,
+            last_nudge_at,
+            ..Default::default()
+        };
+        // Cooldown is 300s, last nudge was 400s ago → should allow
+        assert_eq!(
+            classify_nudge(&state, resolve_with_max(3)),
             Some(NudgeType::Idle)
         );
     }
@@ -281,7 +338,7 @@ mod tests {
             commit_count: 3,
             ..Default::default()
         };
-        let ctx = build_nudge_context(NudgeType::Idle, &state, &config_with_max(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
         assert_eq!(ctx.vars["has_changes"], serde_json::json!(true));
         assert_eq!(ctx.vars["nudge_count"], serde_json::json!(1));
         assert_eq!(ctx.vars["max_nudges"], serde_json::json!(3));
@@ -291,7 +348,7 @@ mod tests {
     #[test]
     fn context_idle_no_commits() {
         let state = WorkerState::default();
-        let ctx = build_nudge_context(NudgeType::Idle, &state, &config_with_max(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
         assert_eq!(ctx.vars["has_changes"], serde_json::json!(false));
     }
 
@@ -304,7 +361,7 @@ mod tests {
             nudge_counts: counts,
             ..Default::default()
         };
-        let ctx = build_nudge_context(NudgeType::Idle, &state, &config_with_max(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
         assert_eq!(ctx.vars["nudge_count"], serde_json::json!(3));
         assert_eq!(ctx.vars["is_final_nudge"], serde_json::json!(true));
     }
@@ -326,7 +383,7 @@ mod tests {
             commit_count: 1,
             ..Default::default()
         };
-        let ctx = build_nudge_context(NudgeType::Idle, &state, &config_with_max(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
         let msg = engine.render("nudge-idle", &ctx).unwrap();
         assert!(msg.contains("STATUS CHECK"));
         assert!(msg.contains("nudge 1/3"));
@@ -337,7 +394,7 @@ mod tests {
     fn render_stuck_nudge_message() {
         let engine = TemplateEngine::new();
         let state = WorkerState::default();
-        let ctx = build_nudge_context(NudgeType::Stuck, &state, &config_with_max(3));
+        let ctx = build_nudge_context(NudgeType::Stuck, &state, resolved(3));
         let msg = engine.render("nudge-stuck", &ctx).unwrap();
         assert!(msg.contains("STUCK PROMPT"));
         assert!(msg.contains("Auto-approving"));

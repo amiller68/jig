@@ -1,5 +1,6 @@
 //! PR lifecycle monitoring — checks merged/closed/open PRs and injects actions.
 
+use crate::config::ResolvedNudgeConfig;
 use crate::dispatch::Action;
 use crate::events::WorkerState;
 use crate::github::GitHubClient;
@@ -25,14 +26,22 @@ pub(crate) struct PrLifecycleResult {
 }
 
 /// Monitors PR state and injects appropriate actions.
-pub(crate) struct PrMonitor<'a> {
+pub(crate) struct PrMonitor<'a, F> {
     client: &'a GitHubClient,
     config: &'a GlobalConfig,
+    resolve: F,
 }
 
-impl<'a> PrMonitor<'a> {
-    pub(super) fn new(client: &'a GitHubClient, config: &'a GlobalConfig) -> Self {
-        Self { client, config }
+impl<'a, F> PrMonitor<'a, F>
+where
+    F: Fn(&str) -> ResolvedNudgeConfig,
+{
+    pub(super) fn new(client: &'a GitHubClient, config: &'a GlobalConfig, resolve: F) -> Self {
+        Self {
+            client,
+            config,
+            resolve,
+        }
     }
 
     /// Check PR lifecycle and inject cleanup/notify actions for merged/closed PRs.
@@ -154,15 +163,17 @@ impl<'a> PrMonitor<'a> {
                             // Only nudge draft PRs — non-draft PRs are in human review
                             if let Some(nudge_type) = check.nudge.filter(|_| pr_state_info.is_draft)
                             {
+                                let resolved = (self.resolve)(nudge_type.count_key());
                                 let count = worker_state
                                     .nudge_counts
                                     .get(nudge_type.count_key())
                                     .copied()
                                     .unwrap_or(0);
-                                if count >= self.config.health.max_nudges {
+                                if count >= resolved.max {
                                     tracing::debug!(
                                         nudge_type = nudge_type.count_key(),
                                         count,
+                                        max = resolved.max,
                                         "PR nudge limit reached, skipping"
                                     );
                                     continue;
@@ -173,12 +184,11 @@ impl<'a> PrMonitor<'a> {
                                 {
                                     let now = chrono::Utc::now().timestamp();
                                     let elapsed = now - last_ts;
-                                    if elapsed < self.config.health.silence_threshold_seconds as i64
-                                    {
+                                    if elapsed < resolved.cooldown_seconds as i64 {
                                         tracing::debug!(
                                             nudge_type = nudge_type.count_key(),
                                             elapsed,
-                                            cooldown = self.config.health.silence_threshold_seconds,
+                                            cooldown = resolved.cooldown_seconds,
                                             "PR nudge cooldown active, skipping"
                                         );
                                         continue;

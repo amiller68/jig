@@ -1,6 +1,6 @@
 # Per-repo nudge configuration in jig.toml
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Labels:** auto
 

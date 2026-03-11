@@ -257,6 +257,97 @@ pub struct JigToml {
     pub agent: AgentConfig,
     #[serde(default)]
     pub issues: IssuesConfig,
+    #[serde(default)]
+    pub health: RepoHealthConfig,
+}
+
+/// Per-repo health/nudge configuration in jig.toml `[health]`.
+///
+/// All fields are optional — when absent, the global config is used.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RepoHealthConfig {
+    /// Override global silence threshold (seconds before a worker is "stalled").
+    pub silence_threshold_seconds: Option<u64>,
+    /// Override global max nudges before escalation.
+    pub max_nudges: Option<u32>,
+    /// Per-nudge-type overrides.
+    #[serde(default)]
+    pub nudge: NudgeTypeConfigs,
+}
+
+/// Per-nudge-type configuration overrides.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NudgeTypeConfigs {
+    pub idle: Option<NudgeTypeConfig>,
+    pub stalled: Option<NudgeTypeConfig>,
+    pub ci: Option<NudgeTypeConfig>,
+    pub review: Option<NudgeTypeConfig>,
+    pub conflict: Option<NudgeTypeConfig>,
+    pub bad_commits: Option<NudgeTypeConfig>,
+}
+
+/// Configuration for a single nudge type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NudgeTypeConfig {
+    /// Max nudges of this type before escalation.
+    pub max: Option<u32>,
+    /// Minimum seconds between nudges of this type.
+    pub cooldown_seconds: Option<u64>,
+}
+
+/// Resolved nudge parameters for a specific nudge type.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedNudgeConfig {
+    pub max: u32,
+    pub cooldown_seconds: u64,
+}
+
+impl RepoHealthConfig {
+    /// Resolve the effective silence threshold: jig.toml > global config.
+    pub fn resolve_silence_threshold(&self, global: &crate::global::HealthConfig) -> u64 {
+        self.silence_threshold_seconds
+            .unwrap_or(global.silence_threshold_seconds)
+    }
+
+    /// Resolve the effective max nudges: jig.toml > global config.
+    pub fn resolve_max_nudges(&self, global: &crate::global::HealthConfig) -> u32 {
+        self.max_nudges.unwrap_or(global.max_nudges)
+    }
+
+    /// Resolve (max, cooldown) for a specific nudge type.
+    ///
+    /// Resolution: `[health.nudge.<type>]` > `[health]` > global config > defaults.
+    pub fn resolve_for_nudge_type(
+        &self,
+        nudge_type_key: &str,
+        global: &crate::global::HealthConfig,
+    ) -> ResolvedNudgeConfig {
+        let base_max = self.resolve_max_nudges(global);
+        let base_cooldown = self.resolve_silence_threshold(global);
+
+        let type_config = match nudge_type_key {
+            "idle" => &self.nudge.idle,
+            "stuck" | "stalled" => &self.nudge.stalled,
+            "ci" => &self.nudge.ci,
+            "review" => &self.nudge.review,
+            "conflict" => &self.nudge.conflict,
+            "bad_commits" => &self.nudge.bad_commits,
+            _ => &None,
+        };
+
+        let max = type_config.as_ref().and_then(|c| c.max).unwrap_or(base_max);
+        let cooldown_seconds = type_config
+            .as_ref()
+            .and_then(|c| c.cooldown_seconds)
+            .unwrap_or(base_cooldown);
+
+        ResolvedNudgeConfig {
+            max,
+            cooldown_seconds,
+        }
+    }
 }
 
 /// Issue tracking configuration in jig.toml
@@ -461,6 +552,13 @@ pub struct ConfigDisplay {
     pub auto_spawn_interval: u64,
     pub auto_spawn_interval_source: String,
     pub spawn_labels: Vec<String>,
+    // Nudge health config
+    pub silence_threshold_seconds: u64,
+    pub silence_threshold_source: String,
+    pub max_nudges: u32,
+    pub max_nudges_source: String,
+    /// Per-nudge-type resolved configs: (type_name, resolved, source).
+    pub nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)>,
 }
 
 impl ConfigDisplay {
@@ -524,6 +622,59 @@ impl ConfigDisplay {
                 )
             };
 
+        // Resolve nudge health config
+        let health = &jig_toml.health;
+        let global_health = &global_config.health;
+
+        let (silence_threshold_seconds, silence_threshold_source) =
+            if health.silence_threshold_seconds.is_some() {
+                (
+                    health.resolve_silence_threshold(global_health),
+                    "jig.toml".to_string(),
+                )
+            } else {
+                (
+                    global_health.silence_threshold_seconds,
+                    "global config".to_string(),
+                )
+            };
+
+        let (max_nudges, max_nudges_source) = if health.max_nudges.is_some() {
+            (
+                health.resolve_max_nudges(global_health),
+                "jig.toml".to_string(),
+            )
+        } else {
+            (global_health.max_nudges, "global config".to_string())
+        };
+
+        // Resolve per-type configs
+        let nudge_types = ["idle", "stalled", "ci", "review", "conflict", "bad_commits"];
+        let nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)> = nudge_types
+            .iter()
+            .map(|&nt| {
+                let resolved = health.resolve_for_nudge_type(nt, global_health);
+                let type_cfg = match nt {
+                    "idle" => &health.nudge.idle,
+                    "stalled" => &health.nudge.stalled,
+                    "ci" => &health.nudge.ci,
+                    "review" => &health.nudge.review,
+                    "conflict" => &health.nudge.conflict,
+                    "bad_commits" => &health.nudge.bad_commits,
+                    _ => &None,
+                };
+                let source = if type_cfg.is_some() {
+                    "jig.toml [health.nudge]".to_string()
+                } else if health.max_nudges.is_some() || health.silence_threshold_seconds.is_some()
+                {
+                    "jig.toml [health]".to_string()
+                } else {
+                    "global config".to_string()
+                };
+                (nt.to_string(), resolved, source)
+            })
+            .collect();
+
         Ok(Self {
             effective_base,
             toml_base: jig_toml.worktree.base,
@@ -540,6 +691,11 @@ impl ConfigDisplay {
             auto_spawn_interval,
             auto_spawn_interval_source,
             spawn_labels: jig_toml.issues.spawn_labels,
+            silence_threshold_seconds,
+            silence_threshold_source,
+            max_nudges,
+            max_nudges_source,
+            nudge_type_configs,
         })
     }
 }
@@ -648,4 +804,125 @@ pub fn copy_worktree_files(src_root: &Path, dst_root: &Path, files: &[String]) -
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::global::HealthConfig;
+
+    fn global_health() -> HealthConfig {
+        HealthConfig {
+            silence_threshold_seconds: 300,
+            max_nudges: 3,
+        }
+    }
+
+    #[test]
+    fn parse_jig_toml_with_health() {
+        let toml_str = r#"
+[health]
+silence_threshold_seconds = 600
+max_nudges = 5
+
+[health.nudge.idle]
+max = 3
+cooldown_seconds = 120
+
+[health.nudge.ci]
+max = 2
+cooldown_seconds = 60
+"#;
+        let config: JigToml = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.health.silence_threshold_seconds, Some(600));
+        assert_eq!(config.health.max_nudges, Some(5));
+        assert_eq!(config.health.nudge.idle.as_ref().unwrap().max, Some(3));
+        assert_eq!(
+            config.health.nudge.idle.as_ref().unwrap().cooldown_seconds,
+            Some(120)
+        );
+        assert_eq!(config.health.nudge.ci.as_ref().unwrap().max, Some(2));
+        assert!(config.health.nudge.review.is_none());
+    }
+
+    #[test]
+    fn parse_jig_toml_without_health() {
+        let toml_str = r#"
+[worktree]
+base = "origin/main"
+"#;
+        let config: JigToml = toml::from_str(toml_str).unwrap();
+        assert!(config.health.silence_threshold_seconds.is_none());
+        assert!(config.health.max_nudges.is_none());
+    }
+
+    #[test]
+    fn resolve_defaults_to_global() {
+        let repo_health = RepoHealthConfig::default();
+        let global = global_health();
+
+        let resolved = repo_health.resolve_for_nudge_type("idle", &global);
+        assert_eq!(resolved.max, 3);
+        assert_eq!(resolved.cooldown_seconds, 300);
+    }
+
+    #[test]
+    fn resolve_repo_overrides_global() {
+        let repo_health = RepoHealthConfig {
+            silence_threshold_seconds: Some(600),
+            max_nudges: Some(5),
+            ..Default::default()
+        };
+        let global = global_health();
+
+        let resolved = repo_health.resolve_for_nudge_type("idle", &global);
+        assert_eq!(resolved.max, 5);
+        assert_eq!(resolved.cooldown_seconds, 600);
+    }
+
+    #[test]
+    fn resolve_per_type_overrides_repo() {
+        let repo_health = RepoHealthConfig {
+            silence_threshold_seconds: Some(600),
+            max_nudges: Some(5),
+            nudge: NudgeTypeConfigs {
+                ci: Some(NudgeTypeConfig {
+                    max: Some(2),
+                    cooldown_seconds: Some(60),
+                }),
+                ..Default::default()
+            },
+        };
+        let global = global_health();
+
+        // CI type uses per-type overrides
+        let ci = repo_health.resolve_for_nudge_type("ci", &global);
+        assert_eq!(ci.max, 2);
+        assert_eq!(ci.cooldown_seconds, 60);
+
+        // Idle type falls back to repo-level
+        let idle = repo_health.resolve_for_nudge_type("idle", &global);
+        assert_eq!(idle.max, 5);
+        assert_eq!(idle.cooldown_seconds, 600);
+    }
+
+    #[test]
+    fn resolve_partial_type_config() {
+        let repo_health = RepoHealthConfig {
+            max_nudges: Some(5),
+            nudge: NudgeTypeConfigs {
+                review: Some(NudgeTypeConfig {
+                    max: Some(10),
+                    cooldown_seconds: None, // falls back to silence_threshold
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let global = global_health();
+
+        let review = repo_health.resolve_for_nudge_type("review", &global);
+        assert_eq!(review.max, 10);
+        assert_eq!(review.cooldown_seconds, 300); // from global silence_threshold
+    }
 }

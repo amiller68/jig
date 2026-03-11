@@ -1,25 +1,31 @@
 //! Dispatch rules — pure functions mapping state transitions to actions.
 
+use crate::config::ResolvedNudgeConfig;
 use crate::events::WorkerState;
-use crate::global::GlobalConfig;
 use crate::nudge::classify_nudge;
 use crate::worker::WorkerStatus;
 
 use super::Action;
 
 /// Given an old and new worker state, return actions to execute.
-pub fn dispatch_actions(
+///
+/// The `resolve` closure maps a nudge type key to its resolved config,
+/// enabling per-repo and per-type overrides.
+pub fn dispatch_actions<F>(
     worker_id: &str,
     old_state: &WorkerState,
     new_state: &WorkerState,
-    config: &GlobalConfig,
-) -> Vec<Action> {
+    resolve: F,
+) -> Vec<Action>
+where
+    F: Fn(&str) -> ResolvedNudgeConfig,
+{
     let mut actions = vec![];
     let is_transition = old_state.status != new_state.status;
 
     // Nudge whenever classify_nudge says so — the nudge event increments the
     // count each tick, so classify_nudge naturally stops at max_nudges.
-    if let Some(nudge_type) = classify_nudge(new_state, config) {
+    if let Some(nudge_type) = classify_nudge(new_state, &resolve) {
         actions.push(Action::Nudge {
             worker_id: worker_id.to_string(),
             nudge_type,
@@ -79,8 +85,12 @@ mod tests {
     use super::*;
     use crate::nudge::NudgeType;
 
-    fn default_config() -> GlobalConfig {
-        GlobalConfig::default()
+    fn default_resolve(key: &str) -> ResolvedNudgeConfig {
+        let _ = key;
+        ResolvedNudgeConfig {
+            max: 3,
+            cooldown_seconds: 300,
+        }
     }
 
     #[test]
@@ -94,7 +104,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &old, &new, &default_config());
+        let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -117,7 +127,7 @@ mod tests {
         };
         new.nudge_counts.insert("stuck".to_string(), 3);
 
-        let actions = dispatch_actions("test", &old, &new, &default_config());
+        let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], Action::Notify { message, .. } if message.contains("Max nudges"))
@@ -135,7 +145,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &old, &new, &default_config());
+        let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -154,7 +164,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &old, &new, &default_config());
+        let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], Action::Notify { message, .. } if message.contains("PR opened"))
@@ -168,7 +178,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &state, &state, &default_config());
+        let actions = dispatch_actions("test", &state, &state, default_resolve);
         assert!(actions.is_empty());
     }
 
@@ -179,7 +189,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &state, &state, &default_config());
+        let actions = dispatch_actions("test", &state, &state, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -201,7 +211,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &old, &new, &default_config());
+        let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], Action::Notify { message, .. } if message.contains("failed"))
@@ -219,7 +229,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("test", &old, &new, &default_config());
+        let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
