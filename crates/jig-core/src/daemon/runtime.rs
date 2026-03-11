@@ -143,17 +143,8 @@ impl DaemonRuntime {
             return;
         }
         let repos: Vec<(String, PathBuf, String)> = registry
-            .repos()
-            .iter()
-            .filter(|entry| {
-                repo_filter.is_none_or(|filter| {
-                    entry
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy() == filter)
-                        .unwrap_or(false)
-                })
-            })
+            .filtered_repos(repo_filter)
+            .into_iter()
             .filter_map(|entry| {
                 let name = entry.path.file_name()?.to_string_lossy().to_string();
                 let base = RepoContext::resolve_base_branch_for(&entry.path)
@@ -238,17 +229,8 @@ impl DaemonRuntime {
         }
 
         let repos: Vec<(std::path::PathBuf, String)> = registry
-            .repos()
-            .iter()
-            .filter(|entry| {
-                repo_filter.is_none_or(|filter| {
-                    entry
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy() == filter)
-                        .unwrap_or(false)
-                })
-            })
+            .filtered_repos(repo_filter)
+            .into_iter()
             .map(|entry| {
                 let base = RepoContext::resolve_base_branch_for(&entry.path)
                     .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());

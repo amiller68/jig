@@ -384,20 +384,8 @@ impl<'a> Daemon<'a> {
         // When repo_filter is set, only poll that repo.
         {
             let repos: Vec<(std::path::PathBuf, String)> = registry
-                .repos()
-                .iter()
-                .filter(|entry| {
-                    self.daemon_config
-                        .repo_filter
-                        .as_ref()
-                        .is_none_or(|filter| {
-                            entry
-                                .path
-                                .file_name()
-                                .map(|n| n.to_string_lossy() == *filter)
-                                .unwrap_or(false)
-                        })
-                })
+                .filtered_repos(self.daemon_config.repo_filter.as_deref())
+                .into_iter()
                 .map(|entry| {
                     let base = RepoContext::resolve_base_branch_for(&entry.path)
                         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
