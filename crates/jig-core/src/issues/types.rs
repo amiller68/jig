@@ -106,6 +106,8 @@ pub struct Issue {
     pub children: Vec<String>,
     /// Labels/tags attached to this issue.
     pub labels: Vec<String>,
+    /// Suggested branch name (e.g. from Linear's `branchName` field).
+    pub branch_name: Option<String>,
 }
 
 /// Filter criteria for listing issues.
@@ -196,6 +198,7 @@ mod tests {
             source: String::new(),
             children: vec![],
             labels: vec![],
+            branch_name: None,
         };
 
         assert!(issue.matches(&IssueFilter::default()));
@@ -222,6 +225,7 @@ mod tests {
             source: String::new(),
             children: vec![],
             labels: vec!["backend".into(), "Auth".into()],
+            branch_name: None,
         };
 
         // Single label match (case-insensitive)
@@ -265,6 +269,7 @@ mod tests {
             source: String::new(),
             children: vec![],
             labels: vec!["backend".into(), "sprint-1".into()],
+            branch_name: None,
         };
 
         // Empty spawn_labels → auto = false (opt-in via labels)

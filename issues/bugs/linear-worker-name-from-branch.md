@@ -1,6 +1,6 @@
 # Linear auto-spawn uses short issue ID instead of branch name for worker
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** High
 **Labels:** auto
 

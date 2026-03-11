@@ -277,6 +277,7 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         source: rel_path.to_string(),
         children,
         labels,
+        branch_name: None,
     })
 }
 
@@ -359,6 +360,7 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         source: path.to_string_lossy().to_string(),
         children,
         labels,
+        branch_name: None,
     })
 }
 
@@ -761,6 +763,7 @@ mod tests {
                 source: String::new(),
                 children: vec![],
                 labels: vec![],
+                branch_name: None,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -773,6 +776,7 @@ mod tests {
                 source: String::new(),
                 children: vec![],
                 labels: vec![],
+                branch_name: None,
             },
         ];
         sort_issues(&mut issues);
