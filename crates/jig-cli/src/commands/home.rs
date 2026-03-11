@@ -1,4 +1,4 @@
-//! Home command - print base repo root path
+//! Home command - navigate to base repo root
 
 use clap::Args;
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ pub struct HomeOutput(PathBuf);
 
 impl std::fmt::Display for HomeOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.display())
+        write!(f, "cd '{}'", self.0.display())
     }
 }
 

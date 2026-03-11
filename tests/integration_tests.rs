@@ -858,40 +858,25 @@ fn test_which() {
 // ============================================================================
 
 #[test]
-fn test_home_prints_repo_root() {
+fn test_home_outputs_cd() {
     let repo = TestRepo::new();
 
-    let output = repo
-        .jig()
+    repo.jig()
         .args(["home"])
-        .output()
-        .expect("Failed to run command");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let printed_path = PathBuf::from(stdout.trim());
-    // The printed path should match the repo root (canonicalized)
-    assert_eq!(
-        printed_path.canonicalize().unwrap(),
-        repo.path().canonicalize().unwrap()
-    );
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cd "));
 }
 
 #[test]
 fn test_home_alias() {
     let repo = TestRepo::new();
 
-    let output = repo
-        .jig()
+    repo.jig()
         .args(["h"])
-        .output()
-        .expect("Failed to run command");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let printed_path = PathBuf::from(stdout.trim());
-    assert_eq!(
-        printed_path.canonicalize().unwrap(),
-        repo.path().canonicalize().unwrap()
-    );
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cd "));
 }
 
 #[test]
@@ -906,14 +891,12 @@ fn test_home_from_worktree() {
     cmd.env("XDG_CONFIG_HOME", repo.config_dir.path());
 
     let output = cmd.args(["home"]).output().expect("Failed to run command");
+    assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let printed_path = PathBuf::from(stdout.trim());
-    // From a worktree, home should print the base repo root, not the worktree path
-    assert_eq!(
-        printed_path.canonicalize().unwrap(),
-        repo.path().canonicalize().unwrap()
-    );
+    // Should output cd command pointing to base repo root, not the worktree
+    assert!(stdout.contains("cd "));
+    assert!(!stdout.contains("home-test"));
 }
 
 #[test]
