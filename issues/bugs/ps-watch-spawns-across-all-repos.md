@@ -1,6 +1,6 @@
 # `ps -w` auto-spawns issues from all repos, not just the current one
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Urgent
 **Labels:** auto
 

@@ -100,6 +100,25 @@ impl RepoRegistry {
         &self.repos
     }
 
+    /// Return repos filtered by an optional directory name.
+    ///
+    /// When `filter` is `Some`, only entries whose directory name matches are
+    /// returned. When `None`, all entries are returned.
+    pub fn filtered_repos(&self, filter: Option<&str>) -> Vec<&RepoEntry> {
+        self.repos
+            .iter()
+            .filter(|entry| {
+                filter.is_none_or(|f| {
+                    entry
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == f)
+                        .unwrap_or(false)
+                })
+            })
+            .collect()
+    }
+
     fn find(&self, path: &Path) -> Option<&RepoEntry> {
         self.repos.iter().find(|e| e.path == path)
     }
