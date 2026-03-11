@@ -24,11 +24,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::config::{JigToml, RepoHealthConfig, ResolvedNudgeConfig};
 use crate::context::RepoContext;
 use crate::dispatch::{dispatch_actions, Action};
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
-use crate::global::{GlobalConfig, WorkerEntry, WorkersState};
+use crate::global::{GlobalConfig, HealthConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::{execute_nudge, NudgeType};
 use crate::registry::{RepoEntry, RepoRegistry};
@@ -154,6 +155,35 @@ impl<'a> Daemon<'a> {
             engine,
             notifier,
             daemon_config,
+        }
+    }
+
+    /// Load per-repo health config from jig.toml, falling back to defaults.
+    fn load_repo_health_config(registry: &RepoRegistry, repo_name: &str) -> RepoHealthConfig {
+        Self::find_repo_path(registry, repo_name)
+            .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+            .map(|toml| toml.health)
+            .unwrap_or_default()
+    }
+
+    /// Build a resolver closure for nudge type config resolution.
+    fn make_nudge_resolver(
+        repo_health: &RepoHealthConfig,
+        global_health: &HealthConfig,
+    ) -> impl Fn(&str) -> ResolvedNudgeConfig {
+        let repo_health = repo_health.clone();
+        let global_health = global_health.clone();
+        move |key: &str| repo_health.resolve_for_nudge_type(key, &global_health)
+    }
+
+    /// Build a HealthConfig with per-repo silence threshold applied.
+    fn effective_health_config(
+        repo_health: &RepoHealthConfig,
+        global_health: &HealthConfig,
+    ) -> HealthConfig {
+        HealthConfig {
+            silence_threshold_seconds: repo_health.resolve_silence_threshold(global_health),
+            max_nudges: repo_health.resolve_max_nudges(global_health),
         }
     }
 
@@ -434,9 +464,14 @@ impl<'a> Daemon<'a> {
         WorkerDisplayInfo,
         Vec<messages::PruneTarget>,
     )> {
+        // Load per-repo health config
+        let repo_health = Self::load_repo_health_config(registry, repo_name);
+        let effective_health = Self::effective_health_config(&repo_health, &self.config.health);
+        let resolve = Self::make_nudge_resolver(&repo_health, &self.config.health);
+
         let event_log = EventLog::for_worker(repo_name, worker_name)?;
         let events = event_log.read_all()?;
-        let new_state = WorkerState::reduce(&events, &self.config.health);
+        let new_state = WorkerState::reduce(&events, &effective_health);
         let branch_name = extract_branch_name(&events, worker_name);
 
         // Use cached GitHub data — request a check for next tick if needed
@@ -472,7 +507,7 @@ impl<'a> Daemon<'a> {
 
         // Re-read state with potential PrOpened event
         let events = event_log.read_all()?;
-        let mut new_state = WorkerState::reduce(&events, &self.config.health);
+        let mut new_state = WorkerState::reduce(&events, &effective_health);
 
         let old_state = workers_state
             .get_worker(key)
@@ -486,7 +521,7 @@ impl<'a> Daemon<'a> {
             "worker state"
         );
 
-        let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
+        let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
 
         // Track review feedback count for nudge reset logic
         let mut current_review_feedback_count: Option<u32> = None;
@@ -544,16 +579,18 @@ impl<'a> Daemon<'a> {
                         "commits" => NudgeType::BadCommits,
                         _ => continue,
                     };
+                    let resolved = resolve(nudge_type.count_key());
                     let count = new_state
                         .nudge_counts
                         .get(nudge_type.count_key())
                         .copied()
                         .unwrap_or(0);
-                    if count >= self.config.health.max_nudges {
+                    if count >= resolved.max {
                         tracing::debug!(
                             worker = key,
                             nudge_type = nudge_type.count_key(),
                             count,
+                            max = resolved.max,
                             "PR nudge limit reached, skipping"
                         );
                         continue;
@@ -562,12 +599,12 @@ impl<'a> Daemon<'a> {
                     if let Some(&last_ts) = new_state.last_nudge_at.get(nudge_type.count_key()) {
                         let now = chrono::Utc::now().timestamp();
                         let elapsed = now - last_ts;
-                        if elapsed < self.config.health.silence_threshold_seconds as i64 {
+                        if elapsed < resolved.cooldown_seconds as i64 {
                             tracing::debug!(
                                 worker = key,
                                 nudge_type = nudge_type.count_key(),
                                 elapsed,
-                                cooldown = self.config.health.silence_threshold_seconds,
+                                cooldown = resolved.cooldown_seconds,
                                 "PR nudge cooldown active, skipping"
                             );
                             continue;
@@ -590,6 +627,7 @@ impl<'a> Daemon<'a> {
             &new_state,
             &event_log,
             registry,
+            &resolve,
         );
 
         // Update workers.json
@@ -664,9 +702,14 @@ impl<'a> Daemon<'a> {
         workers_state: &mut WorkersState,
         registry: &RepoRegistry,
     ) -> Result<(usize, usize, usize, WorkerTickInfo)> {
+        // Load per-repo health config
+        let repo_health = Self::load_repo_health_config(registry, repo_name);
+        let effective_health = Self::effective_health_config(&repo_health, &self.config.health);
+        let resolve = Self::make_nudge_resolver(&repo_health, &self.config.health);
+
         let event_log = EventLog::for_worker(repo_name, worker_name)?;
         let events = event_log.read_all()?;
-        let mut new_state = WorkerState::reduce(&events, &self.config.health);
+        let mut new_state = WorkerState::reduce(&events, &effective_health);
         let branch_name = extract_branch_name(&events, worker_name);
 
         // Proactively discover PR if not already known
@@ -682,8 +725,7 @@ impl<'a> Daemon<'a> {
                         } else {
                             tracing::info!(worker = key, pr_url = %pr_info.url, "discovered PR for branch");
                             if let Ok(updated_events) = event_log.read_all() {
-                                new_state =
-                                    WorkerState::reduce(&updated_events, &self.config.health);
+                                new_state = WorkerState::reduce(&updated_events, &effective_health);
                             }
                         }
                     }
@@ -709,7 +751,7 @@ impl<'a> Daemon<'a> {
             "worker state"
         );
 
-        let mut actions = dispatch_actions(worker_name, &old_state, &new_state, self.config);
+        let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
 
         // Check PR lifecycle
         let mut worker_tick_info = WorkerTickInfo::default();
@@ -722,7 +764,7 @@ impl<'a> Daemon<'a> {
                     .and_then(|e| e.review_feedback_count);
                 match make_github_client(repo_name, registry) {
                     Some(client) => {
-                        let monitor = PrMonitor::new(&client, self.config);
+                        let monitor = PrMonitor::new(&client, self.config, &resolve);
                         let pr_result = monitor.check_lifecycle(
                             worker_name,
                             &branch_name,
@@ -754,6 +796,7 @@ impl<'a> Daemon<'a> {
             &new_state,
             &event_log,
             registry,
+            &resolve,
         );
 
         workers_state.set_worker(
@@ -776,7 +819,7 @@ impl<'a> Daemon<'a> {
 
     /// Execute dispatched actions, returning (nudge_count, notif_count, prune_targets).
     #[allow(clippy::too_many_arguments)]
-    fn execute_actions(
+    fn execute_actions<F>(
         &self,
         actions: &[Action],
         repo_name: &str,
@@ -785,7 +828,11 @@ impl<'a> Daemon<'a> {
         new_state: &WorkerState,
         event_log: &EventLog,
         registry: &RepoRegistry,
-    ) -> (usize, usize, Vec<messages::PruneTarget>) {
+        resolve: &F,
+    ) -> (usize, usize, Vec<messages::PruneTarget>)
+    where
+        F: Fn(&str) -> ResolvedNudgeConfig,
+    {
         let mut nudge_count = 0;
         let mut notif_count = 0;
         let mut prune_targets = Vec::new();
@@ -809,11 +856,12 @@ impl<'a> Daemon<'a> {
                             );
                             continue;
                         }
+                        let resolved = resolve(nudge_type.count_key());
                         if let Err(e) = execute_nudge(
                             &target,
                             *nudge_type,
                             new_state,
-                            self.config,
+                            resolved,
                             self.engine,
                             self.tmux,
                             event_log,

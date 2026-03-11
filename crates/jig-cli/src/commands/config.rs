@@ -163,6 +163,33 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
         );
     }
 
+    eprintln!();
+    ui::header("Nudge Health");
+    eprintln!();
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Silence threshold:"),
+        ui::highlight(&format!("{}s", display.silence_threshold_seconds)),
+        ui::dim(&format!("({})", display.silence_threshold_source))
+    );
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Default max nudges:"),
+        ui::highlight(&display.max_nudges.to_string()),
+        ui::dim(&format!("({})", display.max_nudges_source))
+    );
+    eprintln!();
+    eprintln!("  {}", ui::dim("Per-type config:"));
+    for (name, resolved, source) in &display.nudge_type_configs {
+        eprintln!(
+            "    {} max={} cooldown={}s {}",
+            ui::highlight(name),
+            resolved.max,
+            resolved.cooldown_seconds,
+            ui::dim(&format!("({})", source))
+        );
+    }
+
     Ok(ConfigOutput(None))
 }
 
