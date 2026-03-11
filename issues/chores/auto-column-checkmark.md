@@ -1,6 +1,6 @@
 # Use checkmark instead of asterisk for AUTO column
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Low
 **Labels:** auto
 
