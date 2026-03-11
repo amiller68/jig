@@ -219,8 +219,28 @@ impl Worktree {
     // Registration (absorb from spawn.rs)
     // ---------------------------------------------------------------
 
+    /// Register this worktree as a worker in the orchestrator state,
+    /// emitting an Initializing event instead of Spawn. Use this when the
+    /// worker needs to run an on-create hook before being fully ready.
+    pub fn register_initializing(
+        &self,
+        context: Option<&str>,
+        issue_ref: Option<&str>,
+    ) -> Result<()> {
+        self.register_with_event(context, issue_ref, EventType::Initializing)
+    }
+
     /// Register this worktree as a worker in the orchestrator state.
     pub fn register(&self, context: Option<&str>, issue_ref: Option<&str>) -> Result<()> {
+        self.register_with_event(context, issue_ref, EventType::Spawn)
+    }
+
+    fn register_with_event(
+        &self,
+        context: Option<&str>,
+        issue_ref: Option<&str>,
+        initial_event_type: EventType,
+    ) -> Result<()> {
         let config = RepoConfig {
             base_branch: self.resolve_base_branch(),
             ..Default::default()
@@ -251,12 +271,12 @@ impl Worktree {
         state.add_worker(worker);
         state.save()?;
 
-        // Emit Spawn event
+        // Emit initial event (Spawn or Initializing)
         let repo_name = self.repo_name();
 
         if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
             let _ = event_log.reset();
-            let mut event = Event::new(EventType::Spawn)
+            let mut event = Event::new(initial_event_type)
                 .with_field("branch", self.branch.as_str())
                 .with_field("repo", repo_name.as_str());
             if self.auto_spawned {
@@ -269,6 +289,28 @@ impl Worktree {
         }
 
         Ok(())
+    }
+
+    /// Emit a Spawn event, transitioning from Initializing to Spawned.
+    pub fn emit_spawn_event(&self) {
+        let repo_name = self.repo_name();
+        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+            let event = Event::new(EventType::Spawn)
+                .with_field("branch", self.branch.as_str())
+                .with_field("repo", repo_name.as_str());
+            let _ = event_log.append(&event);
+        }
+    }
+
+    /// Emit a Terminal "failed" event with a reason.
+    pub fn emit_setup_failed(&self, reason: &str) {
+        let repo_name = self.repo_name();
+        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+            let event = Event::new(EventType::Terminal)
+                .with_field("terminal", "failed")
+                .with_field("reason", reason);
+            let _ = event_log.append(&event);
+        }
     }
 
     /// Unregister this worktree from state and clean up event log.

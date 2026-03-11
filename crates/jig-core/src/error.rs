@@ -44,6 +44,15 @@ pub enum Error {
     #[error("Tmux session not found: {0}")]
     TmuxSessionNotFound(String),
 
+    #[error("On-create hook failed")]
+    OnCreateHookFailed,
+
+    #[error("Worker '{0}' is still initializing (running on-create hook)")]
+    WorkerInitializing(String),
+
+    #[error("Worker '{0}' failed during setup: {1}")]
+    WorkerSetupFailed(String, String),
+
     #[error("Merge conflict with branch '{0}'")]
     MergeConflict(String),
 

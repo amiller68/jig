@@ -292,6 +292,7 @@ mod tests {
     #[test]
     fn status_all_variants_roundtrip() {
         let variants = [
+            WorkerStatus::Initializing,
             WorkerStatus::Spawned,
             WorkerStatus::Running,
             WorkerStatus::Idle,

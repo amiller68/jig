@@ -898,7 +898,7 @@ impl<'a> Daemon<'a> {
         let on_create_hook = crate::config::get_on_create_hook(repo_root)?;
         let git_common_dir = crate::git::Repo::open(repo_root)?.common_dir();
 
-        // Create worktree using Worktree::create
+        // Create worktree WITHOUT on-create hook — we run it after registration
         let wt = Worktree::create(
             repo_root,
             &worktrees_dir,
@@ -906,7 +906,7 @@ impl<'a> Daemon<'a> {
             &issue.worker_name,
             None,
             &base_branch,
-            on_create_hook.as_deref(),
+            None, // defer on-create hook
             &copy_files,
             true, // auto_spawned
         )?;
@@ -930,7 +930,21 @@ impl<'a> Daemon<'a> {
             "{}\n\n{}{}",
             issue.issue_title, issue.issue_body, completion_instructions
         );
-        wt.register(Some(&context), Some(&issue.issue_id))?;
+
+        // Register as Initializing so jig ps/ls show the worker immediately
+        wt.register_initializing(Some(&context), Some(&issue.issue_id))?;
+
+        // Run on-create hook now that the worker is visible
+        if let Some(hook) = on_create_hook.as_deref() {
+            let success = crate::config::run_on_create_hook(hook, &wt.path)?;
+            if !success {
+                wt.emit_setup_failed("on-create hook failed");
+                return Err(crate::error::Error::OnCreateHookFailed);
+            }
+        }
+
+        // Transition from Initializing → Spawned
+        wt.emit_spawn_event();
 
         // Launch tmux window — always auto-start for daemon-spawned workers
         wt.launch(Some(&context), true)?;

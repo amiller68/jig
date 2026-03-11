@@ -25,8 +25,10 @@ pub fn derive_status(events: &[Event], config: &HealthConfig) -> WorkerStatus {
     let last_event = events.last().unwrap();
     let last_event_age = now - last_event.ts;
 
-    // Check silence threshold
-    if last_event_age > config.silence_threshold_seconds as i64 {
+    // Check silence threshold (but not for initializing workers — they may have long hooks)
+    if last_event_age > config.silence_threshold_seconds as i64
+        && !matches!(last_event.event_type, EventType::Initializing)
+    {
         return WorkerStatus::Stalled;
     }
 
@@ -37,6 +39,7 @@ pub fn derive_status(events: &[Event], config: &HealthConfig) -> WorkerStatus {
         EventType::ToolUseStart | EventType::ToolUseEnd => WorkerStatus::Running,
         EventType::Commit | EventType::Push => WorkerStatus::Running,
         EventType::PrOpened => WorkerStatus::WaitingReview,
+        EventType::Initializing => WorkerStatus::Initializing,
         EventType::Spawn | EventType::Resume => WorkerStatus::Spawned,
         EventType::Review => WorkerStatus::WaitingReview,
         EventType::CiStatus | EventType::Nudge => WorkerStatus::Running,

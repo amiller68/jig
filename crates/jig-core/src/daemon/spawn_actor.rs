@@ -51,7 +51,7 @@ pub fn spawn(
         .expect("failed to spawn spawn actor thread")
 }
 
-/// Spawn a single worker: create worktree, run on-create hook, register, launch.
+/// Spawn a single worker: create worktree, register as initializing, run hook, launch.
 fn spawn_single(issue: &SpawnableIssue) -> std::result::Result<(), String> {
     let repo_root = &issue.repo_root;
     let worktrees_dir = repo_root.join(JIG_DIR);
@@ -71,6 +71,7 @@ fn spawn_single(issue: &SpawnableIssue) -> std::result::Result<(), String> {
         .map_err(|e| e.to_string())?
         .common_dir();
 
+    // Create worktree WITHOUT running on-create hook — we handle it after registration
     let wt = Worktree::create(
         repo_root,
         &worktrees_dir,
@@ -78,15 +79,29 @@ fn spawn_single(issue: &SpawnableIssue) -> std::result::Result<(), String> {
         &issue.worker_name,
         None,
         &base_branch,
-        on_create_hook.as_deref(),
+        None, // defer on-create hook
         &copy_files,
         true,
     )
     .map_err(|e| e.to_string())?;
 
     let context = build_context(issue);
-    wt.register(Some(&context), Some(&issue.issue_id))
+
+    // Register as Initializing so jig ps/ls show the worker immediately
+    wt.register_initializing(Some(&context), Some(&issue.issue_id))
         .map_err(|e| e.to_string())?;
+
+    // Run on-create hook now that the worker is visible
+    if let Some(hook) = on_create_hook.as_deref() {
+        let success = config::run_on_create_hook(hook, &wt.path).map_err(|e| e.to_string())?;
+        if !success {
+            wt.emit_setup_failed("on-create hook failed");
+            return Err("on-create hook failed".to_string());
+        }
+    }
+
+    // Transition from Initializing → Spawned
+    wt.emit_spawn_event();
 
     wt.launch(Some(&context), true).map_err(|e| e.to_string())?;
 
