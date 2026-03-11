@@ -2,7 +2,7 @@
 
 **Status:** Planned
 **Priority:** Medium
-**Labels:** cli
+**Labels:** auto
 
 ## Objective
 
