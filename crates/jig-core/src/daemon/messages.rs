@@ -116,3 +116,33 @@ pub struct SpawnResult {
 pub struct SpawnComplete {
     pub results: Vec<SpawnResult>,
 }
+
+/// Request sent to the nudge actor to deliver a nudge via tmux.
+pub struct NudgeRequest {
+    /// Tmux session name.
+    pub session: String,
+    /// Tmux window name (branch).
+    pub window: String,
+    /// Pre-rendered nudge message text.
+    pub message: String,
+    /// Nudge type key (e.g. "idle", "stuck", "ci").
+    pub nudge_type_key: String,
+    /// Whether this is a stuck-prompt nudge (needs auto-approve first).
+    pub is_stuck: bool,
+    /// Repo name (for event log path).
+    pub repo_name: String,
+    /// Worker name (for event log path).
+    pub worker_name: String,
+    /// Worker key ("repo/worker") for response correlation.
+    pub worker_key: String,
+}
+
+/// Response from the nudge actor after delivering (or failing) a nudge.
+pub struct NudgeComplete {
+    /// Worker key ("repo/worker").
+    pub worker_key: String,
+    /// Nudge type key (e.g. "idle", "stuck").
+    pub nudge_type_key: String,
+    /// Error message if delivery failed, None on success.
+    pub error: Option<String>,
+}

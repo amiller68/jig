@@ -55,7 +55,9 @@ jig/
 │   │       │   ├── sync_actor.rs # Background git fetch actor
 │   │       │   ├── github_actor.rs # Background GitHub API actor
 │   │       │   ├── issue_actor.rs  # Background issue polling actor
-│   │       │   └── prune_actor.rs # Background worktree pruning actor
+│   │       │   ├── prune_actor.rs # Background worktree pruning actor
+│   │       │   ├── spawn_actor.rs # Background worker spawning actor
+│   │       │   └── nudge_actor.rs # Background nudge delivery actor
 │   │       ├── nudge.rs    # Nudge system (classify, build, execute)
 │   │       ├── tmux.rs     # Type-safe tmux client (TmuxClient, TmuxTarget)
 │   │       ├── github/     # GitHub integration via gh CLI

@@ -8,7 +8,7 @@ use crate::context::RepoContext;
 use crate::registry::RepoRegistry;
 
 use super::messages::*;
-use super::{github_actor, issue_actor, prune_actor, spawn_actor, sync_actor};
+use super::{github_actor, issue_actor, nudge_actor, prune_actor, spawn_actor, sync_actor};
 
 /// Runtime configuration for the daemon actors.
 #[derive(Debug, Clone)]
@@ -65,6 +65,10 @@ pub struct DaemonRuntime {
     /// Worker names currently being spawned in the background (for display).
     spawning_workers: Vec<String>,
 
+    // Nudge actor
+    nudge_tx: flume::Sender<NudgeRequest>,
+    nudge_rx: flume::Receiver<NudgeComplete>,
+
     config: RuntimeConfig,
 
     // Thread handles (kept alive for clean shutdown)
@@ -94,6 +98,10 @@ impl DaemonRuntime {
         let (spawn_resp_tx, spawn_resp_rx) = flume::bounded(1);
         let spawn_handle = spawn_actor::spawn(spawn_req_rx, spawn_resp_tx);
 
+        let (nudge_req_tx, nudge_req_rx) = flume::bounded(16);
+        let (nudge_resp_tx, nudge_resp_rx) = flume::bounded(16);
+        let nudge_handle = nudge_actor::spawn(nudge_req_rx, nudge_resp_tx);
+
         // Start with past timestamps so first tick triggers sync/poll immediately
         let past = Instant::now();
 
@@ -121,6 +129,9 @@ impl DaemonRuntime {
             spawn_pending: false,
             spawning_workers: Vec::new(),
 
+            nudge_tx: nudge_req_tx,
+            nudge_rx: nudge_resp_rx,
+
             config,
             _handles: vec![
                 sync_handle,
@@ -128,6 +139,7 @@ impl DaemonRuntime {
                 issue_handle,
                 prune_handle,
                 spawn_handle,
+                nudge_handle,
             ],
         }
     }
@@ -330,6 +342,23 @@ impl DaemonRuntime {
     /// Worker names currently being spawned in the background.
     pub fn spawning_workers(&self) -> &[String] {
         &self.spawning_workers
+    }
+
+    /// Send a nudge request to the nudge actor (non-blocking).
+    /// Drops the request on backpressure (nudges are best-effort).
+    pub fn send_nudge(&self, req: NudgeRequest) {
+        if self.nudge_tx.try_send(req).is_err() {
+            tracing::debug!("nudge channel full, dropping nudge request");
+        }
+    }
+
+    /// Drain all completed nudge responses (non-blocking).
+    pub fn drain_nudges(&self) -> Vec<NudgeComplete> {
+        let mut results = Vec::new();
+        while let Ok(resp) = self.nudge_rx.try_recv() {
+            results.push(resp);
+        }
+        results
     }
 
     /// Get runtime config reference.

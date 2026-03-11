@@ -13,6 +13,7 @@ mod discovery;
 pub mod github_actor;
 pub mod issue_actor;
 pub mod messages;
+pub mod nudge_actor;
 mod pr;
 pub mod prune_actor;
 pub mod runtime;
@@ -31,7 +32,7 @@ use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::global::{GlobalConfig, HealthConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
-use crate::nudge::{execute_nudge, NudgeType};
+use crate::nudge::{build_nudge_context, NudgeType};
 use crate::registry::{RepoEntry, RepoRegistry};
 use crate::spawn::TaskStatus;
 use crate::templates::TemplateEngine;
@@ -223,6 +224,18 @@ impl<'a> Daemon<'a> {
         runtime.drain_sync();
         runtime.drain_github();
         let spawnable = runtime.drain_issues();
+
+        // Drain nudge completions from previous tick
+        for nudge_result in runtime.drain_nudges() {
+            if let Some(err) = nudge_result.error {
+                tracing::warn!(
+                    worker = %nudge_result.worker_key,
+                    nudge_type = %nudge_result.nudge_type_key,
+                    "nudge delivery error: {}",
+                    err
+                );
+            }
+        }
 
         // Drain prune results from previous tick
         if let Some(prune_complete) = runtime.drain_prune() {
@@ -627,12 +640,14 @@ impl<'a> Daemon<'a> {
         let (nudge_count, notif_count, cleanup_prune_targets) = self.execute_actions(
             &actions,
             repo_name,
+            worker_name,
             &branch_name,
             key,
             &new_state,
             &event_log,
             registry,
             &resolve,
+            Some(runtime),
         );
 
         // Update workers.json
@@ -796,12 +811,14 @@ impl<'a> Daemon<'a> {
         let (nudge_count, notif_count, _prune_targets) = self.execute_actions(
             &actions,
             repo_name,
+            worker_name,
             &branch_name,
             key,
             &new_state,
             &event_log,
             registry,
             &resolve,
+            None,
         );
 
         workers_state.set_worker(
@@ -823,17 +840,23 @@ impl<'a> Daemon<'a> {
     }
 
     /// Execute dispatched actions, returning (nudge_count, notif_count, prune_targets).
+    ///
+    /// When `runtime` is `Some`, nudges are dispatched to the nudge actor
+    /// (non-blocking). When `None` (legacy one-shot path), nudges are
+    /// delivered synchronously via `execute_nudge`.
     #[allow(clippy::too_many_arguments)]
     fn execute_actions<F>(
         &self,
         actions: &[Action],
         repo_name: &str,
+        worker_name: &str,
         branch_name: &str,
         key: &str,
         new_state: &WorkerState,
         event_log: &EventLog,
         registry: &RepoRegistry,
         resolve: &F,
+        runtime: Option<&DaemonRuntime>,
     ) -> (usize, usize, Vec<messages::PruneTarget>)
     where
         F: Fn(&str) -> ResolvedNudgeConfig,
@@ -848,10 +871,8 @@ impl<'a> Daemon<'a> {
                     worker_id: _,
                     nudge_type,
                 } => {
-                    let target = TmuxTarget::new(
-                        format!("{}{}", self.daemon_config.session_prefix, repo_name),
-                        branch_name.to_string(),
-                    );
+                    let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                    let target = TmuxTarget::new(&session, branch_name.to_string());
 
                     if self.tmux.has_window(&target) {
                         if !self.tmux.pane_is_running(&target) {
@@ -862,30 +883,71 @@ impl<'a> Daemon<'a> {
                             continue;
                         }
                         let resolved = resolve(nudge_type.count_key());
-                        if let Err(e) = execute_nudge(
-                            &target,
-                            *nudge_type,
-                            new_state,
-                            resolved,
-                            self.engine,
-                            self.tmux,
-                            event_log,
-                        ) {
-                            tracing::warn!("nudge failed for {}: {}", key, e);
-                        } else {
-                            tracing::info!(
-                                worker = key,
-                                nudge_type = nudge_type.count_key(),
-                                "nudge delivered"
-                            );
+
+                        // Render template on the tick thread (TemplateEngine has lifetime)
+                        let ctx = build_nudge_context(*nudge_type, new_state, resolved);
+                        let message = match self.engine.render(nudge_type.template_name(), &ctx) {
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                tracing::warn!("nudge template render failed for {}: {}", key, e);
+                                continue;
+                            }
+                        };
+
+                        if let Some(rt) = runtime {
+                            // Async path: dispatch to nudge actor
+                            rt.send_nudge(messages::NudgeRequest {
+                                session,
+                                window: branch_name.to_string(),
+                                message,
+                                nudge_type_key: nudge_type.count_key().to_string(),
+                                is_stuck: *nudge_type == NudgeType::Stuck,
+                                repo_name: repo_name.to_string(),
+                                worker_name: worker_name.to_string(),
+                                worker_key: key.to_string(),
+                            });
                             nudge_count += 1;
+                        } else {
+                            // Blocking path (tick_once): deliver synchronously
+                            let delivery = if *nudge_type == NudgeType::Stuck {
+                                self.tmux.auto_approve(&target).and_then(|()| {
+                                    std::thread::sleep(std::time::Duration::from_millis(500));
+                                    self.tmux.send_message(&target, &message)
+                                })
+                            } else {
+                                self.tmux.send_message(&target, &message)
+                            };
+
+                            match delivery {
+                                Ok(()) => {
+                                    let event = Event::new(EventType::Nudge)
+                                        .with_field("nudge_type", nudge_type.count_key())
+                                        .with_field("message", message.as_str());
+                                    if let Err(e) = event_log.append(&event) {
+                                        tracing::warn!(
+                                            "failed to append nudge event for {}: {}",
+                                            key,
+                                            e
+                                        );
+                                    }
+                                    tracing::info!(
+                                        worker = key,
+                                        nudge_type = nudge_type.count_key(),
+                                        "nudge delivered"
+                                    );
+                                    nudge_count += 1;
+                                }
+                                Err(e) => {
+                                    tracing::warn!("nudge failed for {}: {}", key, e);
+                                }
+                            }
                         }
                     } else {
                         tracing::debug!(
                             worker = key,
                             nudge_type = nudge_type.count_key(),
-                            session = %target.session,
-                            window = %target.window,
+                            session = %format!("{}{}", self.daemon_config.session_prefix, repo_name),
+                            window = %branch_name,
                             "tmux window not found, skipping nudge"
                         );
                     }
