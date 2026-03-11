@@ -81,4 +81,4 @@ Debug integration tests by examining the temp directory state.
 
 ## Pre-commit
 
-No pre-commit hooks are configured. Run checks manually before pushing.
+jig installs git hooks (`post-commit`, `post-merge`, `pre-commit`) via `jig init`. These hooks emit events for the daemon — they do not run linters or formatters. Run checks manually before pushing.

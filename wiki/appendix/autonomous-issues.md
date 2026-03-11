@@ -86,12 +86,14 @@ Worker state is derived by replaying the event stream — there's no mutable sta
 
 | Status | Meaning |
 |--------|---------|
-| `spawned` | Just created, no activity yet |
+| `initializing` | Worktree created, on-create hook still running |
+| `spawned` | Created, no tool use activity yet |
 | `running` | Tool use events flowing |
 | `idle` | Agent exited, at shell prompt |
 | `waiting` | Agent hit an interactive prompt |
 | `stalled` | No events for 5+ minutes (configurable) |
-| `review` | PR opened, waiting on human review |
+| `review` | Non-draft PR opened, waiting on human review |
+| `draft` | Draft PR opened, agent still working |
 | `approved` | PR approved |
 | `merged` | PR merged (terminal) |
 | `failed` | Error or killed (terminal) |
@@ -114,6 +116,23 @@ The daemon runs a periodic loop (default every 30 seconds). Each tick:
    - Execute actions (nudge, notify, cleanup)
 4. **Save state** — Write updated `workers.json`
 
+### Actor architecture
+
+The tick thread stays responsive by offloading all blocking I/O to background actor threads:
+
+| Actor | Purpose |
+|-------|---------|
+| **sync** | `git fetch` for registered repos |
+| **github** | PR status, CI checks, review comments |
+| **issue** | Poll for spawnable issues |
+| **spawn** | Create worktrees and launch agents |
+| **prune** | Remove worktrees for merged/closed PRs |
+| **nudge** | Deliver nudge messages via tmux |
+
+Each actor uses bounded `flume` channels for non-blocking communication. The nudge actor is critical — it prevents `tmux send-keys` from blocking the tick thread when a pane can't accept input.
+
+All tmux subprocess calls have a **5-second timeout**. If a tmux command hangs, the child process is killed and reaped, returning a `TimedOut` error.
+
 ### Running the daemon
 
 The daemon runs in two ways:
@@ -125,7 +144,9 @@ Both share the same `run_with()` entrypoint — `ps --watch` just adds the displ
 
 ## Nudges: intervening when agents get stuck
 
-Nudges are messages sent to agents via `tmux send-keys`. The daemon classifies what kind of nudge is needed and renders a template with contextual information.
+Nudges are messages sent to agents via `tmux send-keys`. The daemon classifies what kind of nudge is needed, renders a template with contextual information on the tick thread, and dispatches delivery to the **nudge actor** — a background thread with its own `TmuxClient`. This ensures that slow or hanging tmux calls never block the tick loop.
+
+The daemon also checks that the pane is actually running a command before nudging. It filters out shell prompts (`bash`, `zsh`, `fish`, `sh`), tmux itself, and version-like strings (`2.1.72`) that tmux can report as the pane command.
 
 ### Nudge types
 
@@ -256,9 +277,9 @@ jig ps --watch — logs  (every 2s)
 
 Press `t` or `l` again to switch back to the table. Press `q` to quit cleanly.
 
-## Global configuration
+## Configuration
 
-The daemon reads `~/.config/jig/config.toml`:
+### Global config (`~/.config/jig/config.toml`)
 
 ```toml
 [health]
@@ -274,6 +295,34 @@ exec = "notify-send 'jig' '$MESSAGE'"  # shell command for notifications
 # webhook = "https://hooks.slack.com/..." # or a webhook URL
 # events = ["worker.done"]              # filter which events trigger
 ```
+
+### Per-repo config (`jig.toml`)
+
+Repos can override health and nudge settings, and configure auto-spawn:
+
+```toml
+[health]
+silence_threshold_seconds = 600  # slower repos get more patience
+
+[health.nudge.idle]
+max = 5
+cooldown_seconds = 600
+
+[health.nudge.ci]
+max = 2
+cooldown_seconds = 180
+
+[spawn]
+auto = true
+max_concurrent_workers = 3
+auto_spawn_interval = 120
+
+[issues]
+provider = "file"
+spawn_labels = ["auto"]
+```
+
+Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits`) can set `max` and `cooldown_seconds` independently. Resolution: per-type repo → repo defaults → global → hardcoded defaults.
 
 ### State files
 

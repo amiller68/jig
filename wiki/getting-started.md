@@ -54,8 +54,7 @@ This scaffolds:
 │   ├── index.md
 │   ├── PATTERNS.md
 │   ├── CONTRIBUTING.md
-│   ├── SUCCESS_CRITERIA.md
-│   └── PROJECT_LAYOUT.md
+│   └── SUCCESS_CRITERIA.md
 └── issues/
     ├── README.md
     ├── _templates/
@@ -134,49 +133,53 @@ jig remove hello-world    # Clean up
 
 | Command | Description |
 |---------|-------------|
-| `jig create <name>` | Create a worktree |
-| `jig list` | List all worktrees |
-| `jig open <name>` | Open a worktree directory |
-| `jig remove <name>` | Remove a worktree |
-| `jig exit` | Remove current worktree (run from inside one) |
+| `jig create <name>` | Create a worktree (`-o` to cd into it) |
+| `jig list` | List all worktrees (`-g` for global, `--all` to include base repo) |
+| `jig open <name>` | Navigate to worktree directory (`--all` to open all in tabs) |
+| `jig remove <name>` | Remove worktree(s) — supports glob patterns (`-f` to force) |
+| `jig exit` | Remove current worktree and cd to repo root |
+| `jig home` | Navigate to base repository root |
 
 ### Sessions
 
 | Command | Description |
 |---------|-------------|
-| `jig spawn <name>` | Create worktree + launch agent session |
+| `jig spawn <name>` | Create worktree + launch agent session (`--auto`, `--issue`) |
 | `jig ps` | Show worker status dashboard |
-| `jig ps -w` | Live watch mode (updates every 2s) |
+| `jig ps -w` | Live watch mode with daemon loop (l=logs, q=quit) |
 | `jig ps -g` | Global mode — workers across all repos |
 | `jig attach <name>` | Attach to agent's tmux session |
-| `jig kill <name>` | Kill a worker's tmux session |
-| `jig nuke <name>` | Kill session + remove worktree |
+| `jig kill <name>` | Kill a worker's tmux session (`-a` for all) |
+| `jig nuke` | Kill all workers and clear state (keeps config/hooks) |
 
 ### Review & merge
 
 | Command | Description |
 |---------|-------------|
-| `jig review <name>` | Show diff for review |
-| `jig merge <name>` | Merge worktree branch |
+| `jig review <name>` | Show diff for review (`--full` for complete diff) |
+| `jig merge <name>` | Merge worktree branch into current branch |
 
 ### Configuration
 
 | Command | Description |
 |---------|-------------|
-| `jig init` | Initialize jig in a repository |
-| `jig config` | View/edit configuration |
+| `jig init <agent>` | Initialize jig in a repository (`--audit` to auto-populate docs) |
+| `jig config` | View/edit configuration (`base`, `on-create`, `show`) |
 | `jig repos` | List registered repos |
-| `jig issues` | Browse and manage issues |
+| `jig issues` | Browse issues (`-i` interactive, `--auto` spawnable only) |
 
 ### System
 
 | Command | Description |
 |---------|-------------|
-| `jig daemon` | Run the background daemon |
-| `jig health` | Check system health |
-| `jig hooks` | Manage git/agent hooks |
+| `jig daemon` | Run the background daemon (`--interval`, `--once`) |
+| `jig health` | Check system dependencies and repo setup |
+| `jig hooks` | Manage git/agent hooks (`init`, `uninstall`, `install-claude`) |
 | `jig shell-init <shell>` | Print shell integration script |
-| `jig shell-setup` | Interactive shell setup |
+| `jig shell-setup` | Auto-configure shell integration |
+| `jig update` | Update jig to latest version |
+| `jig version` | Show version information |
+| `jig which` | Show path to jig executable |
 
 ## Next steps
 

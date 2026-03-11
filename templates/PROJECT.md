@@ -26,7 +26,6 @@ src/
 └── types/         # Type definitions
 ```
 
-For detailed structure, see `docs/PROJECT_LAYOUT.md`.
 -->
 
 ## Documentation
@@ -35,7 +34,6 @@ For detailed structure, see `docs/PROJECT_LAYOUT.md`.
 - `docs/PATTERNS.md` — Coding conventions
 - `docs/SUCCESS_CRITERIA.md` — CI checks
 - `docs/CONTRIBUTING.md` — Contribution guide
-- `docs/PROJECT_LAYOUT.md` — Codebase structure
 
 ## Issues
 

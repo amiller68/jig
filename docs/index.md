@@ -30,10 +30,10 @@ cargo run -- spawn <name> --context "task description"
 | [PATTERNS.md](./PATTERNS.md) | Coding conventions and patterns |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute (agents + humans) |
 | [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | CI checks that must pass |
-| [PROJECT_LAYOUT.md](./PROJECT_LAYOUT.md) | Codebase structure overview |
 | [RELEASING.md](./RELEASING.md) | Release workflow and automation |
-| [daemon.md](./daemon.md) | Daemon setup and background service installation |
+| [daemon.md](./daemon.md) | Daemon architecture, actors, and background service setup |
 | [Linear Integration](./cli/usage/linear-integration.md) | Connect issue system to Linear API |
+| [CLI Usage](./cli/) | Shell integration, worktrees, orchestration, configuration |
 
 ## For AI Agents
 

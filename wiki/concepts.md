@@ -45,8 +45,7 @@ jig scaffolds a `docs/` structure:
 docs/
 ├── index.md           # Documentation hub
 ├── PATTERNS.md        # Coding conventions
-├── CONTRIBUTING.md    # How to contribute
-└── PROJECT_LAYOUT.md  # Codebase structure
+└── CONTRIBUTING.md    # How to contribute
 ```
 
 Plus a `CLAUDE.md` (or agent-specific config) at the repo root with:

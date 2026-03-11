@@ -42,7 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bas
 eval "$(jig shell-init zsh)"
 
 # Initialize jig in your repo
-jig init
+jig init claude
 
 # Create a worktree and spawn an agent
 jig spawn feature-auth --context "Implement JWT authentication"

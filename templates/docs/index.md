@@ -25,7 +25,6 @@ npm test
 | [PATTERNS.md](./PATTERNS.md) | Coding conventions and patterns |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute (agents + humans) |
 | [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | CI checks that must pass |
-| [PROJECT_LAYOUT.md](./PROJECT_LAYOUT.md) | Codebase structure overview |
 
 ## For AI Agents
 

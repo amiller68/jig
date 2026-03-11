@@ -54,7 +54,6 @@ Review documentation for necessary updates:
 - `CLAUDE.md` — Does quick reference or project structure need updating?
 - `docs/PATTERNS.md` — Do any documented patterns need revision?
 - `docs/SUCCESS_CRITERIA.md` — Did build/test/lint commands change?
-- `docs/PROJECT_LAYOUT.md` — Did directory structure change?
 - `docs/CONTRIBUTING.md` — Did contribution workflow change?
 - README — Does the README need updates for new features?
 

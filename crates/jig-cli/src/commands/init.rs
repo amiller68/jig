@@ -18,7 +18,6 @@ const DOCS_INDEX: &str = include_str!("../../../../templates/docs/index.md");
 const DOCS_PATTERNS: &str = include_str!("../../../../templates/docs/PATTERNS.md");
 const DOCS_CONTRIBUTING: &str = include_str!("../../../../templates/docs/CONTRIBUTING.md");
 const DOCS_SUCCESS_CRITERIA: &str = include_str!("../../../../templates/docs/SUCCESS_CRITERIA.md");
-const DOCS_PROJECT_LAYOUT: &str = include_str!("../../../../templates/docs/PROJECT_LAYOUT.md");
 
 // Issues templates
 const ISSUES_README: &str = include_str!("../../../../templates/issues/README.md");
@@ -209,13 +208,6 @@ type = "{}"
             self.force,
             backup_dir_opt,
         )?;
-        write_file(
-            &repo_root,
-            "docs/PROJECT_LAYOUT.md",
-            DOCS_PROJECT_LAYOUT,
-            self.force,
-            backup_dir_opt,
-        )?;
 
         // Write issues files
         write_file(
@@ -350,17 +342,12 @@ fn audit_prompt(adapter: &adapter::AgentAdapter, has_backup: bool, extra: Option
    - Actual lint command
    - Actual format check command
 
-5. **docs/PROJECT_LAYOUT.md** — Document:
-   - Actual directory structure with descriptions
-   - Key files and their purposes
-   - Entry points
-
-6. **docs/CONTRIBUTING.md** — Fill in:
+5. **docs/CONTRIBUTING.md** — Fill in:
    - Setup instructions
    - Commit message conventions used
    - Any project-specific contribution rules
 
-7. **Skills** — Review each skill in {skills_dir}/ and update if needed:
+6. **Skills** — Review each skill in {skills_dir}/ and update if needed:
    - /check — Update with project-specific check commands
    - /review — Ensure review criteria match project conventions
 

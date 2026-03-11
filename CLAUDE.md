@@ -36,15 +36,12 @@ docs/              # Documentation
 issues/            # File-based issue tracking
 ```
 
-For detailed structure, see `docs/PROJECT_LAYOUT.md`.
-
 ## Documentation
 
 - `docs/index.md` — Documentation hub and agent instructions
 - `docs/PATTERNS.md` — Coding conventions
 - `docs/SUCCESS_CRITERIA.md` — CI checks
 - `docs/CONTRIBUTING.md` — Contribution guide
-- `docs/PROJECT_LAYOUT.md` — Codebase structure
 
 ## Issues
 

@@ -125,6 +125,43 @@ fn test_create_worktree() {
 }
 ```
 
+## Actor Pattern (Daemon)
+
+The daemon uses background actor threads for blocking I/O. Each actor follows the same pattern:
+
+- **Messages**: Request/response structs in `daemon/messages.rs`
+- **Actor**: A `spawn()` function that takes `flume::Receiver<Request>` and `flume::Sender<Response>`, returns `JoinHandle<()>`
+- **Runtime**: Channels and methods (`send_*`, `drain_*`) in `daemon/runtime.rs`
+- **Wiring**: Drained at the top of each tick, triggered when needed
+
+```rust
+// In <name>_actor.rs
+pub fn spawn(
+    rx: flume::Receiver<FooRequest>,
+    tx: flume::Sender<FooComplete>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("jig-foo".into())
+        .spawn(move || {
+            while let Ok(req) = rx.recv() {
+                let result = do_work(&req);
+                if tx.send(result).is_err() {
+                    break;
+                }
+            }
+        })
+        .expect("failed to spawn foo actor thread")
+}
+```
+
+Key conventions:
+- Actor owns its own resources (e.g., `TmuxClient`, `GitHubClient`)
+- Communication is non-blocking on the tick thread (`try_send`, `try_recv`)
+- Drop requests on backpressure when appropriate (nudges are best-effort)
+- Bounded channels prevent unbounded memory growth
+
+Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `prune_actor`, `nudge_actor`.
+
 ## Common Idioms
 
 - **Git operations**: Use `git::Repo` wrapper around `git2::Repository`
