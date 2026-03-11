@@ -50,6 +50,10 @@ pub struct Issues {
     #[arg(short, long)]
     pub interactive: bool,
 
+    /// Show only auto-spawn candidates (planned, labeled, deps satisfied)
+    #[arg(long)]
+    pub auto: bool,
+
     /// Print issue IDs only (one per line, for scripting)
     #[arg(long)]
     pub ids: bool,
@@ -144,7 +148,13 @@ impl Op for Issues {
             return Ok(IssuesOutput::Detail(issue));
         }
 
-        let all_issues = provider.list(&filter)?;
+        let all_issues = if self.auto {
+            let spawnable = provider.list_spawnable(&jig_toml.issues.spawn_labels)?;
+            // Apply additional filters on top of spawnable results
+            filter.apply(spawnable)
+        } else {
+            provider.list(&filter)?
+        };
         let all_issues = self.apply_dep_filter(all_issues, provider.as_ref());
         self.finish(all_issues, jig_toml.issues.spawn_labels.clone())
     }
@@ -165,7 +175,12 @@ impl Op for Issues {
                 continue;
             }
 
-            let repo_issues = provider.list(&filter)?;
+            let repo_issues = if self.auto {
+                let spawnable = provider.list_spawnable(&jig_toml.issues.spawn_labels)?;
+                filter.apply(spawnable)
+            } else {
+                provider.list(&filter)?
+            };
             let repo_issues = self.apply_dep_filter(repo_issues, provider.as_ref());
             all_issues.extend(repo_issues);
         }

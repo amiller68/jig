@@ -120,6 +120,13 @@ pub struct IssueFilter {
     pub labels: Vec<String>,
 }
 
+impl IssueFilter {
+    /// Apply this filter to a list of issues, returning only those that match.
+    pub fn apply(&self, issues: Vec<Issue>) -> Vec<Issue> {
+        issues.into_iter().filter(|i| i.matches(self)).collect()
+    }
+}
+
 impl Issue {
     /// Whether this issue is eligible for auto-spawn given the repo's
     /// `spawn_labels` config.

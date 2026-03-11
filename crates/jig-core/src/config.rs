@@ -452,12 +452,22 @@ pub struct ConfigDisplay {
     pub effective_on_create: Option<String>,
     pub toml_on_create: Option<String>,
     pub global_on_create: Option<String>,
+    // Auto-spawn fields
+    pub auto_spawn: bool,
+    pub auto_spawn_source: String,
+    pub auto_start: bool,
+    pub max_concurrent_workers: usize,
+    pub max_concurrent_workers_source: String,
+    pub auto_spawn_interval: u64,
+    pub auto_spawn_interval_source: String,
+    pub spawn_labels: Vec<String>,
 }
 
 impl ConfigDisplay {
     pub fn load(repo_path: &Path) -> Result<Self> {
         let config = Config::load()?;
         let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
+        let global_config = crate::global::GlobalConfig::load().unwrap_or_default();
 
         // Get effective base branch (jig.toml > repo config > global > default)
         let effective_base = jig_toml
@@ -475,6 +485,45 @@ impl ConfigDisplay {
             .clone()
             .or_else(|| config.get_on_create_hook(repo_path));
 
+        // Resolve auto-spawn settings (jig.toml override > global config > default)
+        let global_spawn = &global_config.spawn;
+        let spawn = &jig_toml.spawn;
+
+        let (auto_spawn, auto_spawn_source) = if spawn.auto_spawn.is_some() {
+            (
+                spawn.resolve_auto_spawn(global_spawn),
+                "jig.toml".to_string(),
+            )
+        } else {
+            (global_spawn.auto_spawn, "global config".to_string())
+        };
+
+        let (max_concurrent_workers, max_concurrent_workers_source) =
+            if spawn.max_concurrent_workers.is_some() {
+                (
+                    spawn.resolve_max_concurrent_workers(global_spawn),
+                    "jig.toml".to_string(),
+                )
+            } else {
+                (
+                    global_spawn.max_concurrent_workers,
+                    "global config".to_string(),
+                )
+            };
+
+        let (auto_spawn_interval, auto_spawn_interval_source) =
+            if spawn.auto_spawn_interval.is_some() {
+                (
+                    spawn.resolve_auto_spawn_interval(global_spawn),
+                    "jig.toml".to_string(),
+                )
+            } else {
+                (
+                    global_spawn.auto_spawn_interval,
+                    "global config".to_string(),
+                )
+            };
+
         Ok(Self {
             effective_base,
             toml_base: jig_toml.worktree.base,
@@ -483,6 +532,14 @@ impl ConfigDisplay {
             effective_on_create,
             toml_on_create: jig_toml.worktree.on_create,
             global_on_create: config.get_on_create_hook(repo_path),
+            auto_spawn,
+            auto_spawn_source,
+            auto_start: jig_toml.spawn.auto,
+            max_concurrent_workers,
+            max_concurrent_workers_source,
+            auto_spawn_interval,
+            auto_spawn_interval_source,
+            spawn_labels: jig_toml.issues.spawn_labels,
         })
     }
 }
