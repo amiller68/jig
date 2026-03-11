@@ -441,7 +441,7 @@ where
     E: From<io::Error>,
 {
     let mut w = io::stderr();
-    crossterm::execute!(w, terminal::EnterAlternateScreen).map_err(io::Error::from)?;
+    crossterm::execute!(w, terminal::EnterAlternateScreen)?;
     terminal::enable_raw_mode()?;
 
     let result = f(&mut w);
