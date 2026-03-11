@@ -111,6 +111,10 @@ Epic `index.md` tracks overall progress and ticket status.
 
 See `issues/README.md` for full documentation.
 
+Typically for straightforward and well-defined tasks, 
+ we prefer setting the `auto` label such that said tasks
+ are picked up and spawned by the jig daemon.
+
 ## External Trackers
 
 For Linear, Jira, or GitHub Issues, use their MCP tools or CLI instead of file scanning.

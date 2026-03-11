@@ -1,9 +1,8 @@
 # Daemon crash recovery and worker resume
 
-**Status:** Blocked
+**Status:** Planned
 **Priority:** Urgent
-**Depends-On:** improvements/worktree-consolidation
-**Auto:** true
+**Labels:** auto
 
 ## Objective
 
@@ -13,7 +12,7 @@ Make jig resilient to daemon crashes, Ctrl+C shutdowns, and computer reboots. Wo
 
 Currently when the daemon stops, tmux sessions may die (reboot) or persist (Ctrl+C), but the Claude Code agent process is gone either way. The worktree, branch, and full event history survive on disk, yet there is no mechanism to re-launch the agent. Workers appear as `Stalled` with no distinction from genuinely stuck agents. There is also no signal handling — Ctrl+C kills the daemon immediately with no cleanup.
 
-This ticket assumes `improvements/worktree-consolidation` is done first. That ticket moves the `Resume` event, spawn context recording, orphan detection, and worker resume logic into `Worktree` methods. This ticket builds on those primitives to add graceful shutdown, lifecycle logging, startup recovery, steady-state dead detection, and the `jig resume` CLI.
+This ticket builds on the `Worktree` primitives (`Resume` event, spawn context recording, orphan detection, worker resume) added in the worktree-consolidation work to add graceful shutdown, lifecycle logging, startup recovery, steady-state dead detection, and the `jig resume` CLI.
 
 ## Implementation
 
@@ -44,15 +43,6 @@ New `commands/resume.rs`:
 ### 5. Steady-state dead detection
 
 In daemon `process_worker()`: if worker is active (Running/Spawned/Stalled) AND `wt.is_orphaned()` → call `wt.resume()` instead of nudging. Wire the existing `Action::Restart` (currently unimplemented) to use `Worktree::resume()`.
-
-## Prerequisites from worktree-consolidation
-
-The following are handled by `improvements/worktree-consolidation` and assumed complete:
-- `Resume` event type in `events/schema.rs` + reducer handling
-- `auto` and `context` fields recorded in Spawn events
-- `Worktree::resume()` — appends Resume event, launches tmux window
-- `Worktree::is_orphaned()` — auto_spawned && !has_tmux_window()
-- `Worktree::list()` — scans worktrees directory
 
 ## Files
 

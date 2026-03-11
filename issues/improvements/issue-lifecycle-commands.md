@@ -2,7 +2,7 @@
 
 **Status:** Planned
 **Priority:** Low
-**Category:** Improvements
+**Labels:** auto
 
 ## Objective
 

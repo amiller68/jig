@@ -1,6 +1,7 @@
 # Linear profile-level filters with per-repo overrides
 
 **Status:** Planned
+**Labels:** auto
 
 ## Objective
 
