@@ -852,3 +852,80 @@ fn test_which() {
         .success()
         .stdout(predicate::str::contains("jig"));
 }
+
+// ============================================================================
+// Home Tests
+// ============================================================================
+
+#[test]
+fn test_home_prints_repo_root() {
+    let repo = TestRepo::new();
+
+    let output = repo
+        .jig()
+        .args(["home"])
+        .output()
+        .expect("Failed to run command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let printed_path = PathBuf::from(stdout.trim());
+    // The printed path should match the repo root (canonicalized)
+    assert_eq!(
+        printed_path.canonicalize().unwrap(),
+        repo.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn test_home_alias() {
+    let repo = TestRepo::new();
+
+    let output = repo
+        .jig()
+        .args(["h"])
+        .output()
+        .expect("Failed to run command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let printed_path = PathBuf::from(stdout.trim());
+    assert_eq!(
+        printed_path.canonicalize().unwrap(),
+        repo.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn test_home_from_worktree() {
+    let repo = TestRepo::new();
+
+    repo.jig().args(["create", "home-test"]).assert().success();
+
+    let wt_path = repo.worktrees_path().join("home-test");
+    let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
+    cmd.current_dir(&wt_path);
+    cmd.env("XDG_CONFIG_HOME", repo.config_dir.path());
+
+    let output = cmd.args(["home"]).output().expect("Failed to run command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let printed_path = PathBuf::from(stdout.trim());
+    // From a worktree, home should print the base repo root, not the worktree path
+    assert_eq!(
+        printed_path.canonicalize().unwrap(),
+        repo.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn test_home_outside_git_repo() {
+    let dir = TempDir::new().expect("Failed to create temp dir");
+    let config_dir = TempDir::new().expect("Failed to create config dir");
+
+    let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
+    cmd.current_dir(dir.path());
+    cmd.env("XDG_CONFIG_HOME", config_dir.path());
+    cmd.args(["home"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Not in a git repo"));
+}
