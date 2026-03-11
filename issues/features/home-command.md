@@ -1,6 +1,6 @@
 # Add `jig home` command to navigate to base repo root
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Medium
 **Labels:** auto
 
