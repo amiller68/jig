@@ -29,13 +29,25 @@ pub enum HooksCommands {
     },
     /// Git post-commit handler (called by hook wrapper)
     #[command(hide = true)]
-    PostCommit,
+    PostCommit {
+        /// Extra args passed by git (ignored).
+        #[arg(trailing_var_arg = true, hide = true)]
+        _args: Vec<String>,
+    },
     /// Git post-merge handler (called by hook wrapper)
     #[command(hide = true)]
-    PostMerge,
+    PostMerge {
+        /// Extra args passed by git (e.g. is-squash-merge flag, ignored).
+        #[arg(trailing_var_arg = true, hide = true)]
+        _args: Vec<String>,
+    },
     /// Git pre-commit handler (called by hook wrapper)
     #[command(hide = true)]
-    PreCommit,
+    PreCommit {
+        /// Extra args passed by git (ignored).
+        #[arg(trailing_var_arg = true, hide = true)]
+        _args: Vec<String>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -145,17 +157,17 @@ impl Op for Hooks {
 
                 Ok(NoOutput)
             }
-            HooksCommands::PostCommit => {
+            HooksCommands::PostCommit { .. } => {
                 let repo = ctx.repo()?;
                 jig_core::hooks::handle_post_commit(&repo.repo_root)?;
                 Ok(NoOutput)
             }
-            HooksCommands::PostMerge => {
+            HooksCommands::PostMerge { .. } => {
                 let repo = ctx.repo()?;
                 jig_core::hooks::handle_post_merge(&repo.repo_root)?;
                 Ok(NoOutput)
             }
-            HooksCommands::PreCommit => {
+            HooksCommands::PreCommit { .. } => {
                 let repo = ctx.repo()?;
                 jig_core::hooks::handle_pre_commit(&repo.repo_root)?;
                 Ok(NoOutput)
