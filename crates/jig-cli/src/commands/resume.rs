@@ -17,10 +17,6 @@ pub struct Resume {
     /// Override the task context for the resumed session
     #[arg(long, short)]
     pub context: Option<String>,
-
-    /// Auto-start Claude with full prompt
-    #[arg(long)]
-    pub auto: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -67,7 +63,12 @@ impl Op for Resume {
         let effective_context = if let Some(ref ctx_override) = self.context {
             Some(ctx_override.clone())
         } else {
-            read_spawn_context(&repo.repo_root, &self.name)
+            let repo_name = repo
+                .repo_root
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            jig_core::daemon::recovery::read_spawn_context(&repo_name, &self.name)
         };
 
         // Resume the worker
@@ -87,20 +88,4 @@ impl Op for Resume {
 
         Ok(NoOutput)
     }
-}
-
-/// Read the original spawn context from the worker's event log.
-fn read_spawn_context(repo_root: &std::path::Path, worker_name: &str) -> Option<String> {
-    let repo_name = repo_root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let event_log = jig_core::EventLog::for_worker(&repo_name, worker_name).ok()?;
-    let events = event_log.read_all().ok()?;
-    events
-        .iter()
-        .find(|e| e.event_type == jig_core::EventType::Spawn)
-        .and_then(|e| e.data.get("context").and_then(|v| v.as_str()))
-        .map(|s| s.to_string())
 }

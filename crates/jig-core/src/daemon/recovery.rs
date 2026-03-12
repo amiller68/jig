@@ -143,7 +143,7 @@ pub fn recover_orphaned_workers(registry: &RepoRegistry) -> Vec<(String, String)
 }
 
 /// Read the original spawn context from the worker's event log.
-fn read_spawn_context(repo_name: &str, worker_name: &str) -> Option<String> {
+pub fn read_spawn_context(repo_name: &str, worker_name: &str) -> Option<String> {
     let event_log = EventLog::for_worker(repo_name, worker_name).ok()?;
     let events = event_log.read_all().ok()?;
     events

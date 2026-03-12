@@ -2,14 +2,12 @@
 //!
 //! Stored at `~/.config/jig/state/daemon.jsonl`.
 
+use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
-
-use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::global::paths::global_state_dir;
+use crate::global::paths::daemon_log_path;
 
 /// A daemon lifecycle event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,11 +32,6 @@ impl DaemonEvent {
             reason: reason.to_string(),
         }
     }
-}
-
-/// Path to the daemon lifecycle log.
-pub fn daemon_log_path() -> Result<PathBuf> {
-    Ok(global_state_dir()?.join("daemon.jsonl"))
 }
 
 /// Append a lifecycle event to the daemon log.
