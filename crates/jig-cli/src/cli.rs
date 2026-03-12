@@ -40,6 +40,7 @@ crate::command_enum! {
     #[command(visible_alias = "rm")]
     (Remove, commands::Remove),
 
+    (Commit, commands::Commit),
     (Issues, commands::Issues),
     (Daemon, commands::Daemon),
     (Exit, commands::Exit),

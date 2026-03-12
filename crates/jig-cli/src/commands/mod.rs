@@ -1,6 +1,7 @@
 //! CLI command implementations
 
 pub mod attach;
+pub mod commit;
 pub mod config;
 pub mod create;
 pub mod daemon;
@@ -29,6 +30,7 @@ pub mod which;
 
 // Re-export command structs
 pub use attach::Attach;
+pub use commit::Commit;
 pub use config::Config;
 pub use create::Create;
 pub use daemon::Daemon;

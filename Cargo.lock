@@ -907,6 +907,7 @@ dependencies = [
  "comfy-table",
  "crossterm",
  "dirs",
+ "git2",
  "glob",
  "jig-core",
  "nix",

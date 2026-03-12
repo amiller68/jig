@@ -9,6 +9,7 @@
 //! - Agent adapters for different AI assistants
 
 pub mod adapter;
+pub mod commits;
 pub mod config;
 pub mod context;
 pub mod daemon;

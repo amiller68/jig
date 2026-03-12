@@ -246,6 +246,56 @@ pub fn run_on_create_hook(hook: &str, dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Conventional commits validation configuration in jig.toml `[commits]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConventionalCommitsConfig {
+    /// Allowed commit types.
+    pub types: Vec<String>,
+    /// Require a scope.
+    pub require_scope: bool,
+    /// Allowed scopes (empty = any).
+    pub scopes: Vec<String>,
+    /// Allow breaking changes.
+    pub allow_breaking: bool,
+    /// Max subject line length.
+    pub max_subject_length: usize,
+    /// Require lowercase first char in subject.
+    pub require_lowercase: bool,
+}
+
+impl Default for ConventionalCommitsConfig {
+    fn default() -> Self {
+        Self {
+            types: [
+                "feat", "fix", "docs", "style", "refactor", "perf", "test", "chore", "ci",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+            require_scope: false,
+            scopes: vec![],
+            allow_breaking: true,
+            max_subject_length: 72,
+            require_lowercase: true,
+        }
+    }
+}
+
+impl ConventionalCommitsConfig {
+    /// Convert to the core validation config.
+    pub fn to_validation_config(&self) -> crate::commits::ValidationConfig {
+        crate::commits::ValidationConfig {
+            allowed_types: self.types.clone(),
+            require_scope: self.require_scope,
+            allowed_scopes: self.scopes.clone(),
+            allow_breaking: self.allow_breaking,
+            max_subject_length: self.max_subject_length,
+            require_lowercase: self.require_lowercase,
+        }
+    }
+}
+
 /// JigToml configuration from jig.toml
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JigToml {
@@ -259,6 +309,8 @@ pub struct JigToml {
     pub issues: IssuesConfig,
     #[serde(default)]
     pub health: RepoHealthConfig,
+    #[serde(default)]
+    pub commits: ConventionalCommitsConfig,
 }
 
 /// Per-repo health/nudge configuration in jig.toml `[health]`.
