@@ -1,6 +1,6 @@
 # Daemon crash recovery and worker resume
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Urgent
 **Labels:** auto
 
