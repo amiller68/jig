@@ -3,7 +3,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use jig_core::{git, terminal, Error, RepoContext};
+use jig_core::{git, terminal, Error, RepoContext, RepoRegistry};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
@@ -50,8 +50,21 @@ impl Op for Open {
     type Output = OpenOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
-        self.open_in_repo(repo)
+        match ctx.repo() {
+            Ok(repo) => self.open_in_repo(repo),
+            Err(_) => {
+                // Auto-detect: outside a git repo, fall back to global discovery
+                let registry = RepoRegistry::load().unwrap_or_default();
+                let repos: Vec<_> = registry
+                    .repos()
+                    .iter()
+                    .filter(|e| e.path.exists())
+                    .filter_map(|e| RepoContext::from_path(&e.path).ok())
+                    .collect();
+                let ctx = GlobalCtx { repos };
+                self.run_global(&ctx)
+            }
+        }
     }
 
     fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {

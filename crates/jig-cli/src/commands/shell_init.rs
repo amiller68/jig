@@ -27,11 +27,12 @@ _jig() {
 
     local commands="create list open remove exit config spawn ps attach review merge kill issues init update version which health tui shell-init shell-setup"
 
-    # Get worktrees for completion
+    # Get worktrees for completion (context-aware)
     _jig_worktrees() {
         local wts
-        wts=$(command jig list --plain 2>/dev/null)
-        if [ -z "$wts" ]; then
+        if git rev-parse --is-inside-work-tree &>/dev/null; then
+            wts=$(command jig list --plain 2>/dev/null)
+        else
             wts=$(command jig list -gp 2>/dev/null | sed -n 's/^  //p')
         fi
         echo "$wts"
@@ -142,8 +143,9 @@ _jig() {
 
     _jig_worktrees() {
         local -a wts
-        wts=(${(f)"$(command jig list --plain 2>/dev/null)"})
-        if (( ${#wts} == 0 )); then
+        if git rev-parse --is-inside-work-tree &>/dev/null; then
+            wts=(${(f)"$(command jig list --plain 2>/dev/null)"})
+        else
             wts=(${(f)"$(command jig list -gp 2>/dev/null | sed -n 's/^  //p')"})
         fi
         _describe 'worktree' wts
@@ -261,8 +263,10 @@ end
 
 # Completions
 function __jig_worktrees
-    set -l wts (command jig list --plain 2>/dev/null)
-    if test -z "$wts"
+    set -l wts
+    if git rev-parse --is-inside-work-tree &>/dev/null
+        set wts (command jig list --plain 2>/dev/null)
+    else
         set wts (command jig list -gp 2>/dev/null | sed -n 's/^  //p')
     end
     echo $wts
