@@ -382,6 +382,9 @@ pub struct LinearIssuesConfig {
     /// Optional assignee filter. "me" resolves to the API key owner.
     #[serde(default)]
     pub assignee: Option<String>,
+    /// Optional label filter. Issues must carry all listed labels.
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 fn default_issues_provider() -> String {
@@ -831,6 +834,7 @@ profile = "work"
 team = "ENG"
 projects = ["Backend"]
 assignee = "alice@co.com"
+labels = ["auto"]
 "#;
         let config: JigToml = toml::from_str(toml_str).unwrap();
         let linear = config.issues.linear.unwrap();
@@ -838,6 +842,7 @@ assignee = "alice@co.com"
         assert_eq!(linear.team.as_deref(), Some("ENG"));
         assert_eq!(linear.projects, vec!["Backend"]);
         assert_eq!(linear.assignee.as_deref(), Some("alice@co.com"));
+        assert_eq!(linear.labels, vec!["auto"]);
     }
 
     #[test]
@@ -855,6 +860,7 @@ profile = "work"
         assert!(linear.team.is_none());
         assert!(linear.projects.is_empty());
         assert!(linear.assignee.is_none());
+        assert!(linear.labels.is_empty());
     }
 
     #[test]

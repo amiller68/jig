@@ -17,6 +17,7 @@ pub struct LinearProvider {
     team: String,
     projects: Vec<String>,
     assignee: Option<String>,
+    labels: Vec<String>,
 }
 
 impl LinearProvider {
@@ -60,6 +61,12 @@ impl LinearProvider {
             linear_config.projects.clone()
         };
 
+        let labels = if linear_config.labels.is_empty() {
+            profile.labels.clone()
+        } else {
+            linear_config.labels.clone()
+        };
+
         let assignee = linear_config
             .assignee
             .clone()
@@ -81,6 +88,7 @@ impl LinearProvider {
             team,
             projects,
             assignee,
+            labels,
         })
     }
 }
@@ -110,9 +118,20 @@ impl IssueProvider for LinearProvider {
             self.assignee.as_deref(),
         )?;
 
-        // Client-side label filtering (all specified labels must match).
-        if !filter.labels.is_empty() {
-            issues.retain(|i| i.matches(filter));
+        // Client-side label filtering: merge config labels with filter labels.
+        // All specified labels must match.
+        let effective_labels: Vec<String> = if !filter.labels.is_empty() {
+            filter.labels.clone()
+        } else {
+            self.labels.clone()
+        };
+
+        if !effective_labels.is_empty() {
+            let label_filter = IssueFilter {
+                labels: effective_labels,
+                ..IssueFilter::default()
+            };
+            issues.retain(|i| i.matches(&label_filter));
         }
 
         // Sort by priority then id, consistent with FileProvider.

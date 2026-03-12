@@ -36,9 +36,10 @@ api_key = "lin_api_xxxxxxxxxxxx"
 team = "ENG"                          # default team filter
 projects = ["Backend", "Platform"]    # default project filter
 assignee = "me"                       # "me" = API key owner; or use email
+labels = ["auto"]                     # default label filter
 ```
 
-API keys live in the global config — never in committed files. The `team`, `projects`, and `assignee` fields are optional profile-level defaults that apply to every repo using this profile.
+API keys live in the global config — never in committed files. The `team`, `projects`, `assignee`, and `labels` fields are optional profile-level defaults that apply to every repo using this profile.
 
 ### 3. Point your repo at Linear
 
@@ -53,6 +54,7 @@ profile = "work"
 # team = "ENG"               # override profile default
 # projects = ["Backend"]     # narrow profile default
 # assignee = "alice@co.com"  # override profile default
+# labels = ["backend"]       # override profile default
 ```
 
 Per-repo fields override profile-level defaults. If the profile already has `team` set, you can omit it from `jig.toml`. `jig issues` now lists your Linear tickets.
@@ -127,6 +129,7 @@ api_key = "lin_api_xxxxxxxxxxxx"
 team = "ENG"
 projects = ["Backend", "Platform"]
 assignee = "me"
+labels = ["auto"]
 ```
 
 Any repo that uses `profile = "work"` inherits these filters. Per-repo `jig.toml` fields override them:
@@ -136,6 +139,7 @@ Any repo that uses `profile = "work"` inherits these filters. Per-repo `jig.toml
 | `team` | jig.toml > profile > *(error if missing)* |
 | `projects` | jig.toml > profile > *(no filter)* |
 | `assignee` | jig.toml > profile > *(no filter)* |
+| `labels` | jig.toml > profile > *(no filter)* |
 
 ### `assignee = "me"`
 
