@@ -1,6 +1,6 @@
 # Show nudge state in jig ps output
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Medium
 **Labels:** auto
 

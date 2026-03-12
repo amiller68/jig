@@ -288,6 +288,14 @@ fn worker_row(w: &WorkerDisplayInfo) -> Vec<Cell> {
         None => ("-", Color::DarkGrey),
     };
 
+    let (nudge_text, nudge_color) = if w.nudge_count == 0 {
+        ("-".to_string(), Color::DarkGrey)
+    } else if w.nudge_count >= w.max_nudges {
+        (format!("{}/{}", w.nudge_count, w.max_nudges), Color::Red)
+    } else {
+        (format!("{}/{}", w.nudge_count, w.max_nudges), Color::Yellow)
+    };
+
     let dirty_marker = if w.is_dirty { "*" } else { "" };
     let commits = if w.commits_ahead > 0 || w.is_dirty {
         format!("{}{}", w.commits_ahead, dirty_marker)
@@ -336,6 +344,9 @@ fn worker_row(w: &WorkerDisplayInfo) -> Vec<Cell> {
     vec![
         Cell::new(&name).fg(tmux_color),
         Cell::new(state_text).fg(state_color),
+        Cell::new(&nudge_text)
+            .fg(nudge_color)
+            .set_alignment(CellAlignment::Right),
         Cell::new(&commits)
             .fg(commit_color)
             .set_alignment(CellAlignment::Right),
@@ -350,6 +361,7 @@ fn table_header() -> Vec<Cell> {
     vec![
         Cell::new("WORKER").add_attribute(Attribute::Bold),
         Cell::new("STATE").add_attribute(Attribute::Bold),
+        Cell::new("NUDGE").add_attribute(Attribute::Bold),
         Cell::new("COMMITS").add_attribute(Attribute::Bold),
         Cell::new("PR").add_attribute(Attribute::Bold),
         Cell::new("HEALTH").add_attribute(Attribute::Bold),
