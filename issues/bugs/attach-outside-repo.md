@@ -1,6 +1,6 @@
 # attach fails outside a git repo without -g flag
 
-**Status:** Planned
+**Status:** Complete
 **Labels:** auto, urgent, ux, completions
 
 ## Objective
