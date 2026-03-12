@@ -41,6 +41,30 @@ query ListIssues($filter: IssueFilter, $first: Int) {
 }
 "#;
 
+const UPDATE_ISSUE_STATUS_MUTATION: &str = r#"
+mutation UpdateIssueStatus($issueId: String!, $stateId: String!) {
+  issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+    success
+    issue {
+      identifier
+      state { type }
+    }
+  }
+}
+"#;
+
+const LIST_WORKFLOW_STATES_QUERY: &str = r#"
+query ListWorkflowStates($filter: WorkflowStateFilter) {
+  workflowStates(filter: $filter) {
+    nodes {
+      id
+      name
+      type
+    }
+  }
+}
+"#;
+
 const GET_ISSUE_QUERY: &str = r#"
 query GetIssue($filter: IssueFilter, $first: Int) {
   issues(filter: $filter, first: $first) {
@@ -111,6 +135,35 @@ struct RawViewer {
     id: String,
     #[allow(dead_code)]
     email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowStatesData {
+    workflow_states: NodeList<RawWorkflowState>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawWorkflowState {
+    id: String,
+    #[allow(dead_code)]
+    name: String,
+    #[allow(dead_code)]
+    #[serde(rename = "type")]
+    state_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateIssueData {
+    #[allow(dead_code)]
+    issue_update: UpdateIssueResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateIssueResult {
+    #[allow(dead_code)]
+    success: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -378,6 +431,59 @@ impl LinearClient {
 
         let data: ListData = self.execute(&request)?;
         Ok(data.issues.nodes.into_iter().map(Issue::from).collect())
+    }
+
+    /// Update an issue's workflow state by transitioning to a state of the
+    /// given type. `team_key` is needed to look up workflow states.
+    pub fn update_issue_status(
+        &self,
+        identifier: &str,
+        team_key: &str,
+        new_status: &IssueStatus,
+    ) -> Result<()> {
+        // Map IssueStatus to Linear state type(s) we want to transition to
+        let target_state_type = match new_status {
+            IssueStatus::Planned => "unstarted",
+            IssueStatus::InProgress => "started",
+            IssueStatus::Complete => "completed",
+            IssueStatus::Blocked => "started", // Linear has no "blocked" state type
+        };
+
+        // Find the workflow state ID for the target type
+        let filter = serde_json::json!({
+            "team": { "key": { "eq": team_key } },
+            "type": { "eq": target_state_type }
+        });
+        let variables = serde_json::json!({ "filter": filter });
+        let request = GqlRequest {
+            query: LIST_WORKFLOW_STATES_QUERY,
+            variables,
+        };
+
+        let data: WorkflowStatesData = self.execute(&request)?;
+        let state = data.workflow_states.nodes.first().ok_or_else(|| {
+            Error::Linear(format!(
+                "no workflow state of type '{}' found for team {}",
+                target_state_type, team_key,
+            ))
+        })?;
+
+        // Get issue's internal ID (we need to fetch it first)
+        let issue = self
+            .get_issue(identifier)?
+            .ok_or_else(|| Error::Linear(format!("issue not found: {}", identifier)))?;
+        // Use identifier as the ID for the mutation
+        let variables = serde_json::json!({
+            "issueId": issue.id,
+            "stateId": state.id,
+        });
+        let request = GqlRequest {
+            query: UPDATE_ISSUE_STATUS_MUTATION,
+            variables,
+        };
+
+        let _data: UpdateIssueData = self.execute(&request)?;
+        Ok(())
     }
 
     /// Get a single issue by its identifier (e.g. "AUT-123").

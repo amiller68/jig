@@ -17,7 +17,7 @@ impl IssueStatus {
     pub fn from_str_loose(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "planned" => Some(Self::Planned),
-            "in progress" | "in_progress" | "inprogress" => Some(Self::InProgress),
+            "in progress" | "in_progress" | "in-progress" | "inprogress" => Some(Self::InProgress),
             "complete" | "done" => Some(Self::Complete),
             "blocked" => Some(Self::Blocked),
             _ => None,

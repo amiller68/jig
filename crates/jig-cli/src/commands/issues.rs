@@ -1,9 +1,9 @@
-//! Issues command — discover and browse file-based issues.
+//! Issues command — discover, browse, and manage file-based issues.
 
 use std::fmt;
 use std::io::{self, Write};
 
-use clap::Args;
+use clap::{Args, Subcommand};
 use comfy_table::{Cell, Color};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
@@ -15,9 +15,12 @@ use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, Iss
 use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
 
-/// Discover and browse issues
+/// Discover and manage issues
 #[derive(Args, Debug, Clone)]
 pub struct Issues {
+    #[command(subcommand)]
+    pub command: Option<IssuesCommand>,
+
     /// Show a single issue by ID (e.g. "features/my-feature")
     #[arg(value_name = "ID")]
     pub id: Option<String>,
@@ -63,6 +66,54 @@ pub struct Issues {
     pub ids: bool,
 }
 
+#[derive(Subcommand, Debug, Clone)]
+pub enum IssuesCommand {
+    /// Create a new issue from a template
+    Create {
+        /// Issue title
+        title: String,
+
+        /// Template to use (standalone, ticket, epic-index)
+        #[arg(short, long, default_value = "standalone")]
+        template: String,
+
+        /// Issue priority (urgent, high, medium, low)
+        #[arg(short, long)]
+        priority: Option<String>,
+
+        /// Category/directory to create in (features, bugs, chores, etc.)
+        #[arg(short, long, default_value = "features")]
+        category: String,
+
+        /// Labels to attach (comma-separated or multiple -l flags)
+        #[arg(short, long)]
+        label: Vec<String>,
+    },
+
+    /// Update issue status
+    Status {
+        /// Issue ID (e.g. "features/my-feature")
+        id: String,
+
+        /// New status (planned, in-progress, complete, blocked)
+        #[arg(short, long)]
+        status: String,
+    },
+
+    /// Mark an issue as complete
+    Complete {
+        /// Issue ID (e.g. "features/my-feature")
+        id: String,
+
+        /// Delete the issue file after marking complete
+        #[arg(long)]
+        delete: bool,
+    },
+
+    /// Show issue statistics
+    Stats,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IssuesError {
     #[error(transparent)]
@@ -79,6 +130,16 @@ pub enum IssuesOutput {
     Detail(CoreIssue),
     Interactive,
     Ids(Vec<String>),
+    Created(String),
+    StatusUpdated(String, String),
+    Completed(String, bool),
+    Stats(StatsData),
+}
+
+#[derive(Debug)]
+pub struct StatsData {
+    pub by_status: Vec<(String, usize)>,
+    pub by_priority: Vec<(String, usize)>,
 }
 
 impl Issues {
@@ -142,13 +203,8 @@ impl Issues {
 
         Ok(IssuesOutput::Table(all_issues, spawn_labels))
     }
-}
 
-impl Op for Issues {
-    type Error = IssuesError;
-    type Output = IssuesOutput;
-
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run_list(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
         let repo = ctx.repo()?;
         let global_config = GlobalConfig::load().unwrap_or_default();
         let filter = self.filter();
@@ -175,7 +231,7 @@ impl Op for Issues {
         self.finish(all_issues, jig_toml.issues.spawn_labels.clone())
     }
 
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+    fn run_list_global(&self, ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
         let global_config = GlobalConfig::load().unwrap_or_default();
         let filter = self.filter();
 
@@ -210,6 +266,187 @@ impl Op for Issues {
     }
 }
 
+fn run_create(
+    ctx: &RepoCtx,
+    title: &str,
+    template: &str,
+    priority: Option<&str>,
+    category: &str,
+    labels: &[String],
+) -> Result<IssuesOutput, IssuesError> {
+    let repo = ctx.repo()?;
+    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+
+    if jig_toml.issues.provider == "linear" {
+        return Err(IssuesError::Usage(
+            "issue creation is only supported for file-based issues".into(),
+        ));
+    }
+
+    let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+    let pri = priority.and_then(IssuePriority::from_str_loose);
+
+    let id = file_provider.create_issue(title, category, template, pri.as_ref(), labels)?;
+    Ok(IssuesOutput::Created(id))
+}
+
+fn run_status_update(
+    ctx: &RepoCtx,
+    id: &str,
+    new_status: &str,
+) -> Result<IssuesOutput, IssuesError> {
+    let repo = ctx.repo()?;
+    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+    let global_config = GlobalConfig::load().unwrap_or_default();
+
+    let status = IssueStatus::from_str_loose(new_status)
+        .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", new_status)))?;
+
+    match jig_toml.issues.provider.as_str() {
+        "linear" => {
+            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            linear_provider.update_status(id, &status)?;
+        }
+        _ => {
+            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            file_provider.update_status(id, &status)?;
+        }
+    }
+
+    Ok(IssuesOutput::StatusUpdated(
+        id.to_string(),
+        status.as_str().to_string(),
+    ))
+}
+
+fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, IssuesError> {
+    let repo = ctx.repo()?;
+    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+    let global_config = GlobalConfig::load().unwrap_or_default();
+
+    match jig_toml.issues.provider.as_str() {
+        "linear" => {
+            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            linear_provider.update_status(id, &IssueStatus::Complete)?;
+        }
+        _ => {
+            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            file_provider.update_status(id, &IssueStatus::Complete)?;
+            if delete {
+                file_provider.delete_issue(id)?;
+            }
+        }
+    }
+
+    Ok(IssuesOutput::Completed(id.to_string(), delete))
+}
+
+fn run_stats(ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
+    let repo = ctx.repo()?;
+    let global_config = GlobalConfig::load().unwrap_or_default();
+    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+    let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+
+    let all_issues = provider.list(&IssueFilter::default())?;
+    Ok(IssuesOutput::Stats(compute_stats(&all_issues)))
+}
+
+fn run_stats_global(ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
+    let global_config = GlobalConfig::load().unwrap_or_default();
+    let mut all_issues = Vec::new();
+
+    for repo in &ctx.repos {
+        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+        all_issues.extend(provider.list(&IssueFilter::default())?);
+    }
+
+    Ok(IssuesOutput::Stats(compute_stats(&all_issues)))
+}
+
+fn compute_stats(issues: &[CoreIssue]) -> StatsData {
+    let mut planned = 0usize;
+    let mut in_progress = 0usize;
+    let mut complete = 0usize;
+    let mut blocked = 0usize;
+
+    let mut urgent = 0usize;
+    let mut high = 0usize;
+    let mut medium = 0usize;
+    let mut low = 0usize;
+    let mut no_priority = 0usize;
+
+    for issue in issues {
+        match issue.status {
+            IssueStatus::Planned => planned += 1,
+            IssueStatus::InProgress => in_progress += 1,
+            IssueStatus::Complete => complete += 1,
+            IssueStatus::Blocked => blocked += 1,
+        }
+        match &issue.priority {
+            Some(IssuePriority::Urgent) => urgent += 1,
+            Some(IssuePriority::High) => high += 1,
+            Some(IssuePriority::Medium) => medium += 1,
+            Some(IssuePriority::Low) => low += 1,
+            None => no_priority += 1,
+        }
+    }
+
+    let mut by_status = vec![
+        ("Planned".to_string(), planned),
+        ("In Progress".to_string(), in_progress),
+        ("Complete".to_string(), complete),
+        ("Blocked".to_string(), blocked),
+    ];
+    by_status.retain(|(_, count)| *count > 0);
+
+    let mut by_priority = vec![
+        ("Urgent".to_string(), urgent),
+        ("High".to_string(), high),
+        ("Medium".to_string(), medium),
+        ("Low".to_string(), low),
+        ("None".to_string(), no_priority),
+    ];
+    by_priority.retain(|(_, count)| *count > 0);
+
+    StatsData {
+        by_status,
+        by_priority,
+    }
+}
+
+impl Op for Issues {
+    type Error = IssuesError;
+    type Output = IssuesOutput;
+
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+        match &self.command {
+            Some(IssuesCommand::Create {
+                title,
+                template,
+                priority,
+                category,
+                label,
+            }) => run_create(ctx, title, template, priority.as_deref(), category, label),
+            Some(IssuesCommand::Status { id, status }) => run_status_update(ctx, id, status),
+            Some(IssuesCommand::Complete { id, delete }) => run_complete(ctx, id, *delete),
+            Some(IssuesCommand::Stats) => run_stats(ctx),
+            None => self.run_list(ctx),
+        }
+    }
+
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        match &self.command {
+            Some(IssuesCommand::Stats) => run_stats_global(ctx),
+            Some(_) => {
+                eprintln!("error: this subcommand does not support -g/--global");
+                std::process::exit(1);
+            }
+            None => self.run_list_global(ctx),
+        }
+    }
+}
+
 impl fmt::Display for IssuesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -236,6 +473,34 @@ impl fmt::Display for IssuesOutput {
             Self::Ids(ids) => {
                 for id in ids {
                     writeln!(f, "{}", id)?;
+                }
+                Ok(())
+            }
+            Self::Created(id) => {
+                write!(f, "Created issue: {}", id)
+            }
+            Self::StatusUpdated(id, status) => {
+                write!(f, "Updated {} -> {}", id, status)
+            }
+            Self::Completed(id, deleted) => {
+                if *deleted {
+                    write!(f, "Completed and deleted: {}", id)
+                } else {
+                    write!(f, "Completed: {}", id)
+                }
+            }
+            Self::Stats(data) => {
+                write!(f, "By Status:  ")?;
+                for (i, (name, count)) in data.by_status.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, "  ")?;
+                    }
+                    write!(f, "{}: {}", name, count)?;
+                }
+                writeln!(f)?;
+                write!(f, "By Priority:")?;
+                for (name, count) in &data.by_priority {
+                    write!(f, "  {}: {}", name, count)?;
                 }
                 Ok(())
             }
