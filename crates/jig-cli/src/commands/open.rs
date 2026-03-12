@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use jig_core::{git, terminal, Error, RepoContext, RepoRegistry};
 
-use crate::op::{GlobalCtx, Op, RepoCtx};
+use crate::op::{Op, RepoCtx};
 use crate::ui;
 
 /// Open/cd into a worktree
@@ -61,19 +61,17 @@ impl Op for Open {
                     .filter(|e| e.path.exists())
                     .filter_map(|e| RepoContext::from_path(&e.path).ok())
                     .collect();
-                let ctx = GlobalCtx { repos };
-                self.run_global(&ctx)
+                let repo = if let Some(name) = self.name.as_deref() {
+                    repos
+                        .iter()
+                        .find(|r| r.worktrees_dir.join(name).exists())
+                        .ok_or(Error::WorktreeNotFound(name.to_string()))?
+                } else {
+                    repos.first().ok_or(Error::NotInGitRepo)?
+                };
+                self.open_in_repo(repo)
             }
         }
-    }
-
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        let repo = if let Some(name) = self.name.as_deref() {
-            ctx.repo_for_worktree(name)?
-        } else {
-            ctx.repos.first().ok_or(Error::NotInGitRepo)?
-        };
-        self.open_in_repo(repo)
     }
 }
 
