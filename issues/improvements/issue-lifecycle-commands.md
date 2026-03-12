@@ -1,6 +1,6 @@
 # Issue Lifecycle Commands
 
-**Status:** Planned
+**Status:** Complete
 **Priority:** Low
 **Labels:** auto
 
