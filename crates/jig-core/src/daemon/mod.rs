@@ -12,10 +12,12 @@
 mod discovery;
 pub mod github_actor;
 pub mod issue_actor;
+pub mod lifecycle;
 pub mod messages;
 pub mod nudge_actor;
 mod pr;
 pub mod prune_actor;
+pub mod recovery;
 pub mod runtime;
 pub mod spawn_actor;
 pub mod sync_actor;
@@ -564,6 +566,47 @@ impl<'a> Daemon<'a> {
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
 
+        // Dead tmux detection: if worker is active but tmux window is gone, resume
+        // instead of sending nudges to a dead window.
+        if matches!(
+            new_state.status,
+            WorkerStatus::Spawned
+                | WorkerStatus::Running
+                | WorkerStatus::Stalled
+                | WorkerStatus::Initializing
+        ) {
+            let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+            let target = TmuxTarget::new(&session, worker_name);
+            if !self.tmux.has_window(&target) {
+                tracing::info!(
+                    worker = key,
+                    status = new_state.status.as_str(),
+                    "active worker has no tmux window, attempting resume"
+                );
+                // Replace nudge actions with resume attempt
+                actions.retain(|a| !matches!(a, Action::Nudge { .. }));
+                if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                    match recovery::RecoveryScanner::try_resume_worker(
+                        &entry.path,
+                        repo_name,
+                        worker_name,
+                    ) {
+                        Ok(true) => {
+                            tracing::info!(worker = key, "worker resumed during steady-state tick");
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                worker = key,
+                                error = %e,
+                                "failed to resume dead worker"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Track review feedback count for nudge reset logic
         let mut current_review_feedback_count: Option<u32> = None;
 
@@ -1029,10 +1072,34 @@ impl<'a> Daemon<'a> {
                 }
                 Action::Restart { worker_id, reason } => {
                     tracing::info!(
-                        "restart requested for {}: {} (not yet implemented)",
-                        worker_id,
-                        reason
+                        worker = %worker_id,
+                        reason = %reason,
+                        "restart requested, attempting resume"
                     );
+                    if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                        match recovery::RecoveryScanner::try_resume_worker(
+                            &entry.path,
+                            repo_name,
+                            worker_name,
+                        ) {
+                            Ok(true) => {
+                                tracing::info!(worker = key, "worker resumed via restart action");
+                            }
+                            Ok(false) => {
+                                tracing::debug!(
+                                    worker = key,
+                                    "worker still has tmux window, skip resume"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    worker = key,
+                                    error = %e,
+                                    "failed to resume worker via restart action"
+                                );
+                            }
+                        }
+                    }
                 }
                 Action::Cleanup { worker_id } => {
                     let tmux_target = TmuxTarget::new(
@@ -1185,6 +1252,76 @@ fn make_notifier(global_config: &GlobalConfig) -> Result<Notifier> {
     Ok(Notifier::new(global_config.notify.clone(), queue))
 }
 
+/// Install SIGINT/SIGTERM handler that sets the quit flag for graceful shutdown.
+fn install_signal_handler(quit: &Arc<AtomicBool>) {
+    let quit_flag = Arc::clone(quit);
+    if let Err(e) = ctrlc::set_handler(move || {
+        tracing::info!("received shutdown signal, finishing current tick...");
+        quit_flag.store(true, Ordering::Relaxed);
+    }) {
+        tracing::warn!("failed to install signal handler: {}", e);
+    }
+}
+
+/// Run startup recovery: log lifecycle event, detect crash, resume orphans.
+fn startup_recovery(global_config: &GlobalConfig) {
+    let log = match lifecycle::DaemonLifecycleLog::global() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("failed to open daemon lifecycle log: {}", e);
+            return;
+        }
+    };
+
+    // Check for previous crash
+    match log.previous_run_crashed() {
+        Ok(true) => {
+            tracing::warn!(
+                "previous daemon run did not shut down cleanly — checking for orphaned workers"
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!("failed to check daemon lifecycle log: {}", e);
+        }
+    }
+
+    // Log startup
+    if let Err(e) = log.record_started() {
+        tracing::warn!("failed to write daemon Started event: {}", e);
+    }
+
+    // Auto-recover orphaned workers if enabled
+    if global_config.daemon.auto_recover {
+        let registry = RepoRegistry::load().unwrap_or_default();
+        let scanner = recovery::RecoveryScanner::new(&registry, &global_config.health);
+        let recovered = scanner.recover_all();
+        if !recovered.is_empty() {
+            tracing::info!(
+                count = recovered.len(),
+                "recovered orphaned workers on startup"
+            );
+            for (repo, worker) in &recovered {
+                tracing::info!(repo = %repo, worker = %worker, "recovered");
+            }
+        }
+    }
+}
+
+/// Log a graceful shutdown event.
+fn log_shutdown(reason: &str) {
+    let log = match lifecycle::DaemonLifecycleLog::global() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("failed to open daemon lifecycle log: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = log.record_stopped(reason) {
+        tracing::warn!("failed to write daemon Stopped event: {}", e);
+    }
+}
+
 /// Run the daemon loop with a per-tick callback and actor runtime.
 ///
 /// The callback receives each `TickResult` and returns `true` to continue or `false` to stop.
@@ -1201,6 +1338,10 @@ where
     F: FnMut(&TickResult, &Arc<AtomicBool>) -> bool,
 {
     let global_config = GlobalConfig::load()?;
+
+    // Startup: lifecycle logging + recovery
+    startup_recovery(&global_config);
+
     let tmux = TmuxClient::new();
     let engine = TemplateEngine::new();
     let notifier = make_notifier(&global_config)?;
@@ -1209,79 +1350,103 @@ where
     let mut runtime = DaemonRuntime::new(runtime_config);
     let quit = Arc::new(AtomicBool::new(false));
 
-    loop {
-        match daemon.tick(&mut runtime, &quit) {
-            Ok(tick) => {
-                if tick.workers_checked > 0 || !tick.errors.is_empty() {
-                    tracing::info!(
-                        workers = tick.workers_checked,
-                        actions = tick.actions_dispatched,
-                        nudges = tick.nudges_sent,
-                        notifications = tick.notifications_sent,
-                        errors = tick.errors.len(),
-                        "tick complete"
-                    );
+    // Install signal handler for graceful shutdown
+    install_signal_handler(&quit);
+
+    let result = (|| -> Result<Arc<AtomicBool>> {
+        loop {
+            match daemon.tick(&mut runtime, &quit) {
+                Ok(tick) => {
+                    if tick.workers_checked > 0 || !tick.errors.is_empty() {
+                        tracing::info!(
+                            workers = tick.workers_checked,
+                            actions = tick.actions_dispatched,
+                            nudges = tick.nudges_sent,
+                            notifications = tick.notifications_sent,
+                            errors = tick.errors.len(),
+                            "tick complete"
+                        );
+                    }
+                    for err in &tick.errors {
+                        tracing::warn!("worker error: {}", err);
+                    }
+                    if quit.load(Ordering::Relaxed) {
+                        return Ok(quit.clone());
+                    }
+                    let keep_going = on_tick(&tick, &quit);
+                    if daemon_config.once || !keep_going {
+                        return Ok(quit.clone());
+                    }
                 }
-                for err in &tick.errors {
-                    tracing::warn!("worker error: {}", err);
+                Err(e) => {
+                    tracing::error!("tick failed: {}", e);
+                    if daemon_config.once {
+                        return Err(e);
+                    }
+                    if quit.load(Ordering::Relaxed) {
+                        return Ok(quit.clone());
+                    }
+                    std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
                 }
-                if quit.load(Ordering::Relaxed) {
-                    return Ok(quit);
-                }
-                let keep_going = on_tick(&tick, &quit);
-                if daemon_config.once || !keep_going {
-                    return Ok(quit);
-                }
-            }
-            Err(e) => {
-                tracing::error!("tick failed: {}", e);
-                if daemon_config.once {
-                    return Err(e);
-                }
-                if quit.load(Ordering::Relaxed) {
-                    return Ok(quit);
-                }
-                std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
             }
         }
-    }
+    })();
+
+    // Log shutdown with appropriate reason
+    log_shutdown(if result.is_ok() { "normal" } else { "error" });
+    result
 }
 
 /// Run the daemon loop (simple blocking mode). Returns after one pass if `config.once` is true.
 pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
     let global_config = GlobalConfig::load()?;
+
+    // Startup: lifecycle logging + recovery
+    startup_recovery(&global_config);
+
     let tmux = TmuxClient::new();
     let engine = TemplateEngine::new();
     let notifier = make_notifier(&global_config)?;
     let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
 
-    loop {
-        match daemon.tick_once() {
-            Ok(tick) => {
-                if tick.workers_checked > 0 || !tick.errors.is_empty() {
-                    eprintln!(
-                        "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
-                        tick.workers_checked,
-                        tick.actions_dispatched,
-                        tick.nudges_sent,
-                        tick.notifications_sent,
-                        tick.errors.len(),
-                    );
-                }
-                if daemon_config.once {
-                    return Ok(());
-                }
-                std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
+    let quit = Arc::new(AtomicBool::new(false));
+    install_signal_handler(&quit);
+
+    let result = (|| -> Result<()> {
+        loop {
+            if quit.load(Ordering::Relaxed) {
+                return Ok(());
             }
-            Err(e) => {
-                tracing::error!("tick failed: {}", e);
-                if daemon_config.once {
-                    return Err(e);
+            match daemon.tick_once() {
+                Ok(tick) => {
+                    if tick.workers_checked > 0 || !tick.errors.is_empty() {
+                        eprintln!(
+                            "[tick] {} workers, {} actions, {} nudges, {} notifications, {} errors",
+                            tick.workers_checked,
+                            tick.actions_dispatched,
+                            tick.nudges_sent,
+                            tick.notifications_sent,
+                            tick.errors.len(),
+                        );
+                    }
+                    if daemon_config.once {
+                        return Ok(());
+                    }
+                    std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
                 }
-                std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
+                Err(e) => {
+                    tracing::error!("tick failed: {}", e);
+                    if daemon_config.once {
+                        return Err(e);
+                    }
+                    std::thread::sleep(Duration::from_secs(daemon_config.interval_seconds));
+                }
             }
         }
-    }
+    })();
+
+    log_shutdown(if result.is_ok() { "normal" } else { "error" });
+    result
 }
 
 /// Convert a WorkerEntry (from workers.json) back to a WorkerState for comparison.

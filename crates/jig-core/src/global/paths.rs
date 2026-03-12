@@ -22,6 +22,11 @@ pub fn global_hooks_dir() -> Result<PathBuf> {
     Ok(Config::config_dir()?.join("hooks"))
 }
 
+/// `~/.config/jig/state/daemon.jsonl`
+pub fn daemon_log_path() -> Result<PathBuf> {
+    Ok(global_state_dir()?.join("daemon.jsonl"))
+}
+
 /// `~/.config/jig/state/events/<repo>-<worker>/`
 pub fn worker_events_dir(repo: &str, worker: &str) -> Result<PathBuf> {
     Ok(global_state_dir()?

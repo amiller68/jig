@@ -100,6 +100,28 @@ impl Default for GlobalSpawnConfig {
     }
 }
 
+/// Daemon configuration (global).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GlobalDaemonConfig {
+    /// Automatically recover orphaned workers on daemon startup.
+    pub auto_recover: bool,
+    /// Tick interval in seconds.
+    pub interval_seconds: u64,
+    /// Tmux session prefix (default: "jig-").
+    pub session_prefix: String,
+}
+
+impl Default for GlobalDaemonConfig {
+    fn default() -> Self {
+        Self {
+            auto_recover: true,
+            interval_seconds: 30,
+            session_prefix: "jig-".to_string(),
+        }
+    }
+}
+
 /// Global configuration stored at `~/.config/jig/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -109,6 +131,7 @@ pub struct GlobalConfig {
     pub github: GitHubConfig,
     pub linear: LinearConfig,
     pub spawn: GlobalSpawnConfig,
+    pub daemon: GlobalDaemonConfig,
 }
 
 impl GlobalConfig {

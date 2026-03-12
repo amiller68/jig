@@ -46,6 +46,7 @@ regex = "1"
 ureq = { version = "3", features = ["json"] }
 crossterm = "0.29"
 nix = { version = "0.31", features = ["process"] }
+ctrlc = { version = "3", features = ["termination"] }
 flume = "0.12"
 git2 = "0.20"
 
