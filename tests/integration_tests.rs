@@ -762,6 +762,32 @@ fn test_open_all_no_cd_output() {
 }
 
 // ============================================================================
+// Resume Tests
+// ============================================================================
+
+#[test]
+fn test_resume_requires_name() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args(["resume"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn test_resume_nonexistent_worktree() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args(["resume", "FAKE-123"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist"));
+}
+
+// ============================================================================
 // Init Tests (test_spawn.sh)
 // ============================================================================
 
