@@ -94,6 +94,7 @@ impl TestRepo {
         TestRepo { dir, config_dir }
     }
 
+    #[allow(deprecated)]
     fn jig(&self) -> Command {
         let mut cmd = Command::cargo_bin("jig").expect("Failed to find jig binary");
         cmd.current_dir(self.dir.path());
