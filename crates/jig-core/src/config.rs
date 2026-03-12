@@ -373,13 +373,18 @@ pub struct IssuesConfig {
 pub struct LinearIssuesConfig {
     /// Name of the profile in global config to use for API key.
     pub profile: String,
-    /// Linear team key (e.g. "ENG"). Optional — will be required at provider
-    /// init time, but can come from the profile-level config in the future.
+    /// Linear team key (e.g. "ENG"). Optional — falls back to profile default.
     #[serde(default)]
     pub team: Option<String>,
     /// Optional list of allowed project names to filter by.
     #[serde(default)]
     pub projects: Vec<String>,
+    /// Optional assignee filter. "me" resolves to the API key owner.
+    #[serde(default)]
+    pub assignee: Option<String>,
+    /// Optional label filter. Issues must carry all listed labels.
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 fn default_issues_provider() -> String {
@@ -816,6 +821,46 @@ mod tests {
             silence_threshold_seconds: 300,
             max_nudges: 3,
         }
+    }
+
+    #[test]
+    fn parse_jig_toml_with_assignee() {
+        let toml_str = r#"
+[issues]
+provider = "linear"
+
+[issues.linear]
+profile = "work"
+team = "ENG"
+projects = ["Backend"]
+assignee = "alice@co.com"
+labels = ["auto"]
+"#;
+        let config: JigToml = toml::from_str(toml_str).unwrap();
+        let linear = config.issues.linear.unwrap();
+        assert_eq!(linear.profile, "work");
+        assert_eq!(linear.team.as_deref(), Some("ENG"));
+        assert_eq!(linear.projects, vec!["Backend"]);
+        assert_eq!(linear.assignee.as_deref(), Some("alice@co.com"));
+        assert_eq!(linear.labels, vec!["auto"]);
+    }
+
+    #[test]
+    fn parse_jig_toml_linear_minimal() {
+        let toml_str = r#"
+[issues]
+provider = "linear"
+
+[issues.linear]
+profile = "work"
+"#;
+        let config: JigToml = toml::from_str(toml_str).unwrap();
+        let linear = config.issues.linear.unwrap();
+        assert_eq!(linear.profile, "work");
+        assert!(linear.team.is_none());
+        assert!(linear.projects.is_empty());
+        assert!(linear.assignee.is_none());
+        assert!(linear.labels.is_empty());
     }
 
     #[test]

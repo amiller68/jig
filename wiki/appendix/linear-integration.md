@@ -33,9 +33,13 @@ Linear > Settings > API > Personal API keys. Create one.
 
 [linear.profiles.work]
 api_key = "lin_api_xxxxxxxxxxxx"
+team = "ENG"                          # default team filter
+projects = ["Backend", "Platform"]    # default project filter
+assignee = "me"                       # "me" = API key owner; or use email
+labels = ["auto"]                     # default label filter
 ```
 
-API keys live in the global config — never in committed files.
+API keys live in the global config — never in committed files. The `team`, `projects`, `assignee`, and `labels` fields are optional profile-level defaults that apply to every repo using this profile.
 
 ### 3. Point your repo at Linear
 
@@ -47,11 +51,13 @@ provider = "linear"
 
 [issues.linear]
 profile = "work"
-team = "ENG"
-projects = ["Backend", "Platform"]  # optional filter
+# team = "ENG"               # override profile default
+# projects = ["Backend"]     # narrow profile default
+# assignee = "alice@co.com"  # override profile default
+# labels = ["backend"]       # override profile default
 ```
 
-That's it. `jig issues` now lists your Linear tickets.
+Per-repo fields override profile-level defaults. If the profile already has `team` set, you can omit it from `jig.toml`. `jig issues` now lists your Linear tickets.
 
 ## Day-to-day usage
 
@@ -110,6 +116,36 @@ Then reference the profile by name in each repo's `jig.toml`:
 profile = "oss"
 team = "JIG"
 ```
+
+## Profile-level filters
+
+Profiles can carry default filters so you don't repeat the same team/project/assignee in every repo:
+
+```toml
+# ~/.config/jig/config.toml
+
+[linear.profiles.work]
+api_key = "lin_api_xxxxxxxxxxxx"
+team = "ENG"
+projects = ["Backend", "Platform"]
+assignee = "me"
+labels = ["auto"]
+```
+
+Any repo that uses `profile = "work"` inherits these filters. Per-repo `jig.toml` fields override them:
+
+| Field | Resolution |
+|-------|-----------|
+| `team` | jig.toml > profile > *(error if missing)* |
+| `projects` | jig.toml > profile > *(no filter)* |
+| `assignee` | jig.toml > profile > *(no filter)* |
+| `labels` | jig.toml > profile > *(no filter)* |
+
+### `assignee = "me"`
+
+The special value `"me"` resolves to the authenticated user (the owner of the API key) via Linear's `viewer` query. This is useful for personal issue feeds — only see issues assigned to you.
+
+You can also use an email address (e.g. `assignee = "alice@company.com"`) to filter by a specific person.
 
 ## How it maps
 
