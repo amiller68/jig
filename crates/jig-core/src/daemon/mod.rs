@@ -1231,7 +1231,7 @@ fn startup_recovery(global_config: &GlobalConfig) {
     // Auto-recover orphaned workers if enabled
     if global_config.daemon.auto_recover {
         let registry = RepoRegistry::load().unwrap_or_default();
-        let scanner = recovery::RecoveryScanner::new(&registry);
+        let scanner = recovery::RecoveryScanner::new(&registry, &global_config.health);
         let recovered = scanner.recover_all();
         if !recovered.is_empty() {
             tracing::info!(

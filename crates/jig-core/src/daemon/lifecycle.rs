@@ -4,8 +4,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -24,13 +23,6 @@ pub enum DaemonEvent {
 #[derive(Debug)]
 pub struct DaemonLifecycleLog {
     path: PathBuf,
-}
-
-impl Deref for DaemonLifecycleLog {
-    type Target = Path;
-    fn deref(&self) -> &Path {
-        &self.path
-    }
 }
 
 impl DaemonLifecycleLog {

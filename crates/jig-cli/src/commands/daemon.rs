@@ -3,6 +3,7 @@
 use clap::Args;
 
 use jig_core::daemon::{self, DaemonConfig};
+use jig_core::global::GlobalConfig;
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -11,8 +12,8 @@ use crate::ui;
 #[derive(Args, Debug, Clone)]
 pub struct Daemon {
     /// Poll interval in seconds
-    #[arg(long, default_value = "30")]
-    interval: u64,
+    #[arg(long)]
+    interval: Option<u64>,
 
     /// Run once and exit (no loop)
     #[arg(long)]
@@ -30,19 +31,19 @@ impl Op for Daemon {
     type Output = NoOutput;
 
     fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+        let global = GlobalConfig::load().unwrap_or_default();
+        let interval = self.interval.unwrap_or(global.daemon.interval_seconds);
         let config = DaemonConfig {
-            interval_seconds: self.interval,
+            interval_seconds: interval,
             once: self.once,
+            session_prefix: global.daemon.session_prefix.clone(),
             ..Default::default()
         };
 
         if self.once {
             eprintln!("{}", ui::dim("Running single pass..."));
         } else {
-            ui::success(&format!(
-                "Daemon started (polling every {}s)",
-                self.interval
-            ));
+            ui::success(&format!("Daemon started (polling every {}s)", interval));
             eprintln!("{}", ui::dim("Press Ctrl+C to stop."));
         }
 

@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::config::JIG_DIR;
 use crate::error::Result;
 use crate::events::{EventLog, EventType, WorkerState};
-use crate::global::{GlobalConfig, HealthConfig};
+use crate::global::HealthConfig;
 use crate::registry::RepoRegistry;
 use crate::worker::WorkerStatus;
 use crate::worktree::Worktree;
@@ -35,10 +35,12 @@ pub struct RecoveryScanner<'a> {
 }
 
 impl<'a> RecoveryScanner<'a> {
-    /// Create a new scanner for the given registry.
-    pub fn new(registry: &'a RepoRegistry) -> Self {
-        let health = GlobalConfig::load().map(|c| c.health).unwrap_or_default();
-        Self { registry, health }
+    /// Create a new scanner for the given registry and health config.
+    pub fn new(registry: &'a RepoRegistry, health: &HealthConfig) -> Self {
+        Self {
+            registry,
+            health: health.clone(),
+        }
     }
 
     /// Find all orphaned workers across registered repos.
