@@ -2,6 +2,8 @@
 
 use clap::{Args, Subcommand};
 
+use jig_core::config::JigToml;
+
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
 
@@ -14,9 +16,7 @@ pub struct Hooks {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum HooksCommands {
-    /// Install Claude Code hooks to ~/.claude/hooks/
-    InstallClaude,
-    /// Install jig git hooks into the current repo
+    /// Install jig git hooks and agent hooks into the current repo
     Init {
         /// Reinstall all hooks even if already installed
         #[arg(long, short)]
@@ -62,26 +62,11 @@ impl Op for Hooks {
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         match &self.subcommand {
-            HooksCommands::InstallClaude => {
-                let result = jig_core::hooks::install_claude_hooks()?;
-
-                for name in &result.installed {
-                    ui::success(&format!("Installed {}", name));
-                }
-                for name in &result.skipped {
-                    ui::warning(&format!("Skipped {} (already exists)", name));
-                }
-
-                if result.installed.is_empty() && !result.skipped.is_empty() {
-                    eprintln!("All hooks already installed.");
-                }
-
-                Ok(NoOutput)
-            }
             HooksCommands::Init { force } => {
                 let repo = ctx.repo()?;
                 let repo_path = &repo.repo_root;
 
+                // Install git hooks
                 eprintln!("Installing git hooks...");
                 eprintln!();
 
@@ -115,10 +100,37 @@ impl Op for Hooks {
                     )
                 });
 
-                eprintln!();
                 if any_backed_up {
+                    eprintln!();
                     eprintln!("Your existing hooks have been moved to .git/hooks/*.user");
                 }
+
+                // Install agent-specific hooks based on config
+                let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
+                let adapter = jig_core::adapter::get_adapter(&jig_toml.agent.agent_type);
+
+                if let Some(adapter) = adapter {
+                    if matches!(adapter.agent_type, jig_core::adapter::AgentType::Claude) {
+                        eprintln!();
+                        ui::progress("Installing Claude Code hooks...");
+                        match jig_core::hooks::install_claude_hooks() {
+                            Ok(result) => {
+                                for name in &result.installed {
+                                    eprintln!("  {} {}: installed", ui::SYM_OK, name);
+                                }
+                                for name in &result.skipped {
+                                    eprintln!("  {} {}: up to date", ui::SYM_OK, name);
+                                }
+                            }
+                            Err(e) => {
+                                ui::warning(&format!("Claude hooks: {}", e));
+                            }
+                        }
+                    }
+                }
+
+                eprintln!();
+                ui::success("Hooks installed");
 
                 Ok(NoOutput)
             }

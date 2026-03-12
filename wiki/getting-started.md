@@ -174,7 +174,7 @@ jig remove hello-world    # Clean up
 |---------|-------------|
 | `jig daemon` | Run the background daemon (`--interval`, `--once`) |
 | `jig health` | Check system dependencies and repo setup |
-| `jig hooks` | Manage git/agent hooks (`init`, `uninstall`, `install-claude`) |
+| `jig hooks` | Manage git/agent hooks (`init`, `uninstall`) |
 | `jig shell-init <shell>` | Print shell integration script |
 | `jig shell-setup` | Auto-configure shell integration |
 | `jig update` | Update jig to latest version |
