@@ -1,11 +1,9 @@
 ---
 description: Discover and manage file-based work items. Use to explore tasks before spawning workers or to track project progress.
 allowed-tools:
+  - Bash(jig:*)
   - Bash(ls:*)
-  - Bash(find:*)
-  - Bash(grep:*)
   - Bash(mkdir:*)
-  - Bash(cp:*)
   - Read
   - Write
   - Edit
@@ -33,34 +31,43 @@ issues/
 
 ### List issues
 
-Scan `issues/` and show all work items:
-
 ```bash
 # All issues
-find issues -name "*.md" -not -path "*/_templates/*" -not -name "README.md"
+jig issues
 
-# By status
-grep -r "Status.*Planned" issues/
+# Filter by status
+jig issues --status planned
+
+# Filter by priority
+jig issues --priority high
+
+# Show IDs only
+jig issues --ids
 ```
-
-Display with status indicators:
-- `[ ]` Planned
-- `[~]` In Progress
-- `[x]` Complete
-- `[!]` Blocked
 
 ### Show issue
 
-Read and display a specific issue file.
+```bash
+jig issues <id>
+# e.g. jig issues features/my-feature
+```
 
-### Create standalone issue
+### Create issue
 
 ```bash
-cp issues/_templates/standalone.md issues/features/my-feature.md
-# or issues/bugs/, issues/chores/
+# Basic (defaults to features/ category)
+jig issues create "Add verbose flag"
+
+# With options
+jig issues create "Fix crash on exit" --priority high --category bugs
+
+# With labels
+jig issues create "Refactor auth" --label backend --label auto
 ```
 
 ### Create epic
+
+Epics still use manual directory setup:
 
 ```bash
 mkdir issues/epics/my-epic
@@ -68,19 +75,34 @@ cp issues/_templates/epic-index.md issues/epics/my-epic/index.md
 cp issues/_templates/ticket.md issues/epics/my-epic/0-first-task.md
 ```
 
-### Create ticket in epic
-
-```bash
-cp issues/_templates/ticket.md issues/epics/my-epic/1-next-task.md
-```
-
 Update the epic's `index.md` ticket table.
 
 ### Update status
 
-Change the `**Status:**` field:
-- `Planned` → `In Progress` → `Complete`
-- Or `Blocked` if waiting on something
+```bash
+jig issues status features/my-feature --status in-progress
+jig issues status bugs/crash-fix --status blocked
+```
+
+### Complete issue
+
+```bash
+# Mark complete (keeps file)
+jig issues complete features/my-feature
+
+# Mark complete and delete file
+jig issues complete features/my-feature --delete
+```
+
+### Stats
+
+```bash
+# Local repo stats
+jig issues stats
+
+# Global stats across all repos
+jig issues stats -g
+```
 
 ### Check dependencies
 
@@ -88,12 +110,6 @@ Issues can depend on other issues via path:
 
 ```markdown
 **Depends-On:** issues/epics/git-hooks/0-wrapper-pattern.md
-```
-
-Check if dependencies are satisfied:
-```bash
-# Read the dependency file and check its status
-grep "Status:" issues/epics/git-hooks/0-wrapper-pattern.md
 ```
 
 Dependencies must be `Complete` before starting dependent issue.
@@ -111,7 +127,7 @@ Epic `index.md` tracks overall progress and ticket status.
 
 See `issues/README.md` for full documentation.
 
-Typically for straightforward and well-defined tasks, 
+Typically for straightforward and well-defined tasks,
  we prefer setting the `auto` label such that said tasks
  are picked up and spawned by the jig daemon.
 
