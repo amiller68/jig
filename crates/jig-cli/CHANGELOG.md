@@ -5,10 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v1.2.0 (2026-03-11)
+## v1.3.0 (2026-03-12)
 
 ### Chore
 
+ - <csr-id-9763763b2e83c52ae93c3903b1e0c3211dd8bfb9/> bump version to 1.3.0
  - <csr-id-bd3db9f58cf9e9100bbfe7a1ee3480cfc3c4e566/> bump version to 1.2.0
  - <csr-id-3d809c6a1b58f3d438c3d279592005947ad50438/> bump version to 1.1.1
  - <csr-id-0d3f00fefd29350c51e4671b9de14d230b809931/> bump version to 1.1.0
@@ -48,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### New Features
 
+ - <csr-id-ffcc788e769bab29484f284e1dd659b9ba4f04b1/> show nudge state in jig ps output
+   Add NUDGE column between STATE and COMMITS in the ps table.
+   Displays nudge count as count/max (e.g. 2/3), with color coding:
+   grey dash for zero, yellow for in-progress, red for exhausted.
+   
+   Adds max_nudges field to WorkerDisplayInfo so the UI can render
+   the denominator from the resolved health config.
  - <csr-id-4be2cafcf2b1c7bcb9a42192a636aaf84d6fbcfc/> add per-repo nudge configuration in jig.toml
    Add [health] section to jig.toml supporting per-repo overrides of
    silence_threshold_seconds and max_nudges, plus per-nudge-type
@@ -572,8 +580,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 114 commits contributed to the release over the course of 36 calendar days.
- - 79 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 119 commits contributed to the release over the course of 36 calendar days.
+ - 81 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
 ### Commit Details
@@ -583,6 +591,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Bump version to 1.3.0 ([`9763763`](https://github.com/amiller68/jig/commit/9763763b2e83c52ae93c3903b1e0c3211dd8bfb9))
+    - Merge pull request #147 from amiller68/improvements/ps-nudge-visibility ([`559aec7`](https://github.com/amiller68/jig/commit/559aec73fbb46349ffb7aab7786a8db024f7c52b))
+    - Show nudge state in jig ps output ([`ffcc788`](https://github.com/amiller68/jig/commit/ffcc788e769bab29484f284e1dd659b9ba4f04b1))
+    - Merge pull request #146 from amiller68/release-automation ([`317be6f`](https://github.com/amiller68/jig/commit/317be6f702e9f39addda94680e14680876132919))
+    - Bump jig-cli v1.2.0 ([`e16a443`](https://github.com/amiller68/jig/commit/e16a4439b7fb222fa6f890ffe7ed189079ba49f8))
     - Bump version to 1.2.0 ([`bd3db9f`](https://github.com/amiller68/jig/commit/bd3db9f58cf9e9100bbfe7a1ee3480cfc3c4e566))
     - Remove useless io::Error conversion in with_alternate_screen ([`cd7bb28`](https://github.com/amiller68/jig/commit/cd7bb28acc3d02336db120485a99f31297e75e80))
     - Linear issue discovery and issues UX improvements ([`8fbdbae`](https://github.com/amiller68/jig/commit/8fbdbae9b48196658aa61eca9c60e4492adbc7f5))
@@ -699,6 +712,413 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Rename internal crates and state file to jig naming ([`5529bf8`](https://github.com/amiller68/jig/commit/5529bf802af7cc1f0c6d4c40849075f0248e8a09))
 </details>
 
+## v1.2.0 (2026-03-11)
+
+<csr-id-bd3db9f58cf9e9100bbfe7a1ee3480cfc3c4e566/>
+<csr-id-3d809c6a1b58f3d438c3d279592005947ad50438/>
+<csr-id-0d3f00fefd29350c51e4671b9de14d230b809931/>
+<csr-id-639e712803a8d13d5f8c84728d0410a17b47561e/>
+<csr-id-f39d6b5fb56180c8cc9f40adf812138f8824b64d/>
+<csr-id-72ff9fcf89d38f5e74d6d06c128226d2f094feb1/>
+<csr-id-d38e493e16a264b81885608389452aa889ddfc6b/>
+<csr-id-8abff4b7ca2031d3232127b93febb92eb07cd9c5/>
+<csr-id-f7c5d5451126c55a29a5742b0ac55e5d2357dc36/>
+<csr-id-e33f0420bcba0c6abd5758cfafd756fff91515ad/>
+<csr-id-7bdb392c7ffa5727e951f18377022e7d596c4151/>
+<csr-id-1345768accb7711e0a333c0c7a3da55dfb3afd1d/>
+<csr-id-85d9e1de3500d926401b726017ee07199e5ff863/>
+<csr-id-12f9c10b9f61aa2054a2d5c2d559553d3af50069/>
+<csr-id-f694a0ce3f1a96ad9fc8b38d1c947924e6acaeaf/>
+<csr-id-a0c69ed63f57649a00d0484505bafc9c644ca7e9/>
+<csr-id-78cff84a46db59e266f2fa4affdaafb3c5857708/>
+<csr-id-80401de003d427eeb057c8f64805b91060278fe5/>
+<csr-id-225e9a6d7b8837652cae0da672f7b4b6a0cd069b/>
+<csr-id-f7e016757eb9b899cd43b37b42b01164c8bd0fc7/>
+
+### Chore
+
+ - <csr-id-bd3db9f58cf9e9100bbfe7a1ee3480cfc3c4e566/> bump version to 1.2.0
+ - <csr-id-3d809c6a1b58f3d438c3d279592005947ad50438/> bump version to 1.1.1
+ - <csr-id-0d3f00fefd29350c51e4671b9de14d230b809931/> bump version to 1.1.0
+ - <csr-id-639e712803a8d13d5f8c84728d0410a17b47561e/> bump all outdated crates to latest major versions
+   - thiserror 1 → 2 (no API changes needed)
+   - colored 2 → 3 (MSRV bump only, dropped lazy_static)
+   - dirs 5 → 6 (API compatible)
+   - toml 0.8 → 1.0 (API compatible)
+   - handlebars 5 → 6 (RenderError refactored, no impact on our usage)
+   - which 6 → 8 (API compatible)
+   - nix 0.28 → 0.31 (no breaking changes for process feature)
+   - flume 0.11 → 0.12 (API compatible)
+ - <csr-id-f39d6b5fb56180c8cc9f40adf812138f8824b64d/> bump version to 1.0.0
+ - <csr-id-72ff9fcf89d38f5e74d6d06c128226d2f094feb1/> bump version to 0.5.0
+ - <csr-id-d38e493e16a264b81885608389452aa889ddfc6b/> remove jig-tui crate and wt references
+   - Remove jig-tui crate entirely (was just a stub)
+   - Remove Tui command from CLI
+   - Rename all wt references to jig throughout codebase
+   - Remove outdated wiki docs and spawn guides
+   - Remove deprecated .claude/commands (replaced by skills)
+   - Update tests to use jig binary name and init claude arg
+   - Remove wt.toml (replaced by jig.toml)
+
+### Documentation
+
+ - <csr-id-3520041197353776dd5999f805866d7c18da9298/> audit and update docs/wiki for release, remove PROJECT_LAYOUT.md and GRINDER-ANALYSIS.md
+   Update daemon.md with actor architecture, tmux timeouts, and per-repo config.
+   Add actor pattern to PATTERNS.md. Fix SUCCESS_CRITERIA.md pre-commit claim.
+   Update wiki with correct commands, new worker states, and actor details.
+   Remove PROJECT_LAYOUT.md (derivable from codebase) and GRINDER-ANALYSIS.md
+   (historical, all functionality now integrated) from docs, templates, init,
+   skills, and all references.
+ - <csr-id-b0f93bcf7cc499835d82f0944a93ccb4a4d3e3b9/> document overlapping branch name behavior in run_global
+   Add doc comment explaining that when multiple repos have a worktree with
+   the same name, the first match (in repo discovery order) is used,
+   consistent with other global commands.
+
+### New Features
+
+<csr-id-37a59d2d8c02dbc87bbff0fcf4f92aef768bd996/>
+<csr-id-df0a3be811b27f8afce047bd088cad410d09e081/>
+<csr-id-45fe8b1e0bf4d16c7d8fc267c150d8dfb506f914/>
+<csr-id-52208bf4ef7efc35cac4726bd4fa73e2713b7bb5/>
+<csr-id-bd1a1faeca5a7634224bef836154791819b4903b/>
+<csr-id-462f05eaf29929899631125c733738cd8f93e558/>
+<csr-id-d5f79bd94e27cf82bc4e5b70f977eea258b62a92/>
+<csr-id-2e4d781ae7aeda559884ea980cacdd5fae423d0c/>
+<csr-id-1f4553fd7f0a7e21cfb5234e3800a8152f6dcca1/>
+<csr-id-3ab73b1d1c7e20c25898ed021a50d7aebf2d0dd1/>
+<csr-id-5745c0d00da47a05a7a4b98d1bca6d9985afc25b/>
+<csr-id-5217bfa9423f54a27b9e0badef98c4a72e2e273e/>
+<csr-id-057e8dc3675610e75e826910d051774f32f63cee/>
+<csr-id-feb9d6068256ec7e2298a08e798a5913396a615d/>
+<csr-id-23c5b4f9f732bb70616b95e95c5b1d7c946e43d1/>
+<csr-id-780632c2fff774e3f968ee8254f5b57a46abaa55/>
+<csr-id-61339c359884180d22d04a206be57d7b28d6fa9a/>
+<csr-id-c34254a3c119de72e0c472c5bf814059547fdbd6/>
+<csr-id-8c92e5a1faa6992a14fb494640fb263d6cbc7049/>
+<csr-id-e33ab3dfa06347d2aee13dc6d53d422cc462117c/>
+<csr-id-d790a8101173e5797d7f331b56e0a0f5b06566a4/>
+<csr-id-1a8faafa772e7c9014347f6802936d7d9a817bcb/>
+<csr-id-73dc3fbbf0178af964a9f0481a5e85fc0e66cde1/>
+<csr-id-13e44044ea08a91eb24e4b1b38c43c695a2fadc4/>
+<csr-id-1bb57f9c0543cd7af986dd2303f34395980019f4/>
+<csr-id-82c654ab1137ec963121638f6741617c59ee0c04/>
+<csr-id-d878b9792a36f7c0d1157296401ca80af7f86f30/>
+<csr-id-5b776f40ef697de1ecb06c16e97feb4102b23103/>
+<csr-id-357f9a6dfb6ab792078fc900f9b1bb956b3a4e4a/>
+<csr-id-a685a48ac6c1b1d693e440d4e565e0bbd3ea49c0/>
+<csr-id-823eeb1a83ac668fe54b7dbb28a0d062c4f91e9a/>
+<csr-id-8cce0fba090be552af7b0186f96ad03ffa8b5d81/>
+<csr-id-4c9f3184c27cab9ddfc835fdde711ba6af2539ca/>
+<csr-id-60460d876900a1fca4dda6e7763127965d7dcb50/>
+<csr-id-7bf25cd45434e6c0c9388ac70aadf0cc85cec04e/>
+<csr-id-badb4164208b05b288a36391ef046cb7b643ca3e/>
+<csr-id-80f3bccb70cdd146ab2eccbeec224a8104db8c61/>
+<csr-id-4dd791fdfc3ce463b6642ae45d57062e10f9026b/>
+<csr-id-3a78670c102178f25db9dc4020b534370fc36f84/>
+<csr-id-f05d75ea429a873ac6f749928f49cb9d850b22eb/>
+<csr-id-0ab34082c061a8ffba63413c3a6b7e397d12de6f/>
+<csr-id-5a59d80324580c092cdda14ce2e2faebf535b444/>
+
+ - <csr-id-4be2cafcf2b1c7bcb9a42192a636aaf84d6fbcfc/> add per-repo nudge configuration in jig.toml
+   Add [health] section to jig.toml supporting per-repo overrides of
+   silence_threshold_seconds and max_nudges, plus per-nudge-type
+   [health.nudge.<type>] sections with independent max and
+   cooldown_seconds settings.
+   
+   Resolution order: jig.toml [health.nudge.<type>] > jig.toml [health]
+   > global config > defaults. When cooldown_seconds is not set, falls
+   back to silence_threshold_seconds.
+   
+   - Add RepoHealthConfig, NudgeTypeConfigs, NudgeTypeConfig structs
+- Add ResolvedNudgeConfig with resolver for per-type config
+- Thread resolved config through nudge classify, dispatch, and execute
+- Apply per-type cooldown to both idle/stalled nudges and PR nudges
+- Display effective nudge config in `jig config show`
+- Fixes PR nudge burst bug by enforcing per-type cooldowns
+- Spawning worker names shown below the ps table during setup
+- WorkerStatus::Initializing variant for future use
+- spawn_labels config in jig.toml
+- Three new issues (config-show-auto-spawn, worker-initializing-state,
+     auto-column-checkmark)
+- Status symbol constants (✓, →, ✗, !)
+- Formatted output helpers (success, progress, failure, warning, detail, header)
+- Color helpers (highlight, bold, dim) that respect plain mode
+- Table builder helper (new_table) for consistent table creation
+- Global --plain flag for scriptable output (no colors, no decorations)
+- Error display with cause chain formatting
+- `jig ls` now shows a table with name, branch, and commits ahead
+- `jig ls -g` shows tables grouped by repo with bold headers
+- Add `--plain/-p` flag for bare name output (old behavior)
+- Shell completions use `--plain` and fall back to `-gp` outside a repo
+- Branch column only shown when it differs from worktree name
+- `jig issues` CLI command with --ids flag for scripting
+- IssuesConfig in jig.toml for configurable issues directory
+- ISSUE column in ps --watch table (shortened last path segment)
+- Shell completions for --issue in bash, zsh, and fish
+- issue_ref tests in reducer and daemon roundtrip
+- TMUX column (●/○/✗) for session liveness
+- STATE column from event-derived WorkerStatus
+- NUDGES count and PR number from event log
+- Configurable interval: `jig ps -w 5` for 5s refresh
+- Discovers workers by scanning event log directories
+- Replays events to derive current WorkerState per worker
+- Compares old vs new state to dispatch actions
+- Executes nudges via tmux and notifications via hooks
+- Persists state to workers.json between ticks
+- Hook wrapper templates that chain jig logic with user hooks
+- Registry tracking installed hooks at jig-hooks.json
+- Idempotent init with backup/restore of existing hooks
+- Post-commit/merge handlers that emit events to worker logs
+- Uninstall with rollback to original user hooks
+- Event schema with typed EventType enum and flat JSONL serialization
+- EventLog append-only reader/writer with per-worker JSONL files
+- Claude Code hook templates (PostToolUse, Notification, Stop)
+- `jig hooks install-claude` CLI command to install hooks to ~/.claude/hooks/
+- Detect installation method (script, cargo, source, unknown)
+- Check latest version from GitHub releases API
+- Auto-update for script installations (~/.local/bin)
+- Prompt dev builds to install release binaries
+- Offer cleanup of old cargo bin after source build updates
+- Add --force flag to skip version check
+- Add Op trait in crates/jig-cli/src/op.rs
+- Rewrite ps command with PsOutput, PsError, and Op impl
+- Add comfy-table dependency for dynamic table rendering
+- Update main.rs dispatch to use Op::execute()
+- Add docs/ui/STDOUT-FORMATTING.md documenting the pattern
+- `worktree.base` — base branch for new worktrees (overrides global)
+- `worktree.on_create` — command to run after worktree creation
+- Add directory-based issue organization (epics/, features/, bugs/, chores/)
+- Add issue templates (_templates/): standalone.md, epic-index.md, ticket.md
+- Create plan-and-execute epic for orchestration vision
+- Update issues/README.md with comprehensive documentation
+- Update /issues skill for new directory structure
+- Remove old flat issue files and _template.md
+- Add .backup/ to .gitignore
+- Add AgentType enum for compile-time safe matching
+- Rename template to PROJECT.md (agent-agnostic name)
+- Dynamic audit prompt uses adapter.project_file and adapter.skills_dir
+- Validate agent is installed before init (warns if not in PATH)
+- Fix settings.json schema URL
+- Fix settings.json to use correct schemastore.org URL
+- Add WebFetch, WebSearch, mcp__*, jig:* to default permissions
+- Update review skill to check jig-specific docs and skills
+- Update issues skill to reference issues/README.md
+- Add adapter module with AgentAdapter struct for pluggable agent support
+- jig init now requires agent argument: `jig init claude`
+- jig.toml stores agent type in [agent] section
+- spawn command uses adapter to build agent-specific commands
+- Move settings.json to templates/adapters/claude-code/
+- Backup now copies files to .backup/ directory preserving path structure
+- Audit prompt is detailed and opinionated about what to fill in each doc
+- Review skill now checks for documentation and skills updates
+- Move issue-tracking.md to issues/README.md, fix "wt" → "jig"
+- Rename skills/jig → skills/spawn for consistency
+- Remove name: field from skill frontmatter
+- Add skeleton docs: PATTERNS.md, CONTRIBUTING.md, SUCCESS_CRITERIA.md, PROJECT_LAYOUT.md
+- Expand docs/index.md as documentation hub
+- Make CLAUDE.md template a skeleton with guidance comments
+- Upgrade settings.json: add $schema, ask tier for destructive ops, better secret patterns
+- Add issues/_template.md ticket template
+- Add skills for check, draft, issues, review, and spawn commands
+- Simplify .claude/settings.json using wildcard permissions
+- Add jig.toml with spawn auto-configuration
+- Fix formatting in init.rs
+- Embed templates from templates/ directory using include_str!
+- Add all 5 skills: check, draft, issues, review, spawn
+- Expand permissions to cover tools used by skills
+- Set spawn.auto = true by default
+- Use exec() on Unix for --audit flag (full terminal control)
+- Add `jig shell-setup` command to automatically configure shell integration
+     - Detects user's shell from $SHELL
+     - Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
+     - Adds eval line with markers for easy identification
+     - Places integration after PATH setup when possible
+     - Supports --dry-run flag to preview changes
+- Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
+- Adds eval line with markers for easy identification
+- Places integration after PATH setup when possible
+- Supports --dry-run flag to preview changes
+- `jig open/attach/review/merge/kill/status <TAB>` shows actual worktrees
+- Context-aware completions for all subcommands
+- Simplified zsh completion using _arguments -C
+- Add quick setup section for shell-setup command
+- Add troubleshooting section for common issues
+- Remove stale `sc` alias references (legacy from "scribe" name)
+
+### Bug Fixes
+
+<csr-id-57e94d35e5e961a5fc68624b2646720f315327a2/>
+<csr-id-46949f98b3f25a53067d7845b8e85e299e7e1909/>
+<csr-id-c970409ad61f8b48cbeb51dfe99371a225f9a4f7/>
+<csr-id-1a36eb384a4ca2b5aab12a518e98daa472022859/>
+<csr-id-d720fcaa0d1f1e0a327ae5d3c90dfe49323b198a/>
+<csr-id-52c77af3da99153a3ff98e580f419a70f8500d93/>
+<csr-id-378031a0afe019f57edc9bae469bf8168e05de29/>
+<csr-id-61dd7ff112e0cb63885649b399e764578f99e4b2/>
+<csr-id-a41b92cb77141469539658c133da79f79f714452/>
+<csr-id-bd9a6c99600670089a646b2e32cb6448d0b234bd/>
+<csr-id-196774225c8eba52fdb9382f98418ecf82c48567/>
+
+ - <csr-id-cd7bb28acc3d02336db120485a99f31297e75e80/> remove useless io::Error conversion in with_alternate_screen
+ - <csr-id-8fbdbae9b48196658aa61eca9c60e4492adbc7f5/> Linear issue discovery and issues UX improvements
+   Fix three bugs in Linear provider:
+   - get_issue GraphQL query had mismatched braces and used deprecated
+   issueSearch; rewrite to use issues query with team+number filter
+- Relation mapping was inverted: "blocks" → "is_blocked_by" so
+     dependency checking now correctly identifies blocked issues
+- Remove unused SearchData type
+- Hide completed issues by default (use --all to include them)
+- Interactive mode (-i) uses alternate screen buffer like less/git diff
+- Add ui::with_alternate_screen() reusable helper
+- Interactive mode: scrolling, auto indicator, title truncation, G/g nav
+- Add proactive PR discovery: daemon queries GitHub for open PRs on
+     worker branches when pr_url is unknown, emits PrOpened events to
+     make state durable across restarts
+- Create per-repo GitHub clients via registry path lookup instead of
+     ambient remote detection (fixes multi-repo daemon)
+- Extract real branch name from spawn events for tmux window lookup
+     (spawn creates windows with slashes, e.g. feature/foo, not dashes)
+- Run all four PR checks (CI, conflicts, reviews, commits) on open PRs
+- Nudge on every tick, not just state transitions, so polling daemon
+     retries delivery until max_nudges
+- Collapse multiline nudge templates to single line before tmux send
+     to prevent premature submission in TUIs
+- Fix tracing init: RUST_LOG now properly overrides default warn level
+- Add stderr tick summary in continuous daemon mode for visibility
+     without RUST_LOG
+- Add debug logging for tmux window misses and notification pipeline
+
+### Other
+
+ - <csr-id-8abff4b7ca2031d3232127b93febb92eb07cd9c5/> fmt
+ - <csr-id-f7c5d5451126c55a29a5742b0ac55e5d2357dc36/> fmt
+
+### Refactor
+
+ - <csr-id-e33f0420bcba0c6abd5758cfafd756fff91515ad/> remove auto field, normalize on label-based spawn filtering
+   Remove the `auto: bool` field from the `Issue` struct and the `**Auto:**`
+   frontmatter / `jig-auto` label special-casing. Auto-spawn eligibility is
+   now determined purely by `spawn_labels` in `[issues]` config in jig.toml.
+   
+   - Remove `auto` field from Issue struct
+   - Remove `**Auto:** true` parsing from file provider
+   - Remove `jig-auto` label detection from Linear client
+   - Remove `i.auto` filter from list_spawnable in both providers
+   - Remove `**Auto:**` from all existing issue files
+   - Add `**Labels:**` field to issue templates
+   - Update issues README with Labels field in format example
+   - Update wiki skill-examples to reference spawn_labels config
+   - Update auto-spawn-filtering issue to reflect new state
+ - <csr-id-7bdb392c7ffa5727e951f18377022e7d596c4151/> consolidate worktree management into Worktree struct
+   Make Worktree the single abstraction for a worker's physical state —
+   repo, branch, path, tmux session, spawn context, and lifecycle.
+   
+   - Expand Worktree struct with repo_root, session_name, auto_spawned fields
+   - Add lifecycle methods: launch(), resume(), register(), unregister()
+   - Add tmux methods: has_tmux_window(), is_agent_running()
+   - Add orphan detection: is_orphaned()
+   - Add Resume event type to EventType enum and handle in reducer/derive
+   - Fix derive_worker_name() to preserve category prefixes (features/foo)
+   - Fix Repo::remove_worktree() to accept optional repo_root, avoiding
+     Repo::discover() in daemon paths
+   - Update daemon auto_spawn_worker to use Worktree::create + wt.register
+     + wt.launch
+   - Update CLI create/remove/spawn commands to use Worktree methods
+   - Remove all spawn::register/spawn::launch_tmux_window calls outside
+     Worktree
+   - Eliminate Repo::discover() from all daemon code paths
+ - <csr-id-1345768accb7711e0a333c0c7a3da55dfb3afd1d/> wrap git2 in Repo struct, remove Git(String) error variant
+   Address PR feedback:
+   - Wrap git2::Repository in a `Repo` struct with domain methods instead
+     of free functions passing repo handles around
+   - Remove Error::Git(String) variant — use Error::Git2(#[from] git2::Error)
+     directly instead of mapping git2 errors to strings
+   - Add Error::MergeConflict for merge-specific errors
+   - DRY up duplicated prune_stale_worktrees and find_worktree_by_path
+     code — prune_actor.rs now calls Repo methods from git.rs
+   - Update all call sites across CLI commands, daemon, worktree, spawn,
+     and context modules
+   - Update PATTERNS.md and PROJECT_LAYOUT.md to reflect git2 usage
+ - <csr-id-85d9e1de3500d926401b726017ee07199e5ff863/> move spawn daemon settings to global config with per-repo overrides
+   Per-developer settings (auto_spawn, max_concurrent_workers,
+   auto_spawn_interval) now live in ~/.config/jig/config.toml instead of
+   jig.toml, since they shouldn't be committed to the repo. Per-repo
+   jig.toml can still override via optional fields.
+ - <csr-id-12f9c10b9f61aa2054a2d5c2d559553d3af50069/> remove `jig status` command (redundant with `jig ps`)
+ - <csr-id-f694a0ce3f1a96ad9fc8b38d1c947924e6acaeaf/> drop -g support from attach/merge/review, deduplicate ps
+   attach, merge, and review don't make sense in global mode — worktree
+   names can conflict across repos. Extract shared ps logic into
+   execute_ps() helper to eliminate duplication between run/run_global.
+ - <csr-id-a0c69ed63f57649a00d0484505bafc9c644ca7e9/> split Op trait into run/run_global for -g flag dispatch
+   Replace OpContext (single struct with global bool + repos vec) with two
+   distinct context types: RepoCtx for single-repo operations and GlobalCtx
+   for cross-repo -g mode. The Op trait now has run() and run_global()
+   methods, with the default run_global() rejecting unsupported commands.
+   
+   11 global commands (list, ps, kill, remove, review, merge, attach,
+   status, nuke, issues, open) implement both methods. 14 non-global
+   commands only implement run(). The command_enum! macro dispatches both,
+   and main.rs branches on cli.global to build the right context.
+ - <csr-id-78cff84a46db59e266f2fa4affdaafb3c5857708/> unify CLI rendering with shared ui module and daemon-backed ps
+   Extract duplicated table rendering, color mappings, and truncation into
+   a shared crates/jig-cli/src/ui.rs module. Non-watch `jig ps` now uses a
+   single daemon tick (once:true) to get the same rich WorkerDisplayInfo as
+   watch mode — same columns (WORKER/STATE/COMMITS/PR/HEALTH/ISSUE) for
+   both paths. Merge tmux status indicator into the WORKER name cell
+   (colored dot prefix) instead of a separate cryptic column.
+   
+   Also includes: actor-based daemon runtime, issue/github/sync actors,
+   Linear integration, session management, and various daemon improvements
+   that were pending on this branch.
+ - <csr-id-80401de003d427eeb057c8f64805b91060278fe5/> extract daemon.rs into struct-based daemon/ submodule
+   Split the 675-line daemon.rs into a daemon/ directory with three files:
+   - mod.rs: Daemon struct with tick/process_worker/sync_repos methods
+   - discovery.rs: worker discovery and directory name splitting
+   - pr.rs: PrMonitor struct for PR lifecycle checks
+   
+   This eliminates #[allow(clippy::too_many_arguments)] by moving shared
+   state into the Daemon struct. All 7 tests preserved, public API updated
+   from daemon::tick() to Daemon::new().tick().
+ - <csr-id-225e9a6d7b8837652cae0da672f7b4b6a0cd069b/> implement Op trait and command_enum! macro for CLI
+   Introduce a trait-based pattern for CLI commands that provides:
+   - Typed errors per command (vs anyhow::Result everywhere)
+   - Typed output per command (Display impl for stdout)
+   - Unified execution via command_enum! macro
+   - Infallible commands use std::convert::Infallible
+   
+   The macro generates Command enum, OpOutput, OpError, and Op impl,
+   reducing boilerplate in main.rs dispatch. Doc comments on Args structs
+   are picked up by clap (no duplication needed in cli.rs).
+   
+   Adds thiserror dependency to jig-cli for per-command error enums.
+   Updates docs/PATTERNS.md to document the new pattern.
+
+### Style
+
+ - <csr-id-f7e016757eb9b899cd43b37b42b01164c8bd0fc7/> fix rustfmt formatting in init command
+
+### New Features (BREAKING)
+
+ - <csr-id-0f3fd3073b7b06f30e4cb6c0ebe1320433a68dff/> restructure jig state directory from .worktrees/ to .jig/
+   Move all jig-managed worktrees from <repo>/.worktrees/ to <repo>/.jig/
+   and state files to <repo>/.jig/.state/state.json. This provides a
+   cleaner directory layout with state files separated from worktrees.
+   
+   Key changes:
+   - Worktrees now live under .jig/ instead of .worktrees/
+- State file moved to .jig/.state/state.json
+- Auto-migration from .worktrees/ layout on first load
+- jig kill/unregister now removes workers from state entirely
+     (instead of archiving them)
+- jig ps auto-cleans stale workers whose tmux windows are gone
+- Hidden directories (.state) are skipped when listing worktrees
+- .jig/.state/ added to .gitignore, .jig/ added to git exclude
+
+<csr-unknown>
+ add jig home command to print base repo rootAdds jig home (alias jig h) that prints the base repository rootpath, enabling cd $(jig home) navigation from worktrees. communicate worker initialization state and on-create failuresAdd Initializing event type and worker status to make the workerlifecycle visible during setup. When the daemon auto-spawns a worker,it now registers the worker as Initializing before running theon-create hook, then transitions to Spawned on success or Failed onhook failure. show auto-spawn config in jig config and add jig issues --autoDisplay auto-spawn settings (enabled, auto-start, max workers, pollinterval, spawn labels) in jig config show with source attribution.Add --auto flag to jig issues to filter to only daemon-eligibleauto-spawn candidates using the existing list_spawnable method. use checkmark instead of asterisk for AUTO columnChange the AUTO column indicator in jig issues from * to ✓for better readability. use checkmark instead of asterisk for AUTO columnChange the AUTO column indicator in jig issues from * to ✓for better readability. move auto-spawn to background thread to keep ps -w responsiveThe on-create hook (e.g. pnpm install) was running synchronously onthe tick thread, freezing the ps –watch UI for the entire duration.Introduces a spawn_actor following the same pattern as prune_actor,issue_actor, etc. The tick now sends spawnable issues to the backgroundthread and drains results on the next tick.Also adds: add labels field for issue tagging and filteringAdd labels: Vec<String> to Issue and IssueFilter types. Linearprovider now passes all label names through from GraphQL (auto fieldderivation unchanged). File provider parses **Labels:** comma-separatedfrontmatter. CLI gains --label/-l flag for filtering (all must match).Shell completions updated for bash, zsh, and fish. add shared UI module with consistent formatting and –plain flagExpand ui.rs into a centralized formatting module with:Migrate all 20 command files from inline colored::Colorize calls toshared ui:: helpers. Add –plain support to list, repos, and issuescommands with tab-separated output for piping. add AUTO column to jig issues table outputShow a green dot indicator for issues tagged for auto-spawn, making itvisible at a glance whether file-provider Auto flag or Linear jig-autolabel is set. support -g/–global flag for attaching from anywhereAdd run_global implementation to the Attach command so users can attachto a worktree from outside the owning repo using jig attach <name> -g.Resolves the owning repo via GlobalCtx::repo_for_worktree. jig init –audit launches agent in tmux to populate docs–audit now spawns the configured agent in a jig-init:<repo> tmuxsession with the audit prompt instead of just printing instructions.–backup enhances the prompt to reference .backup/ files. –auditaccepts an optional string for extra instructions. block auto-spawn on unresolved dependenciesAdd is_spawnable_with_deps() to IssueProvider trait that checks alldepends_on entries resolve to Complete before allowing spawn. Applied inboth FileProvider and LinearProvider’s list_spawnable(). Also adds–blocked/–unblocked flags to jig issues CLI for filtering. group workers by repo in jig ps -g outputAdd repo field to WorkerDisplayInfo and render grouped tables withbold repo headers when running in global mode (jig ps -g / jig ps -gw).Local jig ps output is unchanged. daemon periodically prunes stale worktreesWorkers in terminal state (merged/archived/failed) with dead tmuxsessions now get their git worktrees, event logs, and global stateentries cleaned up automatically. Prune runs every 120s during watchmode. Pruned workers are reported in the tick status and log view.Also includes snake_case fixes for auto-spawn-filtering ticket. default table view for jig ls and pretty grouped jig ls -g show draft vs review state, document PR nudge behaviorWorkers with draft PRs now show “draft” (blue) in the STATE columninstead of “review” (cyan). This makes it visually clear which workerswill receive PR nudges (draft) vs which are in human review (non-draft).Add PR Nudges section to daemon docs explaining the draft/non-draftnudge policy and what each health check means. unify daemon/ps tick loops and add log toggle to watch modeExtract run_with() callback API from daemon so ps –watch shares thesame setup code path instead of duplicating Daemon/Notifier/TmuxClientconstruction. The callback controls inter-tick delay and can signalstop, which enables keypress handling during the sleep window.Add log view toggle to watch mode: press ‘l’ to see timestamped daemonactivity (nudges fired, PR check results, errors), ‘t’ to switch backto the table, ‘q’ to quit cleanly. Uses crossterm raw mode with 100mspoll intervals for responsive input.Also allows spawned workers to transition to stalled (previouslySpawned status was excluded from silence detection). surface PR health in ps –watch displayAdd a HEALTH column to the watch table showing per-worker PR checkresults (ci, conflicts, reviews, commits) so problems are visible at aglance without needing RUST_LOG=debug. Upgrade silent debug-level PRerrors to info-level logging. add –base flag to spawn and create for custom branch baseAllow overriding the default base branch (from jig.toml) per-commandwith –base/-b. Includes shell completions for branch names acrossbash, zsh, and fish. Also fixes spawn status message to show theactual base branch used instead of the current branch. wire issues into spawn pipeline with –issue flagAdd jig spawn --issue <id> to resolve file-based issues and use theirbody as Claude context. Thread issue_ref through the full pipeline:spawn CLI → register() → Spawn event → WorkerState reducer → daemonworkers.json → ps watch table.Also adds: add watch mode to ps command for live dashboardjig ps --watch clears and refreshes the worker table every 2s.Shows enriched state from event logs alongside tmux status: add daemon loop to orchestrate event-driven pipelineThe missing conductor: jig daemon runs a periodic loop that:Supports –once for single-pass mode and –interval for tuning. add git hook management (install, uninstall, handlers)Implements the git-hooks epic (tickets 0-4): expand WorkerStatus with event-driven statesAdd Idle, WaitingInput, Stalled variants. Make all variants unit types(remove associated data from WaitingReview/Failed). Add needs_attention(),is_active(), is_terminal(), from_legacy() methods. Snake_case serialization. add event log format and Claude Code hooksImplement event-system tickets 1 and 2: add global state infrastructure for cross-repo aggregationIntroduces ~/.config/jig/ directory structure with structured TOML config,aggregated JSON worker state, and event log directories for the event-drivenpipeline. Ensures global dirs are created at CLI startup. introduce RepoContext and thread repo state through all operationsDerive repo_root, worktrees_dir, git_common_dir, base_branch, andsession_name once at startup via RepoContext::from_cwd(), eliminatingredundant git subprocess calls (e.g. spawn called get_base_repo() 8x).OpContext now holds Option<RepoContext>, and all jig-core functionsaccept &RepoContext instead of re-deriving from cwd. Also adds reporegistry for global mode auto-registration, removes dead spawn::kill(),and updates docs/patterns/issue status. implement smart jig update commandRewrite update command to: prettify jig ps with Op pattern and comfy-tableIntroduce the Op trait to separate command logic from presentation.Rewrite jig ps as the first adopter: ops return typed data, Displayimpls own all formatting via comfy-table with terminal-width-awarecolumn layout and color-coded status indicators. add worktree.copy for gitignored filesAdds worktree.copy config to copy gitignored files (like .env)to new worktrees:toml[worktree]
+copy = [".env", ".env.local"]
+Files are copied after worktree creation, before on_create hook runs. add worktree config to jig.tomljig.toml now supports worktree configuration: restructure issue tracking with categories and templates improve adapter architecture and audit templatesAdapter improvements:Template improvements: add agent-agnostic adapter architectureThis architecture allows future support for other agents (cursor, etc.)by adding new adapter constants. improve backup, audit prompt, and review skill upgrade jig init scaffolding to language-agnostic skeletons add Claude Code skills and simplify permissions use actual templates for jig init instead of bare-bones placeholdersThe init command now creates a complete scaffolding that matchesthe documentation, instead of empty placeholder comments. add –audit flag to init command that launches Claude interactivelyUses exec() on Unix to replace the current process with Claude Code,giving it full terminal control for interactive documentation audit. add shell-setup command and fix shell completionsRewrite shell completions with dynamic worktree completionUpdate docs/usage/shell-integration.md rewrite health check to validate repo setup and agent scaffoldingReplace terminal-detection-focused health check with structured validationof system deps (git, tmux, claude), repository config (jig.toml, basebranch, .worktrees), and agent scaffolding (CLAUDE.md, settings, skills).Remove unused jq/gh dependency checks and dead required field. Exitnon-zero when checks fail. add shell completions for bash, zsh, and fishShell completions are now emitted alongside the shell wrapper functionin jig shell-init. Completions cover all subcommands, aliases,per-command flags, nested config subcommands, and dynamic worktreename completion via command jig list.Improve issues command UX: accept trailing args in git hook subcommandsGit passes arguments to hooks (e.g. post-merge receives a squash flag“0” or “1”), which the hook wrapper forwards via “$@”. The CLIsubcommands rejected these unexpected args. Add trailing_var_arg toPostCommit, PostMerge, and PreCommit to accept and ignore them. output cd command from jig home instead of bare pathMatches the pattern used by jig open and jig exit — outputscd '/path' to stdout for shell eval, not just the path. recover from stale git worktree registrations on spawn and pruneWhen a worktree directory is removed but git still tracks the entry,git worktree add fails with “missing but already registered”. Nowcreate_worktree runs git worktree prune first, and prune_actorhandles the missing-directory case instead of skipping cleanup.Also extracts prune_actor into its own module and adds urgent issueto replace git CLI shelling with git2. add issues command to shell completionsThe issues command was missing from all three shells’ command listsand had no flag/argument completions. Adds command entry, issue IDpositional completions, and flag completions (status, priority,category, interactive, ids) for bash, zsh, and fish. use if-let instead of unwrap to satisfy clippy daemon PR discovery, tmux targeting, and nudge delivery register Claude hooks in settings.json, add kill –all and nukeClaude Code hooks were installed as scripts but never registered in~/.claude/settings.json, so they never fired. Now jig init registersthem properly. Also fixes: hook templates read JSON from stdin (notenv vars), spawned workers no longer nudged as stalled, event logsreset on respawn, row ordering stabilized in ps –watch, kill/unregistercleans up event logs, and nuke command added for full repo cleanup. address review findings and wire up event pipeline end-to-endFix 6 issues from code review: UTF-8 safe truncate, stable statusserialization via as_str/from_legacy, stuck nudge sends message afterauto-approve, notification errors logged, branch names URL-encoded,tmux commands check exit status.Wire up missing pipeline links: jig spawn emits Spawn event, jig initauto-installs git+Claude hooks (idempotent on re-run), ps –watch runsdaemon tick on each refresh for integrated orchestration.Add docs/daemon.md with background service setup for launchd, systemd,OpenRC, and generic nohup. remove unnecessary return statement make –audit print command instead of trying to launch claudeSpawning claude programmatically was causing terminal issues and hangs.Now –audit just prints the command for the user to run manually. prevent shell-setup from corrupting shell config filesThe previous byte-slicing approach in find_path_line_end() calculatedoffsets incorrectly because lines() strips newlines but the code assumed+1 byte per line. This could corrupt or truncate config files.<csr-unknown/>
+
 ## v1.1.1 (2026-03-04)
 
 <csr-id-3d809c6a1b58f3d438c3d279592005947ad50438/>
@@ -803,98 +1223,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    
    Also adds:
    - `jig issues` CLI command with --ids flag for scripting
-- IssuesConfig in jig.toml for configurable issues directory
-- ISSUE column in ps --watch table (shortened last path segment)
-- Shell completions for --issue in bash, zsh, and fish
-- issue_ref tests in reducer and daemon roundtrip
-- TMUX column (●/○/✗) for session liveness
-- STATE column from event-derived WorkerStatus
-- NUDGES count and PR number from event log
-- Configurable interval: `jig ps -w 5` for 5s refresh
-- Discovers workers by scanning event log directories
-- Replays events to derive current WorkerState per worker
-- Compares old vs new state to dispatch actions
-- Executes nudges via tmux and notifications via hooks
-- Persists state to workers.json between ticks
-- Hook wrapper templates that chain jig logic with user hooks
-- Registry tracking installed hooks at jig-hooks.json
-- Idempotent init with backup/restore of existing hooks
-- Post-commit/merge handlers that emit events to worker logs
-- Uninstall with rollback to original user hooks
-- Event schema with typed EventType enum and flat JSONL serialization
-- EventLog append-only reader/writer with per-worker JSONL files
-- Claude Code hook templates (PostToolUse, Notification, Stop)
-- `jig hooks install-claude` CLI command to install hooks to ~/.claude/hooks/
-- Detect installation method (script, cargo, source, unknown)
-- Check latest version from GitHub releases API
-- Auto-update for script installations (~/.local/bin)
-- Prompt dev builds to install release binaries
-- Offer cleanup of old cargo bin after source build updates
-- Add --force flag to skip version check
-- Add Op trait in crates/jig-cli/src/op.rs
-- Rewrite ps command with PsOutput, PsError, and Op impl
-- Add comfy-table dependency for dynamic table rendering
-- Update main.rs dispatch to use Op::execute()
-- Add docs/ui/STDOUT-FORMATTING.md documenting the pattern
-- `worktree.base` — base branch for new worktrees (overrides global)
-- `worktree.on_create` — command to run after worktree creation
-- Add directory-based issue organization (epics/, features/, bugs/, chores/)
-- Add issue templates (_templates/): standalone.md, epic-index.md, ticket.md
-- Create plan-and-execute epic for orchestration vision
-- Update issues/README.md with comprehensive documentation
-- Update /issues skill for new directory structure
-- Remove old flat issue files and _template.md
-- Add .backup/ to .gitignore
-- Add AgentType enum for compile-time safe matching
-- Rename template to PROJECT.md (agent-agnostic name)
-- Dynamic audit prompt uses adapter.project_file and adapter.skills_dir
-- Validate agent is installed before init (warns if not in PATH)
-- Fix settings.json schema URL
-- Fix settings.json to use correct schemastore.org URL
-- Add WebFetch, WebSearch, mcp__*, jig:* to default permissions
-- Update review skill to check jig-specific docs and skills
-- Update issues skill to reference issues/README.md
-- Add adapter module with AgentAdapter struct for pluggable agent support
-- jig init now requires agent argument: `jig init claude`
-- jig.toml stores agent type in [agent] section
-- spawn command uses adapter to build agent-specific commands
-- Move settings.json to templates/adapters/claude-code/
-- Backup now copies files to .backup/ directory preserving path structure
-- Audit prompt is detailed and opinionated about what to fill in each doc
-- Review skill now checks for documentation and skills updates
-- Move issue-tracking.md to issues/README.md, fix "wt" → "jig"
-- Rename skills/jig → skills/spawn for consistency
-- Remove name: field from skill frontmatter
-- Add skeleton docs: PATTERNS.md, CONTRIBUTING.md, SUCCESS_CRITERIA.md, PROJECT_LAYOUT.md
-- Expand docs/index.md as documentation hub
-- Make CLAUDE.md template a skeleton with guidance comments
-- Upgrade settings.json: add $schema, ask tier for destructive ops, better secret patterns
-- Add issues/_template.md ticket template
-- Add skills for check, draft, issues, review, and spawn commands
-- Simplify .claude/settings.json using wildcard permissions
-- Add jig.toml with spawn auto-configuration
-- Fix formatting in init.rs
-- Embed templates from templates/ directory using include_str!
-- Add all 5 skills: check, draft, issues, review, spawn
-- Expand permissions to cover tools used by skills
-- Set spawn.auto = true by default
-- Use exec() on Unix for --audit flag (full terminal control)
-- Add `jig shell-setup` command to automatically configure shell integration
-     - Detects user's shell from $SHELL
-     - Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
-     - Adds eval line with markers for easy identification
-     - Places integration after PATH setup when possible
-     - Supports --dry-run flag to preview changes
-- Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
-- Adds eval line with markers for easy identification
-- Places integration after PATH setup when possible
-- Supports --dry-run flag to preview changes
-- `jig open/attach/review/merge/kill/status <TAB>` shows actual worktrees
-- Context-aware completions for all subcommands
-- Simplified zsh completion using _arguments -C
-- Add quick setup section for shell-setup command
-- Add troubleshooting section for common issues
-- Remove stale `sc` alias references (legacy from "scribe" name)
+   - Detects user's shell from $SHELL
+   - Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
+   - Adds eval line with markers for easy identification
+   - Places integration after PATH setup when possible
+   - Supports --dry-run flag to preview changes
 
 ### Bug Fixes
 
@@ -909,19 +1242,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Add proactive PR discovery: daemon queries GitHub for open PRs on
    worker branches when pr_url is unknown, emits PrOpened events to
    make state durable across restarts
-- Create per-repo GitHub clients via registry path lookup instead of
-     ambient remote detection (fixes multi-repo daemon)
-- Extract real branch name from spawn events for tmux window lookup
-     (spawn creates windows with slashes, e.g. feature/foo, not dashes)
-- Run all four PR checks (CI, conflicts, reviews, commits) on open PRs
-- Nudge on every tick, not just state transitions, so polling daemon
-     retries delivery until max_nudges
-- Collapse multiline nudge templates to single line before tmux send
-     to prevent premature submission in TUIs
-- Fix tracing init: RUST_LOG now properly overrides default warn level
-- Add stderr tick summary in continuous daemon mode for visibility
-     without RUST_LOG
-- Add debug logging for tmux window misses and notification pipeline
 
 ### Other
 
@@ -988,18 +1308,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    
    Key changes:
    - Worktrees now live under .jig/ instead of .worktrees/
-- State file moved to .jig/.state/state.json
-- Auto-migration from .worktrees/ layout on first load
-- jig kill/unregister now removes workers from state entirely
-     (instead of archiving them)
-- jig ps auto-cleans stale workers whose tmux windows are gone
-- Hidden directories (.state) are skipped when listing worktrees
-- .jig/.state/ added to .gitignore, .jig/ added to git exclude
 
 <csr-unknown>
+IssuesConfig in jig.toml for configurable issues directoryISSUE column in ps –watch table (shortened last path segment)Shell completions for –issue in bash, zsh, and fishissue_ref tests in reducer and daemon roundtripTMUX column (●/○/✗) for session livenessSTATE column from event-derived WorkerStatusNUDGES count and PR number from event logConfigurable interval: jig ps -w 5 for 5s refreshDiscovers workers by scanning event log directoriesReplays events to derive current WorkerState per workerCompares old vs new state to dispatch actionsExecutes nudges via tmux and notifications via hooksPersists state to workers.json between ticksHook wrapper templates that chain jig logic with user hooksRegistry tracking installed hooks at jig-hooks.jsonIdempotent init with backup/restore of existing hooksPost-commit/merge handlers that emit events to worker logsUninstall with rollback to original user hooksEvent schema with typed EventType enum and flat JSONL serializationEventLog append-only reader/writer with per-worker JSONL filesClaude Code hook templates (PostToolUse, Notification, Stop)jig hooks install-claude CLI command to install hooks to ~/.claude/hooks/Detect installation method (script, cargo, source, unknown)Check latest version from GitHub releases APIAuto-update for script installations (~/.local/bin)Prompt dev builds to install release binariesOffer cleanup of old cargo bin after source build updatesAdd –force flag to skip version checkAdd Op trait in crates/jig-cli/src/op.rsRewrite ps command with PsOutput, PsError, and Op implAdd comfy-table dependency for dynamic table renderingUpdate main.rs dispatch to use Op::execute()Add docs/ui/STDOUT-FORMATTING.md documenting the patternworktree.base — base branch for new worktrees (overrides global)worktree.on_create — command to run after worktree creationAdd directory-based issue organization (epics/, features/, bugs/, chores/)Add issue templates (_templates/): standalone.md, epic-index.md, ticket.mdCreate plan-and-execute epic for orchestration visionUpdate issues/README.md with comprehensive documentationUpdate /issues skill for new directory structureRemove old flat issue files and _template.mdAdd .backup/ to .gitignoreAdd AgentType enum for compile-time safe matchingRename template to PROJECT.md (agent-agnostic name)Dynamic audit prompt uses adapter.project_file and adapter.skills_dirValidate agent is installed before init (warns if not in PATH)Fix settings.json schema URLFix settings.json to use correct schemastore.org URLAdd WebFetch, WebSearch, mcp__, jig: to default permissionsUpdate review skill to check jig-specific docs and skillsUpdate issues skill to reference issues/README.mdAdd adapter module with AgentAdapter struct for pluggable agent supportjig init now requires agent argument: jig init claudejig.toml stores agent type in [agent] sectionspawn command uses adapter to build agent-specific commandsMove settings.json to templates/adapters/claude-code/Backup now copies files to .backup/ directory preserving path structureAudit prompt is detailed and opinionated about what to fill in each docReview skill now checks for documentation and skills updatesMove issue-tracking.md to issues/README.md, fix “wt” → “jig”Rename skills/jig → skills/spawn for consistencyRemove name: field from skill frontmatterAdd skeleton docs: PATTERNS.md, CONTRIBUTING.md, SUCCESS_CRITERIA.md, PROJECT_LAYOUT.mdExpand docs/index.md as documentation hubMake CLAUDE.md template a skeleton with guidance commentsUpgrade settings.json: add $schema, ask tier for destructive ops, better secret patternsAdd issues/_template.md ticket templateAdd skills for check, draft, issues, review, and spawn commandsSimplify .claude/settings.json using wildcard permissionsAdd jig.toml with spawn auto-configurationFix formatting in init.rsEmbed templates from templates/ directory using include_str!Add all 5 skills: check, draft, issues, review, spawnExpand permissions to cover tools used by skillsSet spawn.auto = true by defaultUse exec() on Unix for –audit flag (full terminal control)Add jig shell-setup command to automatically configure shell integrationFinds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changesjig open/attach/review/merge/kill/status <TAB> shows actual worktreesContext-aware completions for all subcommandsSimplified zsh completion using _arguments -CAdd quick setup section for shell-setup commandAdd troubleshooting section for common issuesRemove stale sc alias references (legacy from “scribe” name)Create per-repo GitHub clients via registry path lookup instead ofambient remote detection (fixes multi-repo daemon)Extract real branch name from spawn events for tmux window lookup(spawn creates windows with slashes, e.g. feature/foo, not dashes)Run all four PR checks (CI, conflicts, reviews, commits) on open PRsNudge on every tick, not just state transitions, so polling daemonretries delivery until max_nudgesCollapse multiline nudge templates to single line before tmux sendto prevent premature submission in TUIsFix tracing init: RUST_LOG now properly overrides default warn levelAdd stderr tick summary in continuous daemon mode for visibilitywithout RUST_LOGAdd debug logging for tmux window misses and notification pipelineState file moved to .jig/.state/state.jsonAuto-migration from .worktrees/ layout on first loadjig kill/unregister now removes workers from state entirely(instead of archiving them)jig ps auto-cleans stale workers whose tmux windows are goneHidden directories (.state) are skipped when listing worktrees.jig/.state/ added to .gitignore, .jig/ added to git exclude<csr-unknown>
  add watch mode to ps command for live dashboardjig ps --watch clears and refreshes the worker table every 2s.Shows enriched state from event logs alongside tmux status: add daemon loop to orchestrate event-driven pipelineThe missing conductor: jig daemon runs a periodic loop that:Supports –once for single-pass mode and –interval for tuning. add git hook management (install, uninstall, handlers)Implements the git-hooks epic (tickets 0-4): expand WorkerStatus with event-driven statesAdd Idle, WaitingInput, Stalled variants. Make all variants unit types(remove associated data from WaitingReview/Failed). Add needs_attention(),is_active(), is_terminal(), from_legacy() methods. Snake_case serialization. add event log format and Claude Code hooksImplement event-system tickets 1 and 2: add global state infrastructure for cross-repo aggregationIntroduces ~/.config/jig/ directory structure with structured TOML config,aggregated JSON worker state, and event log directories for the event-drivenpipeline. Ensures global dirs are created at CLI startup. introduce RepoContext and thread repo state through all operationsDerive repo_root, worktrees_dir, git_common_dir, base_branch, andsession_name once at startup via RepoContext::from_cwd(), eliminatingredundant git subprocess calls (e.g. spawn called get_base_repo() 8x).OpContext now holds Option<RepoContext>, and all jig-core functionsaccept &RepoContext instead of re-deriving from cwd. Also adds reporegistry for global mode auto-registration, removes dead spawn::kill(),and updates docs/patterns/issue status. implement smart jig update commandRewrite update command to: prettify jig ps with Op pattern and comfy-tableIntroduce the Op trait to separate command logic from presentation.Rewrite jig ps as the first adopter: ops return typed data, Displayimpls own all formatting via comfy-table with terminal-width-awarecolumn layout and color-coded status indicators. add worktree.copy for gitignored filesAdds worktree.copy config to copy gitignored files (like .env)to new worktrees:toml[worktree]
 copy = [".env", ".env.local"]
 Files are copied after worktree creation, before on_create hook runs. add worktree config to jig.tomljig.toml now supports worktree configuration: restructure issue tracking with categories and templates improve adapter architecture and audit templatesAdapter improvements:Template improvements: add agent-agnostic adapter architectureThis architecture allows future support for other agents (cursor, etc.)by adding new adapter constants. improve backup, audit prompt, and review skill upgrade jig init scaffolding to language-agnostic skeletons add Claude Code skills and simplify permissions use actual templates for jig init instead of bare-bones placeholdersThe init command now creates a complete scaffolding that matchesthe documentation, instead of empty placeholder comments. add –audit flag to init command that launches Claude interactivelyUses exec() on Unix to replace the current process with Claude Code,giving it full terminal control for interactive documentation audit. add shell-setup command and fix shell completionsRewrite shell completions with dynamic worktree completionUpdate docs/usage/shell-integration.md rewrite health check to validate repo setup and agent scaffoldingReplace terminal-detection-focused health check with structured validationof system deps (git, tmux, claude), repository config (jig.toml, basebranch, .worktrees), and agent scaffolding (CLAUDE.md, settings, skills).Remove unused jq/gh dependency checks and dead required field. Exitnon-zero when checks fail. add shell completions for bash, zsh, and fishShell completions are now emitted alongside the shell wrapper functionin jig shell-init. Completions cover all subcommands, aliases,per-command flags, nested config subcommands, and dynamic worktreename completion via command jig list. register Claude hooks in settings.json, add kill –all and nukeClaude Code hooks were installed as scripts but never registered in~/.claude/settings.json, so they never fired. Now jig init registersthem properly. Also fixes: hook templates read JSON from stdin (notenv vars), spawned workers no longer nudged as stalled, event logsreset on respawn, row ordering stabilized in ps –watch, kill/unregistercleans up event logs, and nuke command added for full repo cleanup. address review findings and wire up event pipeline end-to-endFix 6 issues from code review: UTF-8 safe truncate, stable statusserialization via as_str/from_legacy, stuck nudge sends message afterauto-approve, notification errors logged, branch names URL-encoded,tmux commands check exit status.Wire up missing pipeline links: jig spawn emits Spawn event, jig initauto-installs git+Claude hooks (idempotent on re-run), ps –watch runsdaemon tick on each refresh for integrated orchestration.Add docs/daemon.md with background service setup for launchd, systemd,OpenRC, and generic nohup. remove unnecessary return statement make –audit print command instead of trying to launch claudeSpawning claude programmatically was causing terminal issues and hangs.Now –audit just prints the command for the user to run manually. prevent shell-setup from corrupting shell config filesThe previous byte-slicing approach in find_path_line_end() calculatedoffsets incorrectly because lines() strips newlines but the code assumed+1 byte per line. This could corrupt or truncate config files.<csr-unknown/>
+<csr-unknown/>
 
 ## v1.1.0 (2026-03-03)
 
@@ -1099,11 +1414,11 @@ Files are copied after worktree creation, before on_create hook runs. add worktr
    
    Also adds:
    - `jig issues` CLI command with --ids flag for scripting
-   - Detects user's shell from $SHELL
-   - Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
-   - Adds eval line with markers for easy identification
-   - Places integration after PATH setup when possible
-   - Supports --dry-run flag to preview changes
+- Detects user's shell from $SHELL
+- Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
+- Adds eval line with markers for easy identification
+- Places integration after PATH setup when possible
+- Supports --dry-run flag to preview changes
 
 ### Bug Fixes
 
@@ -1169,10 +1484,12 @@ Files are copied after worktree creation, before on_create hook runs. add worktr
    - Worktrees now live under .jig/ instead of .worktrees/
 
 <csr-unknown>
+<csr-unknown>
 IssuesConfig in jig.toml for configurable issues directoryISSUE column in ps –watch table (shortened last path segment)Shell completions for –issue in bash, zsh, and fishissue_ref tests in reducer and daemon roundtripTMUX column (●/○/✗) for session livenessSTATE column from event-derived WorkerStatusNUDGES count and PR number from event logConfigurable interval: jig ps -w 5 for 5s refreshDiscovers workers by scanning event log directoriesReplays events to derive current WorkerState per workerCompares old vs new state to dispatch actionsExecutes nudges via tmux and notifications via hooksPersists state to workers.json between ticksHook wrapper templates that chain jig logic with user hooksRegistry tracking installed hooks at jig-hooks.jsonIdempotent init with backup/restore of existing hooksPost-commit/merge handlers that emit events to worker logsUninstall with rollback to original user hooksEvent schema with typed EventType enum and flat JSONL serializationEventLog append-only reader/writer with per-worker JSONL filesClaude Code hook templates (PostToolUse, Notification, Stop)jig hooks install-claude CLI command to install hooks to ~/.claude/hooks/Detect installation method (script, cargo, source, unknown)Check latest version from GitHub releases APIAuto-update for script installations (~/.local/bin)Prompt dev builds to install release binariesOffer cleanup of old cargo bin after source build updatesAdd –force flag to skip version checkAdd Op trait in crates/jig-cli/src/op.rsRewrite ps command with PsOutput, PsError, and Op implAdd comfy-table dependency for dynamic table renderingUpdate main.rs dispatch to use Op::execute()Add docs/ui/STDOUT-FORMATTING.md documenting the patternworktree.base — base branch for new worktrees (overrides global)worktree.on_create — command to run after worktree creationAdd directory-based issue organization (epics/, features/, bugs/, chores/)Add issue templates (_templates/): standalone.md, epic-index.md, ticket.mdCreate plan-and-execute epic for orchestration visionUpdate issues/README.md with comprehensive documentationUpdate /issues skill for new directory structureRemove old flat issue files and _template.mdAdd .backup/ to .gitignoreAdd AgentType enum for compile-time safe matchingRename template to PROJECT.md (agent-agnostic name)Dynamic audit prompt uses adapter.project_file and adapter.skills_dirValidate agent is installed before init (warns if not in PATH)Fix settings.json schema URLFix settings.json to use correct schemastore.org URLAdd WebFetch, WebSearch, mcp__, jig: to default permissionsUpdate review skill to check jig-specific docs and skillsUpdate issues skill to reference issues/README.mdAdd adapter module with AgentAdapter struct for pluggable agent supportjig init now requires agent argument: jig init claudejig.toml stores agent type in [agent] sectionspawn command uses adapter to build agent-specific commandsMove settings.json to templates/adapters/claude-code/Backup now copies files to .backup/ directory preserving path structureAudit prompt is detailed and opinionated about what to fill in each docReview skill now checks for documentation and skills updatesMove issue-tracking.md to issues/README.md, fix “wt” → “jig”Rename skills/jig → skills/spawn for consistencyRemove name: field from skill frontmatterAdd skeleton docs: PATTERNS.md, CONTRIBUTING.md, SUCCESS_CRITERIA.md, PROJECT_LAYOUT.mdExpand docs/index.md as documentation hubMake CLAUDE.md template a skeleton with guidance commentsUpgrade settings.json: add $schema, ask tier for destructive ops, better secret patternsAdd issues/_template.md ticket templateAdd skills for check, draft, issues, review, and spawn commandsSimplify .claude/settings.json using wildcard permissionsAdd jig.toml with spawn auto-configurationFix formatting in init.rsEmbed templates from templates/ directory using include_str!Add all 5 skills: check, draft, issues, review, spawnExpand permissions to cover tools used by skillsSet spawn.auto = true by defaultUse exec() on Unix for –audit flag (full terminal control)Add jig shell-setup command to automatically configure shell integrationFinds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changesjig open/attach/review/merge/kill <TAB> shows actual worktreesContext-aware completions for all subcommandsSimplified zsh completion using _arguments -CAdd quick setup section for shell-setup commandAdd troubleshooting section for common issuesRemove stale sc alias references (legacy from “scribe” name)Create per-repo GitHub clients via registry path lookup instead ofambient remote detection (fixes multi-repo daemon)Extract real branch name from spawn events for tmux window lookup(spawn creates windows with slashes, e.g. feature/foo, not dashes)Run all four PR checks (CI, conflicts, reviews, commits) on open PRsNudge on every tick, not just state transitions, so polling daemonretries delivery until max_nudgesCollapse multiline nudge templates to single line before tmux sendto prevent premature submission in TUIsFix tracing init: RUST_LOG now properly overrides default warn levelAdd stderr tick summary in continuous daemon mode for visibilitywithout RUST_LOGAdd debug logging for tmux window misses and notification pipelineState file moved to .jig/.state/state.jsonAuto-migration from .worktrees/ layout on first loadjig kill/unregister now removes workers from state entirely(instead of archiving them)jig ps auto-cleans stale workers whose tmux windows are goneHidden directories (.state) are skipped when listing worktrees.jig/.state/ added to .gitignore, .jig/ added to git exclude<csr-unknown>
  add watch mode to ps command for live dashboardjig ps --watch clears and refreshes the worker table every 2s.Shows enriched state from event logs alongside tmux status: add daemon loop to orchestrate event-driven pipelineThe missing conductor: jig daemon runs a periodic loop that:Supports –once for single-pass mode and –interval for tuning. add git hook management (install, uninstall, handlers)Implements the git-hooks epic (tickets 0-4): expand WorkerStatus with event-driven statesAdd Idle, WaitingInput, Stalled variants. Make all variants unit types(remove associated data from WaitingReview/Failed). Add needs_attention(),is_active(), is_terminal(), from_legacy() methods. Snake_case serialization. add event log format and Claude Code hooksImplement event-system tickets 1 and 2: add global state infrastructure for cross-repo aggregationIntroduces ~/.config/jig/ directory structure with structured TOML config,aggregated JSON worker state, and event log directories for the event-drivenpipeline. Ensures global dirs are created at CLI startup. introduce RepoContext and thread repo state through all operationsDerive repo_root, worktrees_dir, git_common_dir, base_branch, andsession_name once at startup via RepoContext::from_cwd(), eliminatingredundant git subprocess calls (e.g. spawn called get_base_repo() 8x).OpContext now holds Option<RepoContext>, and all jig-core functionsaccept &RepoContext instead of re-deriving from cwd. Also adds reporegistry for global mode auto-registration, removes dead spawn::kill(),and updates docs/patterns/issue status. implement smart jig update commandRewrite update command to: prettify jig ps with Op pattern and comfy-tableIntroduce the Op trait to separate command logic from presentation.Rewrite jig ps as the first adopter: ops return typed data, Displayimpls own all formatting via comfy-table with terminal-width-awarecolumn layout and color-coded status indicators. add worktree.copy for gitignored filesAdds worktree.copy config to copy gitignored files (like .env)to new worktrees:toml[worktree]
 copy = [".env", ".env.local"]
 Files are copied after worktree creation, before on_create hook runs. add worktree config to jig.tomljig.toml now supports worktree configuration: restructure issue tracking with categories and templates improve adapter architecture and audit templatesAdapter improvements:Template improvements: add agent-agnostic adapter architectureThis architecture allows future support for other agents (cursor, etc.)by adding new adapter constants. improve backup, audit prompt, and review skill upgrade jig init scaffolding to language-agnostic skeletons add Claude Code skills and simplify permissions use actual templates for jig init instead of bare-bones placeholdersThe init command now creates a complete scaffolding that matchesthe documentation, instead of empty placeholder comments. add –audit flag to init command that launches Claude interactivelyUses exec() on Unix to replace the current process with Claude Code,giving it full terminal control for interactive documentation audit. add shell-setup command and fix shell completionsRewrite shell completions with dynamic worktree completionUpdate docs/usage/shell-integration.md rewrite health check to validate repo setup and agent scaffoldingReplace terminal-detection-focused health check with structured validationof system deps (git, tmux, claude), repository config (jig.toml, basebranch, .worktrees), and agent scaffolding (CLAUDE.md, settings, skills).Remove unused jq/gh dependency checks and dead required field. Exitnon-zero when checks fail. add shell completions for bash, zsh, and fishShell completions are now emitted alongside the shell wrapper functionin jig shell-init. Completions cover all subcommands, aliases,per-command flags, nested config subcommands, and dynamic worktreename completion via command jig list. register Claude hooks in settings.json, add kill –all and nukeClaude Code hooks were installed as scripts but never registered in~/.claude/settings.json, so they never fired. Now jig init registersthem properly. Also fixes: hook templates read JSON from stdin (notenv vars), spawned workers no longer nudged as stalled, event logsreset on respawn, row ordering stabilized in ps –watch, kill/unregistercleans up event logs, and nuke command added for full repo cleanup. address review findings and wire up event pipeline end-to-endFix 6 issues from code review: UTF-8 safe truncate, stable statusserialization via as_str/from_legacy, stuck nudge sends message afterauto-approve, notification errors logged, branch names URL-encoded,tmux commands check exit status.Wire up missing pipeline links: jig spawn emits Spawn event, jig initauto-installs git+Claude hooks (idempotent on re-run), ps –watch runsdaemon tick on each refresh for integrated orchestration.Add docs/daemon.md with background service setup for launchd, systemd,OpenRC, and generic nohup. remove unnecessary return statement make –audit print command instead of trying to launch claudeSpawning claude programmatically was causing terminal issues and hangs.Now –audit just prints the command for the user to run manually. prevent shell-setup from corrupting shell config filesThe previous byte-slicing approach in find_path_line_end() calculatedoffsets incorrectly because lines() strips newlines but the code assumed+1 byte per line. This could corrupt or truncate config files.<csr-unknown/>
+<csr-unknown/>
 <csr-unknown/>
 
 ## v1.0.0 (2026-02-20)
@@ -1215,11 +1532,6 @@ Files are copied after worktree creation, before on_create hook runs. add worktr
  - <csr-id-5b776f40ef697de1ecb06c16e97feb4102b23103/> implement smart jig update command
    Rewrite update command to:
    - Detect installation method (script, cargo, source, unknown)
-- Detects user's shell from $SHELL
-- Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
-- Adds eval line with markers for easy identification
-- Places integration after PATH setup when possible
-- Supports --dry-run flag to preview changes
 
 ### Bug Fixes
 
@@ -1259,11 +1571,13 @@ Files are copied after worktree creation, before on_create hook runs. add worktr
    - Worktrees now live under .jig/ instead of .worktrees/
 
 <csr-unknown>
+Detects user’s shell from $SHELLFinds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changes<csr-unknown>
 <csr-unknown>
 Check latest version from GitHub releases APIAuto-update for script installations (~/.local/bin)Prompt dev builds to install release binariesOffer cleanup of old cargo bin after source build updatesAdd –force flag to skip version checkAdd Op trait in crates/jig-cli/src/op.rsRewrite ps command with PsOutput, PsError, and Op implAdd comfy-table dependency for dynamic table renderingUpdate main.rs dispatch to use Op::execute()Add docs/ui/STDOUT-FORMATTING.md documenting the patternworktree.base — base branch for new worktrees (overrides global)worktree.on_create — command to run after worktree creationAdd directory-based issue organization (epics/, features/, bugs/, chores/)Add issue templates (_templates/): standalone.md, epic-index.md, ticket.mdCreate plan-and-execute epic for orchestration visionUpdate issues/README.md with comprehensive documentationUpdate /issues skill for new directory structureRemove old flat issue files and _template.mdAdd .backup/ to .gitignoreAdd AgentType enum for compile-time safe matchingRename template to PROJECT.md (agent-agnostic name)Dynamic audit prompt uses adapter.project_file and adapter.skills_dirValidate agent is installed before init (warns if not in PATH)Fix settings.json schema URLFix settings.json to use correct schemastore.org URLAdd WebFetch, WebSearch, mcp__, jig: to default permissionsUpdate review skill to check jig-specific docs and skillsUpdate issues skill to reference issues/README.mdAdd adapter module with AgentAdapter struct for pluggable agent supportjig init now requires agent argument: jig init claudejig.toml stores agent type in [agent] sectionspawn command uses adapter to build agent-specific commandsMove settings.json to templates/adapters/claude-code/Backup now copies files to .backup/ directory preserving path structureAudit prompt is detailed and opinionated about what to fill in each docReview skill now checks for documentation and skills updatesMove issue-tracking.md to issues/README.md, fix “wt” → “jig”Rename skills/jig → skills/spawn for consistencyRemove name: field from skill frontmatterAdd skeleton docs: PATTERNS.md, CONTRIBUTING.md, SUCCESS_CRITERIA.md, PROJECT_LAYOUT.mdExpand docs/index.md as documentation hubMake CLAUDE.md template a skeleton with guidance commentsUpgrade settings.json: add $schema, ask tier for destructive ops, better secret patternsAdd issues/_template.md ticket templateAdd skills for check, draft, issues, review, and spawn commandsSimplify .claude/settings.json using wildcard permissionsAdd jig.toml with spawn auto-configurationFix formatting in init.rsEmbed templates from templates/ directory using include_str!Add all 5 skills: check, draft, issues, review, spawnExpand permissions to cover tools used by skillsSet spawn.auto = true by defaultUse exec() on Unix for –audit flag (full terminal control)Add jig shell-setup command to automatically configure shell integrationFinds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changesjig open/attach/review/merge/kill <TAB> shows actual worktreesContext-aware completions for all subcommandsSimplified zsh completion using _arguments -CAdd quick setup section for shell-setup commandAdd troubleshooting section for common issuesRemove stale sc alias references (legacy from “scribe” name)State file moved to .jig/.state/state.jsonAuto-migration from .worktrees/ layout on first loadjig kill/unregister now removes workers from state entirely(instead of archiving them)jig ps auto-cleans stale workers whose tmux windows are goneHidden directories (.state) are skipped when listing worktrees.jig/.state/ added to .gitignore, .jig/ added to git exclude<csr-unknown>
  prettify jig ps with Op pattern and comfy-tableIntroduce the Op trait to separate command logic from presentation.Rewrite jig ps as the first adopter: ops return typed data, Displayimpls own all formatting via comfy-table with terminal-width-awarecolumn layout and color-coded status indicators. add worktree.copy for gitignored filesAdds worktree.copy config to copy gitignored files (like .env)to new worktrees:toml[worktree]
 copy = [".env", ".env.local"]
 Files are copied after worktree creation, before on_create hook runs. add worktree config to jig.tomljig.toml now supports worktree configuration: restructure issue tracking with categories and templates improve adapter architecture and audit templatesAdapter improvements:Template improvements: add agent-agnostic adapter architectureThis architecture allows future support for other agents (cursor, etc.)by adding new adapter constants. improve backup, audit prompt, and review skill upgrade jig init scaffolding to language-agnostic skeletons add Claude Code skills and simplify permissions use actual templates for jig init instead of bare-bones placeholdersThe init command now creates a complete scaffolding that matchesthe documentation, instead of empty placeholder comments. add –audit flag to init command that launches Claude interactivelyUses exec() on Unix to replace the current process with Claude Code,giving it full terminal control for interactive documentation audit. add shell-setup command and fix shell completionsRewrite shell completions with dynamic worktree completionUpdate docs/usage/shell-integration.md rewrite health check to validate repo setup and agent scaffoldingReplace terminal-detection-focused health check with structured validationof system deps (git, tmux, claude), repository config (jig.toml, basebranch, .worktrees), and agent scaffolding (CLAUDE.md, settings, skills).Remove unused jq/gh dependency checks and dead required field. Exitnon-zero when checks fail. add shell completions for bash, zsh, and fishShell completions are now emitted alongside the shell wrapper functionin jig shell-init. Completions cover all subcommands, aliases,per-command flags, nested config subcommands, and dynamic worktreename completion via command jig list.<csr-unknown/>
+<csr-unknown/>
 <csr-unknown/>
 <csr-unknown/>
 
@@ -1323,10 +1637,12 @@ Files are copied after worktree creation, before on_create hook runs. add worktr
    +1 byte per line. This could corrupt or truncate config files.
 
 <csr-unknown>
+<csr-unknown>
 Detects user’s shell from $SHELLFinds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changes<csr-unknown>
 <csr-unknown>
 worktree.on_create — command to run after worktree creationAdd directory-based issue organization (epics/, features/, bugs/, chores/)Add issue templates (_templates/): standalone.md, epic-index.md, ticket.mdCreate plan-and-execute epic for orchestration visionUpdate issues/README.md with comprehensive documentationUpdate /issues skill for new directory structureRemove old flat issue files and _template.mdAdd .backup/ to .gitignoreAdd AgentType enum for compile-time safe matchingRename template to PROJECT.md (agent-agnostic name)Dynamic audit prompt uses adapter.project_file and adapter.skills_dirValidate agent is installed before init (warns if not in PATH)Fix settings.json schema URLFix settings.json to use correct schemastore.org URLAdd WebFetch, WebSearch, mcp__, jig: to default permissionsUpdate review skill to check jig-specific docs and skillsUpdate issues skill to reference issues/README.mdAdd adapter module with AgentAdapter struct for pluggable agent supportjig init now requires agent argument: jig init claudejig.toml stores agent type in [agent] sectionspawn command uses adapter to build agent-specific commandsMove settings.json to templates/adapters/claude-code/Backup now copies files to .backup/ directory preserving path structureAudit prompt is detailed and opinionated about what to fill in each docReview skill now checks for documentation and skills updatesMove issue-tracking.md to issues/README.md, fix “wt” → “jig”Rename skills/jig → skills/spawn for consistencyRemove name: field from skill frontmatterAdd skeleton docs: PATTERNS.md, CONTRIBUTING.md, SUCCESS_CRITERIA.md, PROJECT_LAYOUT.mdExpand docs/index.md as documentation hubMake CLAUDE.md template a skeleton with guidance commentsUpgrade settings.json: add $schema, ask tier for destructive ops, better secret patternsAdd issues/_template.md ticket templateAdd skills for check, draft, issues, review, and spawn commandsSimplify .claude/settings.json using wildcard permissionsAdd jig.toml with spawn auto-configurationFix formatting in init.rsEmbed templates from templates/ directory using include_str!Add all 5 skills: check, draft, issues, review, spawnExpand permissions to cover tools used by skillsSet spawn.auto = true by defaultUse exec() on Unix for –audit flag (full terminal control)Add jig shell-setup command to automatically configure shell integrationFinds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changesjig open/attach/review/merge/kill/status <TAB> shows actual worktreesContext-aware completions for all subcommandsSimplified zsh completion using _arguments -CAdd quick setup section for shell-setup commandAdd troubleshooting section for common issuesRemove stale sc alias references (legacy from “scribe” name)<csr-unknown>
  restructure issue tracking with categories and templates improve adapter architecture and audit templatesAdapter improvements:Template improvements: add agent-agnostic adapter architectureThis architecture allows future support for other agents (cursor, etc.)by adding new adapter constants. improve backup, audit prompt, and review skill upgrade jig init scaffolding to language-agnostic skeletons add Claude Code skills and simplify permissions use actual templates for jig init instead of bare-bones placeholdersThe init command now creates a complete scaffolding that matchesthe documentation, instead of empty placeholder comments. add –audit flag to init command that launches Claude interactivelyUses exec() on Unix to replace the current process with Claude Code,giving it full terminal control for interactive documentation audit. add shell-setup command and fix shell completionsRewrite shell completions with dynamic worktree completionUpdate docs/usage/shell-integration.md rewrite health check to validate repo setup and agent scaffoldingReplace terminal-detection-focused health check with structured validationof system deps (git, tmux, claude), repository config (jig.toml, basebranch, .worktrees), and agent scaffolding (CLAUDE.md, settings, skills).Remove unused jq/gh dependency checks and dead required field. Exitnon-zero when checks fail. add shell completions for bash, zsh, and fishShell completions are now emitted alongside the shell wrapper functionin jig shell-init. Completions cover all subcommands, aliases,per-command flags, nested config subcommands, and dynamic worktreename completion via command jig list.<csr-unknown/>
+<csr-unknown/>
 <csr-unknown/>
 <csr-unknown/>
 <csr-unknown/>
@@ -1344,9 +1660,11 @@ worktree.on_create — command to run after worktree creationAdd directory-based
 <csr-unknown>
 <csr-unknown>
 <csr-unknown>
+<csr-unknown>
 Detects user’s shell from $SHELL<csr-unknown>
 Finds appropriate config file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)Adds eval line with markers for easy identificationPlaces integration after PATH setup when possibleSupports –dry-run flag to preview changesjig open/attach/review/merge/kill/status <TAB> shows actual worktreesContext-aware completions for all subcommandsSimplified zsh completion using _arguments -CAdd quick setup section for shell-setup commandAdd troubleshooting section for common issuesRemove stale sc alias references (legacy from “scribe” name)<csr-unknown>
 Rewrite shell completions with dynamic worktree completionUpdate docs/usage/shell-integration.md rewrite health check to validate repo setup and agent scaffoldingReplace terminal-detection-focused health check with structured validationof system deps (git, tmux, claude), repository config (jig.toml, basebranch, .worktrees), and agent scaffolding (CLAUDE.md, settings, skills).Remove unused jq/gh dependency checks and dead required field. Exitnon-zero when checks fail. add shell completions for bash, zsh, and fishShell completions are now emitted alongside the shell wrapper functionin jig shell-init. Completions cover all subcommands, aliases,per-command flags, nested config subcommands, and dynamic worktreename completion via command jig list.<csr-unknown/>
+<csr-unknown/>
 <csr-unknown/>
 <csr-unknown/>
 <csr-unknown/>
