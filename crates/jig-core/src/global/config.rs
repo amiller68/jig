@@ -74,6 +74,15 @@ pub struct LinearConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinearProfile {
     pub api_key: String,
+    /// Default team key (e.g. "ENG"). Used when per-repo config omits `team`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
+    /// Default project filter. Used when per-repo config omits `projects`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
+    /// Default assignee filter. "me" resolves to the API key owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
 }
 
 /// Daemon spawn configuration (global defaults).
@@ -183,6 +192,51 @@ mod tests {
         let path = tmp.path().join("nonexistent.toml");
         let cfg = GlobalConfig::load_from(&path).unwrap();
         assert_eq!(cfg.health.silence_threshold_seconds, 300);
+    }
+
+    #[test]
+    fn linear_profile_with_filters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[linear.profiles.work]
+api_key = "lin_api_test"
+team = "ENG"
+projects = ["Backend", "Platform"]
+assignee = "me"
+"#,
+        )
+        .unwrap();
+
+        let cfg = GlobalConfig::load_from(&path).unwrap();
+        let profile = cfg.linear.profiles.get("work").unwrap();
+        assert_eq!(profile.api_key, "lin_api_test");
+        assert_eq!(profile.team.as_deref(), Some("ENG"));
+        assert_eq!(profile.projects, vec!["Backend", "Platform"]);
+        assert_eq!(profile.assignee.as_deref(), Some("me"));
+    }
+
+    #[test]
+    fn linear_profile_without_filters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[linear.profiles.minimal]
+api_key = "lin_api_minimal"
+"#,
+        )
+        .unwrap();
+
+        let cfg = GlobalConfig::load_from(&path).unwrap();
+        let profile = cfg.linear.profiles.get("minimal").unwrap();
+        assert_eq!(profile.api_key, "lin_api_minimal");
+        assert!(profile.team.is_none());
+        assert!(profile.projects.is_empty());
+        assert!(profile.assignee.is_none());
     }
 
     #[test]

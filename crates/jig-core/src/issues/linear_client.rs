@@ -67,6 +67,15 @@ query GetIssue($filter: IssueFilter, $first: Int) {
 }
 "#;
 
+const VIEWER_QUERY: &str = r#"
+query Viewer {
+  viewer {
+    id
+    email
+  }
+}
+"#;
+
 /// Parse an identifier like "AUT-62" into (team_key, number).
 fn parse_identifier(identifier: &str) -> Option<(&str, i64)> {
     let (team, num) = identifier.rsplit_once('-')?;
@@ -90,6 +99,18 @@ struct GqlError {
 #[derive(Debug, Deserialize)]
 struct ListData {
     issues: NodeList<RawIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ViewerData {
+    viewer: RawViewer,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawViewer {
+    id: String,
+    #[allow(dead_code)]
+    email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,6 +255,17 @@ impl LinearClient {
         }
     }
 
+    /// Fetch the authenticated user's ID via the `viewer` query.
+    /// Used to resolve `assignee = "me"`.
+    pub fn viewer_id(&self) -> Result<String> {
+        let request = GqlRequest {
+            query: VIEWER_QUERY,
+            variables: serde_json::json!({}),
+        };
+        let data: ViewerData = self.execute(&request)?;
+        Ok(data.viewer.id)
+    }
+
     fn execute<T: serde::de::DeserializeOwned>(&self, request: &GqlRequest) -> Result<T> {
         let response = ureq::post(LINEAR_API_URL)
             .config()
@@ -268,13 +300,14 @@ impl LinearClient {
             .ok_or_else(|| Error::Linear("no data in response".into()))
     }
 
-    /// List issues for a team, optionally filtering by project, state, and priority.
+    /// List issues for a team, optionally filtering by project, state, priority, and assignee.
     pub fn list_issues(
         &self,
         team_key: &str,
         projects: &[String],
         status: Option<&IssueStatus>,
         priority: Option<&IssuePriority>,
+        assignee: Option<&str>,
     ) -> Result<Vec<Issue>> {
         let mut filter = serde_json::Map::new();
 
@@ -315,6 +348,22 @@ impl LinearClient {
                 "project".into(),
                 serde_json::json!({ "name": { "in": projects } }),
             );
+        }
+
+        // Assignee filter — the value is a pre-resolved user ID (from "me")
+        // or an email address.
+        if let Some(assignee_val) = assignee {
+            if assignee_val.contains('@') {
+                filter.insert(
+                    "assignee".into(),
+                    serde_json::json!({ "email": { "eq": assignee_val } }),
+                );
+            } else {
+                filter.insert(
+                    "assignee".into(),
+                    serde_json::json!({ "id": { "eq": assignee_val } }),
+                );
+            }
         }
 
         let variables = serde_json::json!({

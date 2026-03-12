@@ -16,6 +16,7 @@ pub struct LinearProvider {
     client: LinearClient,
     team: String,
     projects: Vec<String>,
+    assignee: Option<String>,
 }
 
 impl LinearProvider {
@@ -25,6 +26,7 @@ impl LinearProvider {
     /// Build a provider from repo and global config.
     ///
     /// Looks up the named profile in `global_config` to resolve the API key.
+    /// Per-repo fields override profile-level defaults.
     pub fn from_config(
         global_config: &GlobalConfig,
         linear_config: &LinearIssuesConfig,
@@ -40,17 +42,45 @@ impl LinearProvider {
                 ))
             })?;
 
-        let team = linear_config.team.clone().ok_or_else(|| {
-            Error::Linear(
-                "Linear team key is required — set 'team' in [issues.linear] in jig.toml"
-                    .to_string(),
-            )
-        })?;
+        // Resolution: per-repo jig.toml > profile default > omitted.
+        let team = linear_config
+            .team
+            .clone()
+            .or_else(|| profile.team.clone())
+            .ok_or_else(|| {
+                Error::Linear(
+                    "Linear team key is required — set 'team' in [issues.linear] in jig.toml or in the profile in ~/.config/jig/config.toml"
+                        .to_string(),
+                )
+            })?;
+
+        let projects = if linear_config.projects.is_empty() {
+            profile.projects.clone()
+        } else {
+            linear_config.projects.clone()
+        };
+
+        let assignee = linear_config
+            .assignee
+            .clone()
+            .or_else(|| profile.assignee.clone());
+
+        let client = LinearClient::new(&profile.api_key);
+
+        // Resolve "me" to the authenticated user's ID.
+        let assignee = match assignee.as_deref() {
+            Some("me") => {
+                let viewer_id = client.viewer_id()?;
+                Some(viewer_id)
+            }
+            other => other.map(|s| s.to_string()),
+        };
 
         Ok(Self {
-            client: LinearClient::new(&profile.api_key),
+            client,
             team,
-            projects: linear_config.projects.clone(),
+            projects,
+            assignee,
         })
     }
 }
@@ -77,6 +107,7 @@ impl IssueProvider for LinearProvider {
             &projects,
             filter.status.as_ref(),
             filter.priority.as_ref(),
+            self.assignee.as_deref(),
         )?;
 
         // Client-side label filtering (all specified labels must match).
