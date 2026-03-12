@@ -2,13 +2,22 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::context::RepoContext;
 use crate::registry::RepoRegistry;
 
 use super::messages::*;
 use super::{github_actor, issue_actor, nudge_actor, prune_actor, spawn_actor, sync_actor};
+
+/// Timer info for display in the ps watch footer.
+#[derive(Debug, Clone)]
+pub struct TimerInfo {
+    /// Seconds until the next git sync fires.
+    pub sync_remaining: u64,
+    /// Seconds until the next issue poll fires (None if auto-spawn disabled).
+    pub poll_remaining: Option<u64>,
+}
 
 /// Runtime configuration for the daemon actors.
 #[derive(Debug, Clone)]
@@ -46,6 +55,8 @@ pub struct DaemonRuntime {
     github_tx: flume::Sender<GitHubRequest>,
     github_rx: flume::Receiver<GitHubResponse>,
     github_cache: HashMap<String, GitHubResponse>,
+    /// When each worker's GitHub request was last queued, to throttle API calls.
+    github_last_requested: HashMap<String, Instant>,
 
     // Issue actor
     issue_tx: flume::Sender<IssueRequest>,
@@ -114,6 +125,7 @@ impl DaemonRuntime {
             github_tx: gh_req_tx,
             github_rx: gh_resp_rx,
             github_cache: HashMap::new(),
+            github_last_requested: HashMap::new(),
 
             issue_tx: issue_req_tx,
             issue_rx: issue_resp_rx,
@@ -191,19 +203,43 @@ impl DaemonRuntime {
     }
 
     /// Send a PR check request to the GitHub actor (non-blocking).
+    ///
+    /// Throttles requests to once per 60s per worker to align with `gh api --cache 60s`.
+    /// This prevents spamming the GitHub API on every 2-second tick.
     pub fn request_pr_check(
-        &self,
+        &mut self,
         worker_key: &str,
         repo_name: &str,
         branch: &str,
         pr_url: Option<&str>,
     ) {
-        let _ = self.github_tx.try_send(GitHubRequest {
-            worker_key: worker_key.to_string(),
-            repo_name: repo_name.to_string(),
-            branch: branch.to_string(),
-            pr_url: pr_url.map(|s| s.to_string()),
-        });
+        // Throttle: skip if we requested this worker's PR check within the last 60s
+        const GITHUB_POLL_INTERVAL: Duration = Duration::from_secs(60);
+        if let Some(last) = self.github_last_requested.get(worker_key) {
+            if last.elapsed() < GITHUB_POLL_INTERVAL {
+                return;
+            }
+        }
+
+        let previous_is_draft = self
+            .github_cache
+            .get(worker_key)
+            .map(|r| r.is_draft)
+            .unwrap_or(false);
+        if self
+            .github_tx
+            .try_send(GitHubRequest {
+                worker_key: worker_key.to_string(),
+                repo_name: repo_name.to_string(),
+                branch: branch.to_string(),
+                pr_url: pr_url.map(|s| s.to_string()),
+                previous_is_draft,
+            })
+            .is_ok()
+        {
+            self.github_last_requested
+                .insert(worker_key.to_string(), Instant::now());
+        }
     }
 
     /// Drain all pending GitHub responses into the cache (non-blocking).
@@ -364,5 +400,23 @@ impl DaemonRuntime {
     /// Get runtime config reference.
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
+    }
+
+    /// Compute timer info for display.
+    pub fn timer_info(&self) -> TimerInfo {
+        let sync_elapsed = self.last_sync.elapsed().as_secs();
+        let sync_remaining = self.config.sync_interval.saturating_sub(sync_elapsed);
+
+        let poll_remaining = if self.config.auto_spawn {
+            let poll_elapsed = self.last_issue_poll.elapsed().as_secs();
+            Some(self.config.auto_spawn_interval.saturating_sub(poll_elapsed))
+        } else {
+            None
+        };
+
+        TimerInfo {
+            sync_remaining,
+            poll_remaining,
+        }
     }
 }

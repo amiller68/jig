@@ -43,7 +43,7 @@ use discovery::discover_workers;
 use pr::{make_github_client, PrMonitor};
 
 pub use messages::SpawnableIssue;
-pub use runtime::{DaemonRuntime, RuntimeConfig};
+pub use runtime::{DaemonRuntime, RuntimeConfig, TimerInfo};
 
 /// Extract the branch name from a worker's event log (looks for Spawn event),
 /// falling back to worker_name if no Spawn event exists.
@@ -74,6 +74,8 @@ pub struct WorkerDisplayInfo {
     pub pr_health: WorkerTickInfo,
     /// Whether the worker's PR is a draft (affects display and nudge behavior).
     pub is_draft: bool,
+    /// Seconds until the next nudge cooldown expires (min across all active types).
+    pub nudge_cooldown_remaining: Option<u64>,
 }
 
 /// Per-worker PR health info collected during a tick.
@@ -132,6 +134,10 @@ pub struct TickResult {
     pub pruned: Vec<String>,
     /// Pre-computed display data for the render callback (zero I/O).
     pub worker_display: Vec<WorkerDisplayInfo>,
+    /// Nudge messages delivered this tick: (worker_name, nudge_type, message_text).
+    pub nudge_messages: Vec<(String, String, String)>,
+    /// Timer info for the daemon's sync and poll intervals.
+    pub timer_info: Option<TimerInfo>,
 }
 
 /// The daemon orchestrator — holds references to shared infrastructure.
@@ -299,13 +305,26 @@ impl<'a> Daemon<'a> {
                 &registry,
                 runtime,
             ) {
-                Ok((actions, nudges, notifs, worker_tick_info, display_info, prune_targets)) => {
+                Ok((
+                    actions,
+                    nudges,
+                    notifs,
+                    worker_tick_info,
+                    display_info,
+                    prune_targets,
+                    nudge_msgs,
+                )) => {
                     result.actions_dispatched += actions;
                     result.nudges_sent += nudges;
                     result.notifications_sent += notifs;
                     result.worker_info.insert(key.clone(), worker_tick_info);
                     result.worker_display.push(display_info);
                     live_prune_targets.extend(prune_targets);
+                    for (ntype, msg) in nudge_msgs {
+                        result
+                            .nudge_messages
+                            .push((worker_name.clone(), ntype, msg));
+                    }
                 }
                 Err(e) => {
                     result.errors.push(format!("{}: {}", key, e));
@@ -373,6 +392,7 @@ impl<'a> Daemon<'a> {
         }
 
         result.spawning = runtime.spawning_workers().to_vec();
+        result.timer_info = Some(runtime.timer_info());
 
         Ok(result)
     }
@@ -467,6 +487,7 @@ impl<'a> Daemon<'a> {
     }
 
     /// Process a single worker using cached PR data from the runtime.
+    #[allow(clippy::type_complexity)]
     fn process_worker(
         &self,
         repo_name: &str,
@@ -474,7 +495,7 @@ impl<'a> Daemon<'a> {
         key: &str,
         workers_state: &mut WorkersState,
         registry: &RepoRegistry,
-        runtime: &DaemonRuntime,
+        runtime: &mut DaemonRuntime,
     ) -> Result<(
         usize,
         usize,
@@ -482,6 +503,7 @@ impl<'a> Daemon<'a> {
         WorkerTickInfo,
         WorkerDisplayInfo,
         Vec<messages::PruneTarget>,
+        Vec<(String, String)>,
     )> {
         // Load per-repo health config
         let repo_health = Self::load_repo_health_config(registry, repo_name);
@@ -638,18 +660,19 @@ impl<'a> Daemon<'a> {
         }
 
         let action_count = actions.len();
-        let (nudge_count, notif_count, cleanup_prune_targets) = self.execute_actions(
-            &actions,
-            repo_name,
-            worker_name,
-            &branch_name,
-            key,
-            &new_state,
-            &event_log,
-            registry,
-            &resolve,
-            Some(runtime),
-        );
+        let (nudge_count, notif_count, cleanup_prune_targets, tick_nudge_messages) = self
+            .execute_actions(
+                &actions,
+                repo_name,
+                worker_name,
+                &branch_name,
+                key,
+                &new_state,
+                &event_log,
+                registry,
+                &resolve,
+                Some(runtime),
+            );
 
         // Update workers.json
         workers_state.set_worker(
@@ -689,6 +712,23 @@ impl<'a> Daemon<'a> {
             };
 
         let nudges_total: u32 = new_state.nudge_counts.values().sum();
+
+        // Compute minimum remaining cooldown across all active nudge types
+        let nudge_cooldown_remaining = {
+            let now = chrono::Utc::now().timestamp();
+            let mut min_remaining: Option<u64> = None;
+            for (nudge_key, &last_ts) in &new_state.last_nudge_at {
+                let resolved = resolve(nudge_key);
+                let elapsed = now - last_ts;
+                if elapsed < resolved.cooldown_seconds as i64 {
+                    let remaining = (resolved.cooldown_seconds as i64 - elapsed) as u64;
+                    min_remaining =
+                        Some(min_remaining.map_or(remaining, |cur: u64| cur.min(remaining)));
+                }
+            }
+            min_remaining
+        };
+
         let display_info = WorkerDisplayInfo {
             repo: repo_name.to_string(),
             name: worker_name.to_string(),
@@ -703,6 +743,7 @@ impl<'a> Daemon<'a> {
             issue_ref: new_state.issue_ref.clone(),
             pr_health: worker_tick_info.clone(),
             is_draft,
+            nudge_cooldown_remaining,
         };
 
         Ok((
@@ -712,6 +753,7 @@ impl<'a> Daemon<'a> {
             worker_tick_info,
             display_info,
             cleanup_prune_targets,
+            tick_nudge_messages,
         ))
     }
 
@@ -810,7 +852,7 @@ impl<'a> Daemon<'a> {
         }
 
         let action_count = actions.len();
-        let (nudge_count, notif_count, _prune_targets) = self.execute_actions(
+        let (nudge_count, notif_count, _prune_targets, _nudge_messages) = self.execute_actions(
             &actions,
             repo_name,
             worker_name,
@@ -859,13 +901,19 @@ impl<'a> Daemon<'a> {
         registry: &RepoRegistry,
         resolve: &F,
         runtime: Option<&DaemonRuntime>,
-    ) -> (usize, usize, Vec<messages::PruneTarget>)
+    ) -> (
+        usize,
+        usize,
+        Vec<messages::PruneTarget>,
+        Vec<(String, String)>,
+    )
     where
         F: Fn(&str) -> ResolvedNudgeConfig,
     {
         let mut nudge_count = 0;
         let mut notif_count = 0;
         let mut prune_targets = Vec::new();
+        let mut nudge_messages: Vec<(String, String)> = Vec::new();
 
         for action in actions {
             match action {
@@ -909,6 +957,8 @@ impl<'a> Daemon<'a> {
 
                         if let Some(rt) = runtime {
                             // Async path: dispatch to nudge actor
+                            nudge_messages
+                                .push((nudge_type.count_key().to_string(), message.clone()));
                             rt.send_nudge(messages::NudgeRequest {
                                 session,
                                 window: branch_name.to_string(),
@@ -1015,7 +1065,7 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        (nudge_count, notif_count, prune_targets)
+        (nudge_count, notif_count, prune_targets, nudge_messages)
     }
 
     /// Auto-spawn a worker for an issue.

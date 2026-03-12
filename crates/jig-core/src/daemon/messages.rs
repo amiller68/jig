@@ -26,6 +26,9 @@ pub struct GitHubRequest {
     pub branch: String,
     /// PR URL if already known.
     pub pr_url: Option<String>,
+    /// Previous draft status from cache — preserved on error paths so API
+    /// failures don't clobber the known draft state.
+    pub previous_is_draft: bool,
 }
 
 /// Response from the GitHub actor for a single worker's PR check.

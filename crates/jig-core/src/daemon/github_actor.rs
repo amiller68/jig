@@ -37,7 +37,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: Some("GitHub client unavailable".to_string()),
                 pr_merged: false,
                 pr_closed: false,
-                is_draft: false,
+                is_draft: req.previous_is_draft,
                 review_feedback_count: None,
             };
         }
@@ -91,7 +91,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: Some("invalid PR URL".to_string()),
                 pr_merged: false,
                 pr_closed: false,
-                is_draft: false,
+                is_draft: req.previous_is_draft,
                 review_feedback_count: None,
             };
         }
@@ -108,7 +108,7 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
                 pr_error: Some(e.to_string()),
                 pr_merged: false,
                 pr_closed: false,
-                is_draft: false,
+                is_draft: req.previous_is_draft,
                 review_feedback_count: None,
             };
         }
