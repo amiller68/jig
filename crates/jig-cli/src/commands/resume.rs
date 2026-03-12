@@ -3,7 +3,7 @@
 use clap::Args;
 
 use jig_core::worktree::Worktree;
-use jig_core::{terminal, Error};
+use jig_core::Error;
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -32,16 +32,6 @@ impl Op for Resume {
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
 
-        // Check for tmux
-        if !terminal::command_exists("tmux") {
-            return Err(Error::MissingDependency("tmux".to_string()).into());
-        }
-
-        // Check for claude
-        if !terminal::command_exists("claude") {
-            return Err(Error::MissingDependency("claude".to_string()).into());
-        }
-
         // Open existing worktree
         let wt = Worktree::open(&repo.repo_root, &repo.worktrees_dir, &self.name)?;
 
@@ -68,7 +58,7 @@ impl Op for Resume {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            jig_core::daemon::recovery::read_spawn_context(&repo_name, &self.name)
+            jig_core::daemon::recovery::RecoveryScanner::read_spawn_context(&repo_name, &self.name)
         };
 
         // Resume the worker

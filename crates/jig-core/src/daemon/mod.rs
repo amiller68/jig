@@ -563,7 +563,11 @@ impl<'a> Daemon<'a> {
                 // Replace nudge actions with resume attempt
                 actions.retain(|a| !matches!(a, Action::Nudge { .. }));
                 if let Some(entry) = Self::find_repo_path(registry, repo_name) {
-                    match self::recovery::try_resume_worker(&entry.path, repo_name, worker_name) {
+                    match recovery::RecoveryScanner::try_resume_worker(
+                        &entry.path,
+                        repo_name,
+                        worker_name,
+                    ) {
                         Ok(true) => {
                             tracing::info!(worker = key, "worker resumed during steady-state tick");
                         }
@@ -1010,8 +1014,11 @@ impl<'a> Daemon<'a> {
                         "restart requested, attempting resume"
                     );
                     if let Some(entry) = Self::find_repo_path(registry, repo_name) {
-                        match self::recovery::try_resume_worker(&entry.path, repo_name, worker_name)
-                        {
+                        match recovery::RecoveryScanner::try_resume_worker(
+                            &entry.path,
+                            repo_name,
+                            worker_name,
+                        ) {
                             Ok(true) => {
                                 tracing::info!(worker = key, "worker resumed via restart action");
                             }
@@ -1195,8 +1202,16 @@ fn install_signal_handler(quit: &Arc<AtomicBool>) {
 
 /// Run startup recovery: log lifecycle event, detect crash, resume orphans.
 fn startup_recovery(global_config: &GlobalConfig) {
+    let log = match lifecycle::DaemonLifecycleLog::global() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("failed to open daemon lifecycle log: {}", e);
+            return;
+        }
+    };
+
     // Check for previous crash
-    match lifecycle::previous_run_crashed() {
+    match log.previous_run_crashed() {
         Ok(true) => {
             tracing::warn!(
                 "previous daemon run did not shut down cleanly — checking for orphaned workers"
@@ -1209,14 +1224,15 @@ fn startup_recovery(global_config: &GlobalConfig) {
     }
 
     // Log startup
-    if let Err(e) = lifecycle::append_event(&lifecycle::DaemonEvent::started()) {
+    if let Err(e) = log.record_started() {
         tracing::warn!("failed to write daemon Started event: {}", e);
     }
 
     // Auto-recover orphaned workers if enabled
     if global_config.daemon.auto_recover {
         let registry = RepoRegistry::load().unwrap_or_default();
-        let recovered = recovery::recover_orphaned_workers(&registry);
+        let scanner = recovery::RecoveryScanner::new(&registry);
+        let recovered = scanner.recover_all();
         if !recovered.is_empty() {
             tracing::info!(
                 count = recovered.len(),
@@ -1231,7 +1247,14 @@ fn startup_recovery(global_config: &GlobalConfig) {
 
 /// Log a graceful shutdown event.
 fn log_shutdown(reason: &str) {
-    if let Err(e) = lifecycle::append_event(&lifecycle::DaemonEvent::stopped(reason)) {
+    let log = match lifecycle::DaemonLifecycleLog::global() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("failed to open daemon lifecycle log: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = log.record_stopped(reason) {
         tracing::warn!("failed to write daemon Stopped event: {}", e);
     }
 }

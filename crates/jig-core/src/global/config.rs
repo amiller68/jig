@@ -106,11 +106,19 @@ impl Default for GlobalSpawnConfig {
 pub struct GlobalDaemonConfig {
     /// Automatically recover orphaned workers on daemon startup.
     pub auto_recover: bool,
+    /// Tick interval in seconds.
+    pub interval_seconds: u64,
+    /// Tmux session prefix (default: "jig-").
+    pub session_prefix: String,
 }
 
 impl Default for GlobalDaemonConfig {
     fn default() -> Self {
-        Self { auto_recover: true }
+        Self {
+            auto_recover: true,
+            interval_seconds: 30,
+            session_prefix: "jig-".to_string(),
+        }
     }
 }
 
