@@ -35,7 +35,7 @@ New `daemon/recovery.rs`:
 ### 4. `jig resume` CLI command
 
 New `commands/resume.rs`:
-- Takes worker name, optional `--context` override, `--auto` flag
+- Takes worker name, optional `--context` override
 - Errors if tmux window already exists (use `jig attach` instead)
 - Opens worktree via `Worktree::open()`, calls `wt.resume(context)`
 - Reads original context from Spawn event in log
@@ -59,15 +59,15 @@ In daemon `process_worker()`: if worker is active (Running/Spawned/Stalled) AND 
 
 ## Acceptance Criteria
 
-- [ ] Daemon installs SIGTERM/SIGINT handler and exits gracefully
-- [ ] `daemon.jsonl` records Started/Stopped lifecycle events
-- [ ] Unclean shutdown detected on next startup (missing Stopped event)
-- [ ] Orphaned active workers auto-recovered on daemon startup via `Worktree` methods
-- [ ] `jig resume <name>` works for manual recovery using `Worktree::open()` + `wt.resume()`
-- [ ] `jig resume` errors cleanly when tmux window already exists
-- [ ] Dead tmux detection during steady-state ticks triggers `wt.resume()` instead of nudging
-- [ ] `auto_recover` config option allows opt-out
-- [ ] Integration test for `jig resume`
+- [x] Daemon installs SIGTERM/SIGINT handler and exits gracefully
+- [x] `daemon.jsonl` records Started/Stopped lifecycle events
+- [x] Unclean shutdown detected on next startup (missing Stopped event)
+- [x] Orphaned active workers auto-recovered on daemon startup via `Worktree` methods
+- [x] `jig resume <name>` works for manual recovery using `Worktree::open()` + `wt.resume()`
+- [x] `jig resume` errors cleanly when tmux window already exists
+- [x] Dead tmux detection during steady-state ticks triggers `wt.resume()` instead of nudging
+- [x] `auto_recover` config option allows opt-out
+- [x] Integration test for `jig resume`
 
 ## Verification
 

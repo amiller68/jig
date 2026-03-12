@@ -1329,8 +1329,8 @@ where
         }
     })();
 
-    // Log graceful shutdown
-    log_shutdown("normal");
+    // Log shutdown with appropriate reason
+    log_shutdown(if result.is_ok() { "normal" } else { "error" });
     result
 }
 
@@ -1382,7 +1382,7 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
         }
     })();
 
-    log_shutdown("normal");
+    log_shutdown(if result.is_ok() { "normal" } else { "error" });
     result
 }
 
