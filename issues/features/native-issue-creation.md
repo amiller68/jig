@@ -1,6 +1,6 @@
 # Native issue creation command
 
-**Status:** Planned
+**Status:** Complete
 **Labels:** auto
 
 ## Objective
