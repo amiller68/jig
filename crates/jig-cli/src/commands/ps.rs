@@ -10,7 +10,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{self, disable_raw_mode};
 
 use jig_core::config::JigToml;
-use jig_core::daemon::{DaemonConfig, RuntimeConfig, TickResult};
+use jig_core::daemon::{DaemonConfig, RuntimeConfig, TickResult, TimerInfo};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -293,8 +293,10 @@ fn run_watch(
                             names.join(", ")
                         )
                     };
+                    let nudge_section = format_nudge_messages(&tick.nudge_messages);
+                    let timer_section = format_timer_info(&tick.timer_info);
                     let output = format!(
-                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table_output}{spawning_section}\n\x1B[2m[l]ogs  [q]uit\x1B[0m",
+                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table_output}{spawning_section}{nudge_section}\n\x1B[2m[l]ogs  [q]uit{timer_section}\x1B[0m",
                         tick.worker_display.len(), interval,
                     );
                     for line in output.lines() {
@@ -383,4 +385,39 @@ fn format_tick_status(tick: &Option<&TickResult>) -> String {
     } else {
         format!("  \x1B[2m[{}]\x1B[0m", parts.join(", "))
     }
+}
+
+/// Format nudge messages delivered this tick for display below the worker table.
+fn format_nudge_messages(messages: &[(String, String, String)]) -> String {
+    if messages.is_empty() {
+        return String::new();
+    }
+
+    let term_width = terminal::size().map(|(w, _)| w as usize).unwrap_or(120);
+    let mut lines = Vec::new();
+    for (worker, ntype, msg) in messages {
+        let prefix = format!("  \u{21b3} {} [{}]: ", worker, ntype);
+        let max_msg_len = term_width.saturating_sub(prefix.len() + 1);
+        let truncated = ui::truncate(msg, max_msg_len);
+        lines.push(format!(
+            "\x1B[2m  \u{21b3} {} [{}]:\x1B[0m {}",
+            worker, ntype, truncated
+        ));
+    }
+    format!("\n{}\n", lines.join("\n"))
+}
+
+/// Format timer info for the footer line.
+fn format_timer_info(timer: &Option<TimerInfo>) -> String {
+    let Some(timer) = timer else {
+        return String::new();
+    };
+    let mut parts = vec![format!(
+        "sync: {}",
+        ui::format_duration_short(timer.sync_remaining)
+    )];
+    if let Some(poll) = timer.poll_remaining {
+        parts.push(format!("poll: {}", ui::format_duration_short(poll)));
+    }
+    format!("  {}", parts.join("  "))
 }

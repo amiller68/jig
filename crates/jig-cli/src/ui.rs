@@ -183,6 +183,33 @@ pub fn truncate(s: &str, max: usize) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Duration formatting
+// ---------------------------------------------------------------------------
+
+/// Format seconds as a short human-readable duration: `45s`, `3m12s`, `1h5m`.
+pub fn format_duration_short(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        let m = secs / 60;
+        let s = secs % 60;
+        if s == 0 {
+            format!("{}m", m)
+        } else {
+            format!("{}m{}s", m, s)
+        }
+    } else {
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        if m == 0 {
+            format!("{}h", h)
+        } else {
+            format!("{}h{}m", h, m)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Error display
 // ---------------------------------------------------------------------------
 
@@ -289,9 +316,23 @@ fn worker_row(w: &WorkerDisplayInfo) -> Vec<Cell> {
     };
 
     let (nudge_text, nudge_color) = if w.nudge_count == 0 {
-        ("-".to_string(), Color::DarkGrey)
+        if let Some(cd) = w.nudge_cooldown_remaining {
+            (format!("({})", format_duration_short(cd)), Color::DarkGrey)
+        } else {
+            ("-".to_string(), Color::DarkGrey)
+        }
     } else if w.nudge_count >= w.max_nudges {
         (format!("{}/{}", w.nudge_count, w.max_nudges), Color::Red)
+    } else if let Some(cd) = w.nudge_cooldown_remaining {
+        (
+            format!(
+                "{}/{} ({})",
+                w.nudge_count,
+                w.max_nudges,
+                format_duration_short(cd)
+            ),
+            Color::Yellow,
+        )
     } else {
         (format!("{}/{}", w.nudge_count, w.max_nudges), Color::Yellow)
     };
@@ -462,4 +503,34 @@ where
     let _ = crossterm::execute!(w, terminal::LeaveAlternateScreen);
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_duration_short_seconds() {
+        assert_eq!(format_duration_short(0), "0s");
+        assert_eq!(format_duration_short(1), "1s");
+        assert_eq!(format_duration_short(45), "45s");
+        assert_eq!(format_duration_short(59), "59s");
+    }
+
+    #[test]
+    fn format_duration_short_minutes() {
+        assert_eq!(format_duration_short(60), "1m");
+        assert_eq!(format_duration_short(61), "1m1s");
+        assert_eq!(format_duration_short(192), "3m12s");
+        assert_eq!(format_duration_short(300), "5m");
+        assert_eq!(format_duration_short(3599), "59m59s");
+    }
+
+    #[test]
+    fn format_duration_short_hours() {
+        assert_eq!(format_duration_short(3600), "1h");
+        assert_eq!(format_duration_short(3660), "1h1m");
+        assert_eq!(format_duration_short(7260), "2h1m");
+        assert_eq!(format_duration_short(7200), "2h");
+    }
 }
