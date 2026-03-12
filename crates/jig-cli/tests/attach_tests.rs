@@ -1,3 +1,5 @@
+#![allow(deprecated)] // Command::cargo_bin is deprecated but used across tests
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
