@@ -877,7 +877,18 @@ impl<'a> Daemon<'a> {
                     let target = TmuxTarget::new(&session, branch_name.to_string());
 
                     if self.tmux.has_window(&target) {
-                        if !self.tmux.pane_is_running(&target) {
+                        // PR nudges (review, ci, conflict, bad commits) should always
+                        // be delivered — the agent may be at its idle prompt, which
+                        // tmux reports as a shell/version string (pane_is_running=false).
+                        // Only skip idle/stuck nudges when the pane has no running command.
+                        let is_pr_nudge = matches!(
+                            nudge_type,
+                            NudgeType::Review
+                                | NudgeType::Ci
+                                | NudgeType::Conflict
+                                | NudgeType::BadCommits
+                        );
+                        if !is_pr_nudge && !self.tmux.pane_is_running(&target) {
                             tracing::debug!(
                                 worker = key,
                                 "no command running in pane, skipping nudge"
