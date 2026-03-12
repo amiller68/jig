@@ -9,7 +9,7 @@ use crate::global::GlobalConfig;
 
 use super::linear_client::LinearClient;
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter};
+use super::types::{Issue, IssueFilter, IssueStatus};
 
 /// Issue provider backed by the Linear API.
 pub struct LinearProvider {
@@ -90,6 +90,14 @@ impl LinearProvider {
             assignee,
             labels,
         })
+    }
+}
+
+impl LinearProvider {
+    /// Update the workflow state of a Linear issue.
+    pub fn update_status(&self, identifier: &str, new_status: &IssueStatus) -> Result<()> {
+        self.client
+            .update_issue_status(identifier, &self.team, new_status)
     }
 }
 

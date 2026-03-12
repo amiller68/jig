@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 use super::provider::IssueProvider;
 use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus};
@@ -133,6 +133,192 @@ impl FileProvider {
 
         Ok(issues)
     }
+}
+
+impl FileProvider {
+    /// Create a new issue file from a template.
+    ///
+    /// `template` is one of "standalone", "ticket", "epic-index" (or a custom name).
+    /// Returns the ID of the newly created issue.
+    pub fn create_issue(
+        &self,
+        title: &str,
+        category: &str,
+        template: &str,
+        priority: Option<&IssuePriority>,
+        labels: &[String],
+    ) -> Result<String> {
+        // Load template content
+        let template_path = self
+            .issues_dir
+            .join("_templates")
+            .join(format!("{}.md", template));
+        let content = if template_path.exists() {
+            std::fs::read_to_string(&template_path)?
+        } else {
+            // Fallback to standalone template
+            let fallback = self.issues_dir.join("_templates/standalone.md");
+            if fallback.exists() {
+                std::fs::read_to_string(&fallback)?
+            } else {
+                // Minimal default
+                "# [Title]\n\n**Status:** Planned\n\n## Objective\n\nDescribe the objective.\n"
+                    .to_string()
+            }
+        };
+
+        // Replace placeholder title
+        let content = content.replace("[Title]", title);
+        let content = content.replace("[Ticket Title]", title);
+        let content = content.replace("[Epic Title]", title);
+
+        // Inject priority if provided
+        let content = if let Some(pri) = priority {
+            if content.contains("**Priority:**") {
+                content
+            } else {
+                // Insert after **Status:** line
+                content.replace(
+                    "**Status:** Planned",
+                    &format!("**Status:** Planned\n**Priority:** {}", pri.as_str()),
+                )
+            }
+        } else {
+            content
+        };
+
+        // Inject labels if provided
+        let content = if !labels.is_empty() {
+            if content.contains("**Labels:**") {
+                content
+            } else {
+                let labels_str = labels.join(", ");
+                // Insert after **Status:** or **Priority:** line
+                if content.contains("**Priority:**") {
+                    // Find the priority line and insert after it
+                    let mut lines: Vec<&str> = content.lines().collect();
+                    let pos = lines
+                        .iter()
+                        .position(|l| l.trim().starts_with("**Priority:**"));
+                    if let Some(idx) = pos {
+                        lines.insert(idx + 1, &format!("**Labels:** {}", labels_str));
+                        // Can't use format! result as &str reference, so rebuild differently
+                    }
+                    // Rebuild with labels
+                    content.replace(
+                        &format!(
+                            "**Priority:** {}",
+                            priority.map(|p| p.as_str()).unwrap_or("Medium")
+                        ),
+                        &format!(
+                            "**Priority:** {}\n**Labels:** {}",
+                            priority.map(|p| p.as_str()).unwrap_or("Medium"),
+                            labels_str,
+                        ),
+                    )
+                } else {
+                    content.replace(
+                        "**Status:** Planned",
+                        &format!("**Status:** Planned\n**Labels:** {}", labels_str),
+                    )
+                }
+            }
+        } else {
+            content
+        };
+
+        // Derive filename from title (kebab-case)
+        let slug: String = title
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-");
+
+        let dir = self.issues_dir.join(category);
+        std::fs::create_dir_all(&dir)?;
+
+        let file_path = dir.join(format!("{}.md", slug));
+        if file_path.exists() {
+            return Err(Error::Custom(format!(
+                "issue file already exists: {}",
+                file_path.display()
+            )));
+        }
+
+        std::fs::write(&file_path, &content)?;
+
+        let id = format!("{}/{}", category, slug);
+        Ok(id)
+    }
+
+    /// Update the status field in an issue file.
+    pub fn update_status(&self, id: &str, new_status: &IssueStatus) -> Result<()> {
+        let path = self.resolve_path(id)?;
+        let content = std::fs::read_to_string(&path)?;
+        let updated = replace_field(&content, "Status", new_status.as_str());
+        std::fs::write(&path, updated)?;
+        Ok(())
+    }
+
+    /// Delete an issue file.
+    pub fn delete_issue(&self, id: &str) -> Result<()> {
+        let path = self.resolve_path(id)?;
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    /// Resolve an issue ID to its file path on disk.
+    fn resolve_path(&self, id: &str) -> Result<PathBuf> {
+        let candidates = [
+            self.issues_dir.join(format!("{}.md", id)),
+            self.issues_dir.join(id),
+        ];
+        for path in &candidates {
+            if path.exists() && path.extension().map(|e| e == "md").unwrap_or(false) {
+                return Ok(path.clone());
+            }
+        }
+        Err(Error::Custom(format!("issue file not found: {}", id)))
+    }
+}
+
+/// Replace a `**Key:** Value` field in markdown content.
+fn replace_field(content: &str, key: &str, new_value: &str) -> String {
+    let prefix = format!("**{}:**", key);
+    let mut result = Vec::new();
+    let mut found = false;
+
+    for line in content.lines() {
+        if line.trim().starts_with(&prefix) {
+            result.push(format!("**{}:** {}", key, new_value));
+            found = true;
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    if !found {
+        // Insert after first heading if field didn't exist
+        let mut inserted = false;
+        let mut final_result = Vec::new();
+        for line in &result {
+            final_result.push(line.clone());
+            if !inserted && line.starts_with("# ") {
+                final_result.push(String::new());
+                final_result.push(format!("**{}:** {}", key, new_value));
+                inserted = true;
+            }
+        }
+        if inserted {
+            return final_result.join("\n");
+        }
+    }
+
+    result.join("\n")
 }
 
 impl IssueProvider for FileProvider {
@@ -782,5 +968,140 @@ mod tests {
         sort_issues(&mut issues);
         assert_eq!(issues[0].id, "a-urgent");
         assert_eq!(issues[1].id, "b-low");
+    }
+
+    #[test]
+    fn create_issue_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let templates = tmp.path().join("_templates");
+        std::fs::create_dir_all(&templates).unwrap();
+        std::fs::write(
+            templates.join("standalone.md"),
+            "# [Title]\n\n**Status:** Planned\n\n## Objective\n\nDescribe.\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let id = provider
+            .create_issue("Add verbose flag", "features", "standalone", None, &[])
+            .unwrap();
+
+        assert_eq!(id, "features/add-verbose-flag");
+
+        // Verify the file was created and can be read back
+        let issue = provider.get(&id).unwrap().unwrap();
+        assert_eq!(issue.title, "Add verbose flag");
+        assert_eq!(issue.status, IssueStatus::Planned);
+    }
+
+    #[test]
+    fn create_issue_with_priority_and_labels() {
+        let tmp = tempfile::tempdir().unwrap();
+        let templates = tmp.path().join("_templates");
+        std::fs::create_dir_all(&templates).unwrap();
+        std::fs::write(
+            templates.join("standalone.md"),
+            "# [Title]\n\n**Status:** Planned\n\n## Objective\n\nDescribe.\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let id = provider
+            .create_issue(
+                "Fix crash on exit",
+                "bugs",
+                "standalone",
+                Some(&IssuePriority::High),
+                &["auto".to_string(), "backend".to_string()],
+            )
+            .unwrap();
+
+        let issue = provider.get(&id).unwrap().unwrap();
+        assert_eq!(issue.title, "Fix crash on exit");
+        assert_eq!(issue.priority, Some(IssuePriority::High));
+        assert_eq!(issue.labels, vec!["auto", "backend"]);
+    }
+
+    #[test]
+    fn create_issue_duplicate_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(tmp.path());
+        provider
+            .create_issue("My Feature", "features", "standalone", None, &[])
+            .unwrap();
+
+        let result = provider.create_issue("My Feature", "features", "standalone", None, &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_status_changes_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+        std::fs::write(
+            features.join("my-feature.md"),
+            "# My Feature\n\n**Status:** Planned\n\n## Objective\n\nDo stuff.\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        provider
+            .update_status("features/my-feature", &IssueStatus::InProgress)
+            .unwrap();
+
+        let issue = provider.get("features/my-feature").unwrap().unwrap();
+        assert_eq!(issue.status, IssueStatus::InProgress);
+    }
+
+    #[test]
+    fn update_status_to_complete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bugs = tmp.path().join("bugs");
+        std::fs::create_dir_all(&bugs).unwrap();
+        std::fs::write(
+            bugs.join("crash.md"),
+            "# Fix Crash\n\n**Status:** In Progress\n**Priority:** Urgent\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        provider
+            .update_status("bugs/crash", &IssueStatus::Complete)
+            .unwrap();
+
+        let issue = provider.get("bugs/crash").unwrap().unwrap();
+        assert_eq!(issue.status, IssueStatus::Complete);
+        // Priority should be unchanged
+        assert_eq!(issue.priority, Some(IssuePriority::Urgent));
+    }
+
+    #[test]
+    fn delete_issue_removes_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+        std::fs::write(features.join("test.md"), "# Test\n\n**Status:** Complete\n").unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        assert!(provider.get("features/test").unwrap().is_some());
+
+        provider.delete_issue("features/test").unwrap();
+        assert!(provider.get("features/test").unwrap().is_none());
+    }
+
+    #[test]
+    fn replace_field_in_content() {
+        let content = "# Title\n\n**Status:** Planned\n**Priority:** High\n\n## Body\n";
+        let updated = replace_field(content, "Status", "Complete");
+        assert!(updated.contains("**Status:** Complete"));
+        assert!(updated.contains("**Priority:** High"));
+    }
+
+    #[test]
+    fn replace_field_inserts_when_missing() {
+        let content = "# Title\n\n## Body\n";
+        let updated = replace_field(content, "Status", "Planned");
+        assert!(updated.contains("**Status:** Planned"));
     }
 }

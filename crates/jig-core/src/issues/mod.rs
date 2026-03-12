@@ -46,6 +46,23 @@ pub fn make_provider_with_ref(
     make_provider_inner(repo_root, jig_toml, global_config, Some(git_ref))
 }
 
+/// Create a file-based provider (for mutation operations).
+pub fn make_file_provider(repo_root: &Path, jig_toml: &JigToml) -> FileProvider {
+    let issues_dir = repo_root.join(&jig_toml.issues.directory);
+    FileProvider::new(&issues_dir)
+}
+
+/// Create a Linear provider (for mutation operations).
+pub fn make_linear_provider(
+    jig_toml: &JigToml,
+    global_config: &GlobalConfig,
+) -> Result<LinearProvider> {
+    let linear_config = jig_toml.issues.linear.as_ref().ok_or_else(|| {
+        Error::Custom("[issues.linear] config required when provider = \"linear\"".into())
+    })?;
+    LinearProvider::from_config(global_config, linear_config)
+}
+
 fn make_provider_inner(
     repo_root: &Path,
     jig_toml: &JigToml,
