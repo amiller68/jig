@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::error::Result;
 
-use super::types::{Issue, IssueFilter, IssueStatus};
+use super::types::{CreateIssueInput, CreatedIssue, Issue, IssueFilter, IssueStatus};
 
 /// Identifies the type of issue provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,14 @@ pub trait IssueProvider {
 
     /// Get a single issue by ID.
     fn get(&self, id: &str) -> Result<Option<Issue>>;
+
+    /// Create a new issue. Not all providers support creation.
+    fn create(&self, _input: &CreateIssueInput) -> Result<CreatedIssue> {
+        Err(crate::error::Error::Custom(format!(
+            "issue creation is not supported by the {} provider",
+            self.name()
+        )))
+    }
 
     /// List issues eligible for auto-spawning (status=Planned).
     ///

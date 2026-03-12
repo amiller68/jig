@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
-use super::types::{Issue, IssuePriority, IssueStatus};
+use super::types::{CreateIssueInput, CreatedIssue, Issue, IssuePriority, IssueStatus};
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 
@@ -62,6 +62,34 @@ query GetIssue($filter: IssueFilter, $first: Int) {
           relatedIssue { identifier }
         }
       }
+    }
+  }
+}
+"#;
+
+const GET_TEAM_QUERY: &str = r#"
+query GetTeam($filter: TeamFilter) {
+  teams(filter: $filter) {
+    nodes { id key }
+  }
+}
+"#;
+
+const LIST_LABELS_QUERY: &str = r#"
+query ListLabels($filter: IssueLabelFilter, $first: Int) {
+  issueLabels(filter: $filter, first: $first) {
+    nodes { id name }
+  }
+}
+"#;
+
+const CREATE_ISSUE_MUTATION: &str = r#"
+mutation CreateIssue($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      identifier
+      url
     }
   }
 }
@@ -146,6 +174,49 @@ struct RawRelation {
     #[serde(rename = "type")]
     relation_type: String,
     related_issue: RawChildRef,
+}
+
+// -- Additional response types for create/team/label queries ------------------
+
+#[derive(Debug, Deserialize)]
+struct TeamData {
+    teams: NodeList<RawTeamNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTeamNode {
+    id: String,
+    key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelData {
+    #[serde(rename = "issueLabels")]
+    issue_labels: NodeList<RawLabelNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLabelNode {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateIssueData {
+    #[serde(rename = "issueCreate")]
+    issue_create: RawIssueCreateResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawIssueCreateResult {
+    success: bool,
+    issue: Option<RawCreatedIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCreatedIssue {
+    identifier: String,
+    url: String,
 }
 
 // -- Request body -------------------------------------------------------------
@@ -353,5 +424,98 @@ impl LinearClient {
 
         let data: ListData = self.execute(&request)?;
         Ok(data.issues.nodes.into_iter().next().map(Issue::from))
+    }
+
+    /// Get the team UUID for a team key (e.g. "ENG").
+    pub fn get_team_id(&self, team_key: &str) -> Result<String> {
+        let request = GqlRequest {
+            query: GET_TEAM_QUERY,
+            variables: serde_json::json!({
+                "filter": { "key": { "eq": team_key } }
+            }),
+        };
+
+        let data: TeamData = self.execute(&request)?;
+        data.teams
+            .nodes
+            .into_iter()
+            .find(|t| t.key == team_key)
+            .map(|t| t.id)
+            .ok_or_else(|| Error::Linear(format!("team '{}' not found", team_key)))
+    }
+
+    /// List labels for a team, returning (id, name) pairs.
+    pub fn list_team_labels(&self, team_id: &str) -> Result<Vec<(String, String)>> {
+        let request = GqlRequest {
+            query: LIST_LABELS_QUERY,
+            variables: serde_json::json!({
+                "filter": { "team": { "id": { "eq": team_id } } },
+                "first": 200,
+            }),
+        };
+
+        let data: LabelData = self.execute(&request)?;
+        Ok(data
+            .issue_labels
+            .nodes
+            .into_iter()
+            .map(|l| (l.id, l.name))
+            .collect())
+    }
+
+    /// Create a new issue in the given team.
+    ///
+    /// Resolves label names to IDs automatically.
+    pub fn create_issue(&self, team_key: &str, input: &CreateIssueInput) -> Result<CreatedIssue> {
+        let team_id = self.get_team_id(team_key)?;
+
+        // Resolve label names to IDs
+        let label_ids = if input.labels.is_empty() {
+            vec![]
+        } else {
+            let all_labels = self.list_team_labels(&team_id)?;
+            let mut ids = Vec::new();
+            for name in &input.labels {
+                let id = all_labels
+                    .iter()
+                    .find(|(_, n)| n.eq_ignore_ascii_case(name))
+                    .map(|(id, _)| id.clone())
+                    .ok_or_else(|| {
+                        Error::Linear(format!("label '{}' not found in team '{}'", name, team_key))
+                    })?;
+                ids.push(id);
+            }
+            ids
+        };
+
+        let mut issue_input = serde_json::json!({
+            "teamId": team_id,
+            "title": input.title,
+            "description": input.body,
+        });
+
+        if !label_ids.is_empty() {
+            issue_input["labelIds"] = serde_json::json!(label_ids);
+        }
+
+        let request = GqlRequest {
+            query: CREATE_ISSUE_MUTATION,
+            variables: serde_json::json!({ "input": issue_input }),
+        };
+
+        let data: CreateIssueData = self.execute(&request)?;
+        if !data.issue_create.success {
+            return Err(Error::Linear("issue creation failed".into()));
+        }
+
+        let raw = data
+            .issue_create
+            .issue
+            .ok_or_else(|| Error::Linear("no issue returned after creation".into()))?;
+
+        Ok(CreatedIssue {
+            id: raw.identifier,
+            url: raw.url,
+        })
     }
 }

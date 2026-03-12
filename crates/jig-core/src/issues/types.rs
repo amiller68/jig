@@ -110,6 +110,24 @@ pub struct Issue {
     pub branch_name: Option<String>,
 }
 
+/// Input for creating a new issue.
+#[derive(Debug, Clone)]
+pub struct CreateIssueInput {
+    pub title: String,
+    pub body: String,
+    /// Label names to attach (will be resolved to IDs by the provider).
+    pub labels: Vec<String>,
+}
+
+/// Result of creating an issue.
+#[derive(Debug, Clone)]
+pub struct CreatedIssue {
+    /// Issue identifier (e.g. "ENG-456").
+    pub id: String,
+    /// URL to the issue in the provider's UI.
+    pub url: String,
+}
+
 /// Filter criteria for listing issues.
 #[derive(Debug, Default)]
 pub struct IssueFilter {

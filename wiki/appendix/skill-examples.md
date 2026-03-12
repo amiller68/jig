@@ -95,4 +95,4 @@ return 429 with Retry-After header, and add integration tests
 Claude will discover your team, create the issue with the appropriate labels, and confirm it appears in `jig issues`.
 
 {: .note }
-> **Future improvement:** This workflow will be simplified by a native `jig issues create` command that reads team, project, and label config directly from `jig.toml` — no MCP discovery step needed.
+> **Simpler alternative:** Use `jig issues create --title "..." --body "..."` to create Linear issues directly from the CLI. It reads team, project, and label config from `jig.toml` — no MCP discovery step needed. Add `--spawn` to immediately launch a worker for the new issue.

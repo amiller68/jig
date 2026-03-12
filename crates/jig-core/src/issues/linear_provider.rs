@@ -9,7 +9,7 @@ use crate::global::GlobalConfig;
 
 use super::linear_client::LinearClient;
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter};
+use super::types::{CreateIssueInput, CreatedIssue, Issue, IssueFilter};
 
 /// Issue provider backed by the Linear API.
 pub struct LinearProvider {
@@ -96,5 +96,9 @@ impl IssueProvider for LinearProvider {
 
     fn get(&self, id: &str) -> Result<Option<Issue>> {
         self.client.get_issue(id)
+    }
+
+    fn create(&self, input: &CreateIssueInput) -> Result<CreatedIssue> {
+        self.client.create_issue(&self.team, input)
     }
 }

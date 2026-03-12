@@ -1,23 +1,44 @@
-//! Issues command — discover and browse file-based issues.
+//! Issues command — discover, browse, and create issues.
 
 use std::fmt;
-use std::io::{self, Write};
+use std::io::{self, Read as _, Write};
 
-use clap::Args;
+use clap::{Args, Subcommand};
 use comfy_table::{Cell, Color};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 
 use jig_core::config::JigToml;
 use jig_core::global::GlobalConfig;
-use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
+use jig_core::issues::{
+    self, CreateIssueInput, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus,
+};
+use jig_core::worktree::Worktree;
+use jig_core::{config, terminal as jig_terminal};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
 
-/// Discover and browse issues
+/// Discover, browse, and create issues
 #[derive(Args, Debug, Clone)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct Issues {
+    #[command(subcommand)]
+    pub action: Option<IssuesAction>,
+
+    #[command(flatten)]
+    pub list: IssuesList,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum IssuesAction {
+    /// Create a new issue via the configured provider
+    Create(IssuesCreate),
+}
+
+/// Browse and filter issues (default)
+#[derive(Args, Debug, Clone)]
+pub struct IssuesList {
     /// Show a single issue by ID (e.g. "features/my-feature")
     #[arg(value_name = "ID")]
     pub id: Option<String>,
@@ -63,6 +84,26 @@ pub struct Issues {
     pub ids: bool,
 }
 
+/// Create a new issue
+#[derive(Args, Debug, Clone)]
+pub struct IssuesCreate {
+    /// Issue title
+    #[arg(short, long)]
+    pub title: String,
+
+    /// Issue body/description (reads from stdin if omitted)
+    #[arg(short, long)]
+    pub body: Option<String>,
+
+    /// Spawn a worker for the new issue after creation
+    #[arg(long)]
+    pub spawn: bool,
+
+    /// Auto-start Claude with full prompt (used with --spawn)
+    #[arg(long)]
+    pub auto: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IssuesError {
     #[error(transparent)]
@@ -79,9 +120,10 @@ pub enum IssuesOutput {
     Detail(CoreIssue),
     Interactive,
     Ids(Vec<String>),
+    Created(String),
 }
 
-impl Issues {
+impl IssuesList {
     fn filter(&self) -> IssueFilter {
         IssueFilter {
             status: self.status.as_deref().and_then(IssueStatus::from_str_loose),
@@ -142,13 +184,8 @@ impl Issues {
 
         Ok(IssuesOutput::Table(all_issues, spawn_labels))
     }
-}
 
-impl Op for Issues {
-    type Error = IssuesError;
-    type Output = IssuesOutput;
-
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run_list(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
         let repo = ctx.repo()?;
         let global_config = GlobalConfig::load().unwrap_or_default();
         let filter = self.filter();
@@ -175,7 +212,7 @@ impl Op for Issues {
         self.finish(all_issues, jig_toml.issues.spawn_labels.clone())
     }
 
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+    fn run_list_global(&self, ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
         let global_config = GlobalConfig::load().unwrap_or_default();
         let filter = self.filter();
 
@@ -210,6 +247,115 @@ impl Op for Issues {
     }
 }
 
+impl IssuesCreate {
+    fn run_create(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
+        let repo = ctx.repo()?;
+        let global_config = GlobalConfig::load().unwrap_or_default();
+        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+
+        // Read body from --body or stdin
+        let body = match &self.body {
+            Some(b) => b.clone(),
+            None => {
+                let mut buf = String::new();
+                io::stdin().read_to_string(&mut buf)?;
+                buf
+            }
+        };
+
+        // Build labels: always include spawn_labels (e.g. "jig-auto")
+        let labels = jig_toml.issues.spawn_labels.clone();
+
+        let input = CreateIssueInput {
+            title: self.title.clone(),
+            body,
+            labels,
+        };
+
+        let created = provider.create(&input)?;
+        let issue_id = created.id.clone();
+
+        ui::success(&format!(
+            "Created issue {} ({})",
+            ui::highlight(&created.id),
+            created.url,
+        ));
+
+        // Optionally spawn a worker for the new issue
+        if self.spawn {
+            if !jig_terminal::command_exists("tmux") {
+                return Err(jig_core::Error::MissingDependency("tmux".to_string()).into());
+            }
+            if !jig_terminal::command_exists("claude") {
+                return Err(jig_core::Error::MissingDependency("claude".to_string()).into());
+            }
+
+            // Derive worktree name from the issue ID (e.g. "ENG-456" -> "eng-456")
+            let wt_name = issue_id.to_lowercase();
+            let worktree_path = repo.worktrees_dir.join(&wt_name);
+
+            let wt = if !worktree_path.exists() {
+                let base = &repo.base_branch;
+                let copy_files = config::get_copy_files(&repo.repo_root)?;
+                let on_create_hook = config::get_on_create_hook(&repo.repo_root)?;
+
+                Worktree::create(
+                    &repo.repo_root,
+                    &repo.worktrees_dir,
+                    &repo.git_common_dir,
+                    &wt_name,
+                    None,
+                    base,
+                    on_create_hook.as_deref(),
+                    &copy_files,
+                    false,
+                )?
+            } else {
+                Worktree::open(&repo.repo_root, &repo.worktrees_dir, &wt_name)?
+            };
+
+            // Fetch the issue body for context
+            let issue_context = provider.get(&issue_id)?.map(|i| i.body);
+
+            let use_auto = if self.auto { true } else { jig_toml.spawn.auto };
+
+            wt.register(issue_context.as_deref(), Some(&issue_id))?;
+            wt.launch(issue_context.as_deref(), use_auto)?;
+
+            ui::success(&format!(
+                "Spawned worker '{}' for {}",
+                ui::highlight(&wt_name),
+                ui::highlight(&issue_id),
+            ));
+        }
+
+        // Print issue ID to stdout for scripting
+        Ok(IssuesOutput::Created(issue_id))
+    }
+}
+
+impl Op for Issues {
+    type Error = IssuesError;
+    type Output = IssuesOutput;
+
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+        match &self.action {
+            Some(IssuesAction::Create(create)) => create.run_create(ctx),
+            None => self.list.run_list(ctx),
+        }
+    }
+
+    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        match &self.action {
+            Some(IssuesAction::Create(_)) => Err(IssuesError::Usage(
+                "issues create does not support --global".to_string(),
+            )),
+            None => self.list.run_list_global(ctx),
+        }
+    }
+}
+
 impl fmt::Display for IssuesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -239,6 +385,7 @@ impl fmt::Display for IssuesOutput {
                 }
                 Ok(())
             }
+            Self::Created(id) => write!(f, "{}", id),
         }
     }
 }
