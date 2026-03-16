@@ -223,8 +223,8 @@ impl Worktree {
         // Create window in tmux
         session::create_window(&self.session_name, &self.name, &self.path)?;
 
-        // Build resume command (continues existing session instead of starting fresh)
-        let cmd = adapter::build_resume_command(agent_adapter, self.auto_spawned);
+        // Build resume command — always use auto flag (agent was already running with permissions)
+        let cmd = adapter::build_resume_command(agent_adapter, true);
 
         // Send command to window
         session::send_keys(&self.session_name, &self.name, &cmd)?;

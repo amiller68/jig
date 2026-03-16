@@ -439,6 +439,10 @@ pub struct LinearIssuesConfig {
     pub labels: Vec<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_issues_provider() -> String {
     "file".to_string()
 }
@@ -478,10 +482,10 @@ pub struct WorktreeConfig {
 /// The daemon fields (`auto_spawn`, `max_concurrent_workers`,
 /// `auto_spawn_interval`) are optional overrides of the global config
 /// defaults in `~/.config/jig/config.toml`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnConfig {
-    /// Auto-start Claude in spawned windows.
-    #[serde(default)]
+    /// Auto-start Claude in spawned windows (defaults to true).
+    #[serde(default = "default_true")]
     pub auto: bool,
     /// Override global auto_spawn setting for this repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -492,6 +496,17 @@ pub struct SpawnConfig {
     /// Override global auto_spawn_interval for this repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_spawn_interval: Option<u64>,
+}
+
+impl Default for SpawnConfig {
+    fn default() -> Self {
+        Self {
+            auto: true,
+            auto_spawn: None,
+            max_concurrent_workers: None,
+            auto_spawn_interval: None,
+        }
+    }
 }
 
 impl SpawnConfig {
