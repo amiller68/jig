@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN != '' && secrets.PAT_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -152,7 +152,7 @@ jobs:
       - name: Create or update PR
         if: steps.check.outputs.needs_release == 'true'
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN != '' && secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           PR_NUM=$(gh pr list --head release-automation --base main --json number --jq '.[0].number')
 
