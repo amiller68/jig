@@ -6,10 +6,7 @@ _wt
 .claude-spawn-prompt
 
 # jig state
-.jig/.state/
-
-# jig init --backup
-.backup/
+.jig/
 
 
 # Added by cargo
