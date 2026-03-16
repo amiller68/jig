@@ -176,13 +176,11 @@ impl<'a> RecoveryScanner<'a> {
     }
 
     /// Whether a worker in this status should be auto-recovered.
+    ///
+    /// Any non-terminal worker with a dead tmux window should be resumed —
+    /// including WaitingReview (needs to respond to feedback), WaitingInput,
+    /// and Idle (needs nudging back to work).
     fn should_recover(status: WorkerStatus) -> bool {
-        matches!(
-            status,
-            WorkerStatus::Spawned
-                | WorkerStatus::Running
-                | WorkerStatus::Stalled
-                | WorkerStatus::Initializing
-        )
+        !status.is_terminal()
     }
 }

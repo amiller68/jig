@@ -51,6 +51,9 @@ pub(crate) fn discover_workers(registry: &RepoRegistry) -> Vec<(String, String)>
                         if !sub.path().is_dir() || sub_name.starts_with('.') {
                             continue;
                         }
+                        if !has_git_worktree_marker(&sub.path()) {
+                            continue;
+                        }
                         let worker_name = format!("{}/{}", name, sub_name);
                         let key = format!("{}/{}", repo_name, worker_name);
                         if seen.insert(key) {

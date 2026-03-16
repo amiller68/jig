@@ -566,15 +566,9 @@ impl<'a> Daemon<'a> {
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
 
-        // Dead tmux detection: if worker is active but tmux window is gone, resume
-        // instead of sending nudges to a dead window.
-        if matches!(
-            new_state.status,
-            WorkerStatus::Spawned
-                | WorkerStatus::Running
-                | WorkerStatus::Stalled
-                | WorkerStatus::Initializing
-        ) {
+        // Dead tmux detection: if worker is non-terminal but tmux window is gone,
+        // resume instead of sending nudges to a dead window.
+        if !new_state.status.is_terminal() {
             let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
             let target = TmuxTarget::new(&session, worker_name);
             if !self.tmux.has_window(&target) {
