@@ -6,6 +6,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use crate::commits;
+use crate::config::JigToml;
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType};
 
@@ -50,9 +52,54 @@ pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Handle pre-commit hook: currently a no-op.
+/// Handle commit-msg hook: validate the commit message against conventional commits spec.
 ///
-/// Future: validate conventional commits if configured.
+/// Reads the commit message from the file path provided by git (the first argument).
+/// If a `[commits]` section exists in `jig.toml`, validates against those rules.
+/// Returns an error (blocking the commit) if validation fails.
+pub fn handle_commit_msg(repo_path: &Path, commit_msg_file: &str) -> Result<()> {
+    let message = std::fs::read_to_string(commit_msg_file)
+        .map_err(|e| crate::Error::Custom(format!("failed to read commit message file: {}", e)))?;
+
+    // Strip git comment lines (lines starting with #)
+    let cleaned: String = message
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return Ok(());
+    }
+
+    let config = JigToml::load(repo_path)?
+        .unwrap_or_default()
+        .commits
+        .to_validation_config();
+
+    match commits::parse_and_validate(cleaned, &config) {
+        Ok((_msg, errors)) => {
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                let msgs: Vec<String> = errors.iter().map(|e| format!("  {}", e)).collect();
+                Err(crate::Error::Custom(format!(
+                    "commit message does not follow conventional commits:\n{}\n\n  \
+                     Run `jig commit examples` for help.",
+                    msgs.join("\n"),
+                )))
+            }
+        }
+        Err(e) => Err(crate::Error::Custom(format!(
+            "commit message does not follow conventional commits:\n  {}\n\n  \
+             Run `jig commit examples` for help.",
+            e,
+        ))),
+    }
+}
+
+/// Handle pre-commit hook: currently a no-op.
 pub fn handle_pre_commit(_repo_path: &Path) -> Result<()> {
     Ok(())
 }
@@ -134,6 +181,43 @@ mod tests {
     fn pre_commit_is_noop() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(handle_pre_commit(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn commit_msg_valid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let msg_file = tmp.path().join("COMMIT_EDITMSG");
+        std::fs::write(&msg_file, "feat: add new feature\n").unwrap();
+        assert!(handle_commit_msg(tmp.path(), msg_file.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn commit_msg_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let msg_file = tmp.path().join("COMMIT_EDITMSG");
+        std::fs::write(&msg_file, "not a conventional commit\n").unwrap();
+        assert!(handle_commit_msg(tmp.path(), msg_file.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn commit_msg_strips_comments() {
+        let tmp = tempfile::tempdir().unwrap();
+        let msg_file = tmp.path().join("COMMIT_EDITMSG");
+        std::fs::write(
+            &msg_file,
+            "fix: resolve bug\n# This is a comment\n# Another comment\n",
+        )
+        .unwrap();
+        assert!(handle_commit_msg(tmp.path(), msg_file.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn commit_msg_empty_after_stripping_comments() {
+        let tmp = tempfile::tempdir().unwrap();
+        let msg_file = tmp.path().join("COMMIT_EDITMSG");
+        std::fs::write(&msg_file, "# All comments\n# Nothing else\n").unwrap();
+        // Empty message after stripping comments should pass (git will abort anyway)
+        assert!(handle_commit_msg(tmp.path(), msg_file.to_str().unwrap()).is_ok());
     }
 
     #[test]

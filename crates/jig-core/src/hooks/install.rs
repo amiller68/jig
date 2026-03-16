@@ -147,7 +147,7 @@ mod tests {
     fn init_fresh_repo() {
         let (_tmp, repo) = fake_repo();
         let result = init_hooks(&repo, false).unwrap();
-        assert_eq!(result.results.len(), 3);
+        assert_eq!(result.results.len(), MANAGED_HOOKS.len());
 
         for name in MANAGED_HOOKS {
             let path = repo.join(".git/hooks").join(name);

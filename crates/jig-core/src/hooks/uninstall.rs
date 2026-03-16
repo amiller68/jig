@@ -98,6 +98,7 @@ pub fn uninstall_hooks(repo_path: &Path, specific_hook: Option<&str>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::git::MANAGED_HOOKS;
     use crate::hooks::install::init_hooks;
 
     fn fake_repo() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -113,12 +114,12 @@ mod tests {
         init_hooks(&repo, false).unwrap();
 
         let result = uninstall_hooks(&repo, None).unwrap();
-        assert_eq!(result.outcomes.len(), 3);
+        assert_eq!(result.outcomes.len(), MANAGED_HOOKS.len());
 
         // Hooks should be gone
-        assert!(!repo.join(".git/hooks/post-commit").exists());
-        assert!(!repo.join(".git/hooks/post-merge").exists());
-        assert!(!repo.join(".git/hooks/pre-commit").exists());
+        for name in MANAGED_HOOKS {
+            assert!(!repo.join(".git/hooks").join(name).exists());
+        }
 
         // Registry should be gone
         assert!(!registry::registry_path(&repo).exists());
@@ -184,6 +185,6 @@ mod tests {
 
         // Uninstall should still work
         let result = uninstall_hooks(&repo, None).unwrap();
-        assert_eq!(result.outcomes.len(), 3);
+        assert_eq!(result.outcomes.len(), MANAGED_HOOKS.len());
     }
 }

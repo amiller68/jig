@@ -41,6 +41,15 @@ pub enum HooksCommands {
         #[arg(trailing_var_arg = true, hide = true)]
         _args: Vec<String>,
     },
+    /// Git commit-msg handler (called by hook wrapper)
+    #[command(hide = true)]
+    CommitMsg {
+        /// Path to the commit message file (passed by git as $1).
+        file: String,
+        /// Extra args passed by git (ignored).
+        #[arg(trailing_var_arg = true, hide = true)]
+        _args: Vec<String>,
+    },
     /// Git pre-commit handler (called by hook wrapper)
     #[command(hide = true)]
     PreCommit {
@@ -177,6 +186,11 @@ impl Op for Hooks {
             HooksCommands::PostMerge { .. } => {
                 let repo = ctx.repo()?;
                 jig_core::hooks::handle_post_merge(&repo.repo_root)?;
+                Ok(NoOutput)
+            }
+            HooksCommands::CommitMsg { file, .. } => {
+                let repo = ctx.repo()?;
+                jig_core::hooks::handle_commit_msg(&repo.repo_root, file)?;
                 Ok(NoOutput)
             }
             HooksCommands::PreCommit { .. } => {

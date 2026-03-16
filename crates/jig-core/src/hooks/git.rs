@@ -11,7 +11,24 @@ use crate::error::Result;
 pub const JIG_MANAGED_MARKER: &str = "# jig-managed: v1";
 
 /// All hook names that jig manages.
-pub const MANAGED_HOOKS: &[&str] = &["post-commit", "post-merge", "pre-commit"];
+pub const MANAGED_HOOKS: &[&str] = &["commit-msg", "post-commit", "post-merge", "pre-commit"];
+
+const COMMIT_MSG_TEMPLATE: &str = r#"#!/bin/bash
+# jig-managed: v1
+# This hook was installed by jig. To uninstall: jig hooks uninstall
+
+set -e
+
+# Validate commit message against conventional commits spec
+if command -v jig &> /dev/null; then
+    jig hooks commit-msg "$@"
+fi
+
+# Run user hook if it exists
+if [ -f .git/hooks/commit-msg.user ]; then
+    .git/hooks/commit-msg.user "$@"
+fi
+"#;
 
 const POST_COMMIT_TEMPLATE: &str = r#"#!/bin/bash
 # jig-managed: v1
@@ -64,6 +81,7 @@ fi
 /// Generate the wrapper script content for a given hook name.
 pub fn generate_hook(hook_name: &str) -> Result<String> {
     match hook_name {
+        "commit-msg" => Ok(COMMIT_MSG_TEMPLATE.to_string()),
         "post-commit" => Ok(POST_COMMIT_TEMPLATE.to_string()),
         "post-merge" => Ok(POST_MERGE_TEMPLATE.to_string()),
         "pre-commit" => Ok(PRE_COMMIT_TEMPLATE.to_string()),
@@ -84,6 +102,16 @@ pub fn is_jig_managed(content: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generate_commit_msg() {
+        let hook = generate_hook("commit-msg").unwrap();
+        assert!(hook.contains(JIG_MANAGED_MARKER));
+        assert!(hook.contains("jig hooks commit-msg"));
+        assert!(hook.contains(".git/hooks/commit-msg.user"));
+        // commit-msg should NOT have || true (failure blocks commit)
+        assert!(!hook.contains("jig hooks commit-msg \"$@\" || true"));
+    }
 
     #[test]
     fn generate_post_commit() {
