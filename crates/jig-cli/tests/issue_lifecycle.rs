@@ -1,3 +1,4 @@
+#![allow(deprecated)] // Command::cargo_bin is deprecated but used across tests
 //! Integration tests for issue lifecycle commands.
 
 use assert_cmd::Command;
