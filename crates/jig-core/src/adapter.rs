@@ -28,6 +28,8 @@ pub struct AgentAdapter {
     pub project_file: &'static str,
     /// Flag to run in auto mode
     pub auto_flag: &'static str,
+    /// Flag to resume/continue the last session
+    pub resume_flag: &'static str,
 }
 
 /// Claude Code adapter
@@ -40,6 +42,7 @@ pub const CLAUDE_CODE: AgentAdapter = AgentAdapter {
     settings_file: Some(".claude/settings.json"),
     project_file: "CLAUDE.md",
     auto_flag: "--dangerously-skip-permissions",
+    resume_flag: "-c",
 };
 
 // Future adapters:
@@ -51,6 +54,7 @@ pub const CLAUDE_CODE: AgentAdapter = AgentAdapter {
 //     settings_file: None,
 //     project_file: ".cursorrules",
 //     auto_flag: "",
+//     resume_flag: "",
 // };
 
 /// Get an adapter by name
@@ -75,6 +79,23 @@ pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>, auto: 
         // Escape single quotes in context
         let escaped = ctx.replace('\'', "'\\''");
         cmd = format!("{} '{}'", cmd, escaped);
+    }
+
+    if auto && !adapter.auto_flag.is_empty() {
+        cmd.push(' ');
+        cmd.push_str(adapter.auto_flag);
+    }
+
+    cmd
+}
+
+/// Build the resume command for an agent (continues last session instead of starting fresh)
+pub fn build_resume_command(adapter: &AgentAdapter, auto: bool) -> String {
+    let mut cmd = adapter.command.to_string();
+
+    if !adapter.resume_flag.is_empty() {
+        cmd.push(' ');
+        cmd.push_str(adapter.resume_flag);
     }
 
     if auto && !adapter.auto_flag.is_empty() {
@@ -137,5 +158,36 @@ mod tests {
         let adapter = &CLAUDE_CODE;
         let cmd = build_spawn_command(adapter, Some("it's a test"), false);
         assert_eq!(cmd, "claude 'it'\\''s a test'");
+    }
+
+    #[test]
+    fn test_build_resume_command_basic() {
+        let adapter = &CLAUDE_CODE;
+        let cmd = build_resume_command(adapter, false);
+        assert_eq!(cmd, "claude -c");
+    }
+
+    #[test]
+    fn test_build_resume_command_with_auto() {
+        let adapter = &CLAUDE_CODE;
+        let cmd = build_resume_command(adapter, true);
+        assert_eq!(cmd, "claude -c --dangerously-skip-permissions");
+    }
+
+    #[test]
+    fn test_build_resume_command_no_resume_flag() {
+        let adapter = AgentAdapter {
+            agent_type: AgentType::Claude,
+            name: "test",
+            command: "claude",
+            skills_dir: "",
+            skill_file: "",
+            settings_file: None,
+            project_file: "",
+            auto_flag: "",
+            resume_flag: "",
+        };
+        let cmd = build_resume_command(&adapter, false);
+        assert_eq!(cmd, "claude");
     }
 }
