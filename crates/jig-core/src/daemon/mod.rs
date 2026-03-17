@@ -552,6 +552,28 @@ impl<'a> Daemon<'a> {
         let events = event_log.read_all()?;
         let mut new_state = WorkerState::reduce(&events, &effective_health);
 
+        // Created workers (bare worktrees from `jig create`) are discovered for listing
+        // but the daemon takes no actions on them.
+        if new_state.status == WorkerStatus::Created {
+            let display = WorkerDisplayInfo {
+                repo: repo_name.to_string(),
+                name: worker_name.to_string(),
+                branch: branch_name,
+                tmux_status: TaskStatus::NoWindow,
+                worker_status: Some(new_state.status),
+                nudge_count: 0,
+                max_nudges: 0,
+                commits_ahead: 0,
+                is_dirty: false,
+                pr_url: None,
+                issue_ref: None,
+                pr_health: WorkerTickInfo::default(),
+                is_draft: false,
+                nudge_cooldown_remaining: None,
+            };
+            return Ok((0, 0, 0, WorkerTickInfo::default(), display, vec![], vec![]));
+        }
+
         let old_state = workers_state
             .get_worker(key)
             .map(entry_to_worker_state)
@@ -569,11 +591,8 @@ impl<'a> Daemon<'a> {
         // Dead tmux detection: if worker is non-terminal but tmux window is gone,
         // resume instead of sending nudges to a dead window.
         // Skip Initializing workers — they're still running on-create hooks.
-        // Skip workers with no events — they were created via `jig create` (bare worktree),
-        // not `jig spawn`, so they shouldn't be auto-resumed.
         if !new_state.status.is_terminal()
             && new_state.status != WorkerStatus::Initializing
-            && !events.is_empty()
         {
             let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
             let target = TmuxTarget::new(&session, worker_name);

@@ -24,7 +24,7 @@ pub struct WorkerState {
 impl Default for WorkerState {
     fn default() -> Self {
         Self {
-            status: WorkerStatus::Spawned,
+            status: WorkerStatus::Created,
             commit_count: 0,
             last_commit_at: None,
             pr_url: None,
@@ -86,6 +86,9 @@ impl WorkerState {
         }
 
         match event.event_type {
+            EventType::Create => {
+                self.status = WorkerStatus::Created;
+            }
             EventType::Initializing => {
                 self.status = WorkerStatus::Initializing;
                 if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
@@ -152,7 +155,7 @@ impl WorkerState {
         // Initializing: worker is running on-create hook — don't mark stalled
         if matches!(
             self.status,
-            WorkerStatus::WaitingReview | WorkerStatus::Initializing
+            WorkerStatus::WaitingReview | WorkerStatus::Initializing | WorkerStatus::Created
         ) {
             return;
         }
@@ -175,9 +178,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_events_returns_spawned() {
+    fn empty_events_returns_created() {
         let state = WorkerState::reduce(&[], &default_config());
-        assert_eq!(state.status, WorkerStatus::Spawned);
+        assert_eq!(state.status, WorkerStatus::Created);
         assert_eq!(state.commit_count, 0);
     }
 

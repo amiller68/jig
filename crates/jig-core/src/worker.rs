@@ -146,6 +146,8 @@ impl TaskContext {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerStatus {
+    /// Bare worktree created via `jig create` — not daemon-managed
+    Created,
     /// Worker is being created (worktree + on-create hook running)
     Initializing,
     /// Worker just spawned, no events yet
@@ -173,6 +175,7 @@ pub enum WorkerStatus {
 impl WorkerStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Created => "created",
             Self::Initializing => "initializing",
             Self::Spawned => "spawned",
             Self::Running => "running",
@@ -209,6 +212,7 @@ impl WorkerStatus {
     /// Migrate old status strings to new enum
     pub fn from_legacy(s: &str) -> Self {
         match s {
+            "created" => Self::Created,
             "spawned" => Self::Spawned,
             "running" => Self::Running,
             "idle" => Self::Idle,
@@ -292,6 +296,7 @@ mod tests {
     #[test]
     fn status_all_variants_roundtrip() {
         let variants = [
+            WorkerStatus::Created,
             WorkerStatus::Initializing,
             WorkerStatus::Spawned,
             WorkerStatus::Running,

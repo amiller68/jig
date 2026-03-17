@@ -3,6 +3,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
+use jig_core::events::{Event, EventLog, EventType};
 use jig_core::worktree::Worktree;
 use jig_core::{config, Error};
 
@@ -85,6 +86,20 @@ impl Op for Create {
         )?;
 
         let branch = self.branch.as_deref().unwrap_or(&self.name);
+
+        // Emit Create event so the daemon knows this is a bare worktree
+        let repo_name = repo
+            .repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+            let event = Event::new(EventType::Create).with_field("branch", branch);
+            if let Err(e) = event_log.append(&event) {
+                tracing::warn!(worker = %self.name, error = %e, "failed to emit Create event");
+            }
+        }
+
         ui::success(&format!(
             "Created worktree '{}' on branch '{}'",
             ui::highlight(&self.name),
