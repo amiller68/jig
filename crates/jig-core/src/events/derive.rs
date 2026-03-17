@@ -27,7 +27,10 @@ pub fn derive_status(events: &[Event], config: &HealthConfig) -> WorkerStatus {
 
     // Check silence threshold (but not for initializing workers — they may have long hooks)
     if last_event_age > config.silence_threshold_seconds as i64
-        && !matches!(last_event.event_type, EventType::Initializing | EventType::Create)
+        && !matches!(
+            last_event.event_type,
+            EventType::Initializing | EventType::Create
+        )
     {
         return WorkerStatus::Stalled;
     }

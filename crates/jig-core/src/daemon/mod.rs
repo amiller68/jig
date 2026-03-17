@@ -591,9 +591,7 @@ impl<'a> Daemon<'a> {
         // Dead tmux detection: if worker is non-terminal but tmux window is gone,
         // resume instead of sending nudges to a dead window.
         // Skip Initializing workers — they're still running on-create hooks.
-        if !new_state.status.is_terminal()
-            && new_state.status != WorkerStatus::Initializing
-        {
+        if !new_state.status.is_terminal() && new_state.status != WorkerStatus::Initializing {
             let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
             let target = TmuxTarget::new(&session, worker_name);
             if !self.tmux.has_window(&target) {
