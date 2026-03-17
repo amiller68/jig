@@ -7,6 +7,7 @@
 pub mod file_provider;
 pub mod linear_client;
 pub mod linear_provider;
+pub mod naming;
 pub mod provider;
 pub mod types;
 

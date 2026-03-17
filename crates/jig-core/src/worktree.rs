@@ -200,10 +200,7 @@ impl Worktree {
         Ok(())
     }
 
-    /// Resume this worktree: appends a Resume event and continues the existing agent session.
-    ///
-    /// Unlike `launch()`, this uses the agent's resume flag (e.g. `claude -c`) to continue
-    /// the last conversation instead of starting a fresh session.
+    /// Resume this worktree: appends a Resume event and relaunches with auto mode.
     pub fn resume(&self, context: Option<&str>) -> Result<()> {
         let repo_name = self.repo_name();
 
@@ -215,21 +212,7 @@ impl Worktree {
             let _ = event_log.append(&event);
         }
 
-        // Get adapter from config
-        let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
-        let agent_adapter =
-            adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
-
-        // Create window in tmux
-        session::create_window(&self.session_name, &self.name, &self.path)?;
-
-        // Build resume command — always use auto flag (agent was already running with permissions)
-        let cmd = adapter::build_resume_command(agent_adapter, true);
-
-        // Send command to window
-        session::send_keys(&self.session_name, &self.name, &cmd)?;
-
-        Ok(())
+        self.launch(context, true)
     }
 
     // ---------------------------------------------------------------

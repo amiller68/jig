@@ -180,7 +180,10 @@ impl<'a> RecoveryScanner<'a> {
     /// Any non-terminal worker with a dead tmux window should be resumed —
     /// including WaitingReview (needs to respond to feedback), WaitingInput,
     /// and Idle (needs nudging back to work).
+    ///
+    /// Initializing workers are excluded — they're still running their
+    /// on-create hook and haven't launched a tmux window yet.
     fn should_recover(status: WorkerStatus) -> bool {
-        !status.is_terminal()
+        !status.is_terminal() && status != WorkerStatus::Initializing
     }
 }

@@ -101,10 +101,15 @@ query Viewer {
 "#;
 
 /// Parse an identifier like "AUT-62" into (team_key, number).
-fn parse_identifier(identifier: &str) -> Option<(&str, i64)> {
-    let (team, num) = identifier.rsplit_once('-')?;
+///
+/// Also accepts branch-format strings like `feature/aut-5044-refactor-foo`
+/// by extracting the embedded Linear identifier first.
+fn parse_identifier(identifier: &str) -> Option<(String, i64)> {
+    // Try to extract a Linear identifier from branch-format input
+    let canonical = super::naming::extract_linear_identifier(identifier)?;
+    let (team, num) = canonical.rsplit_once('-')?;
     let n = num.parse::<i64>().ok()?;
-    Some((team, n))
+    Some((team.to_string(), n))
 }
 
 // -- Raw API response types ---------------------------------------------------

@@ -568,7 +568,8 @@ impl<'a> Daemon<'a> {
 
         // Dead tmux detection: if worker is non-terminal but tmux window is gone,
         // resume instead of sending nudges to a dead window.
-        if !new_state.status.is_terminal() {
+        // Skip Initializing workers — they're still running on-create hooks.
+        if !new_state.status.is_terminal() && new_state.status != WorkerStatus::Initializing {
             let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
             let target = TmuxTarget::new(&session, worker_name);
             if !self.tmux.has_window(&target) {
@@ -696,6 +697,10 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        // Resolve the repo's base branch for nudge templates
+        let repo_base_branch = Self::find_repo_path(registry, repo_name)
+            .and_then(|entry| RepoContext::resolve_base_branch_for(&entry.path).ok());
+
         let action_count = actions.len();
         let (nudge_count, notif_count, cleanup_prune_targets, tick_nudge_messages) = self
             .execute_actions(
@@ -709,6 +714,7 @@ impl<'a> Daemon<'a> {
                 registry,
                 &resolve,
                 Some(runtime),
+                repo_base_branch.as_deref(),
             );
 
         // Update workers.json
@@ -888,6 +894,9 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        let repo_base_branch = Self::find_repo_path(registry, repo_name)
+            .and_then(|entry| RepoContext::resolve_base_branch_for(&entry.path).ok());
+
         let action_count = actions.len();
         let (nudge_count, notif_count, _prune_targets, _nudge_messages) = self.execute_actions(
             &actions,
@@ -900,6 +909,7 @@ impl<'a> Daemon<'a> {
             registry,
             &resolve,
             None,
+            repo_base_branch.as_deref(),
         );
 
         workers_state.set_worker(
@@ -938,6 +948,7 @@ impl<'a> Daemon<'a> {
         registry: &RepoRegistry,
         resolve: &F,
         runtime: Option<&DaemonRuntime>,
+        base_branch: Option<&str>,
     ) -> (
         usize,
         usize,
@@ -983,7 +994,8 @@ impl<'a> Daemon<'a> {
                         let resolved = resolve(nudge_type.count_key());
 
                         // Render template on the tick thread (TemplateEngine has lifetime)
-                        let ctx = build_nudge_context(*nudge_type, new_state, resolved);
+                        let ctx =
+                            build_nudge_context(*nudge_type, new_state, resolved, base_branch);
                         let message = match self.engine.render(nudge_type.template_name(), &ctx) {
                             Ok(msg) => msg,
                             Err(e) => {

@@ -93,7 +93,7 @@ Bad commits:
 
 Fix with interactive rebase:
 
-1. git rebase -i origin/main
+1. git rebase -i {{base_branch}}
 2. Change 'pick' to 'reword' for each bad commit
 3. Update message to: <type>(<scope>): <description>
    Types: feat|fix|docs|style|refactor|perf|test|chore|ci

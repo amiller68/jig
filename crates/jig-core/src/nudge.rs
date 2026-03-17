@@ -125,16 +125,22 @@ where
 }
 
 /// Build the template context for a nudge.
+///
+/// `base_branch` is used for conflict and bad-commits nudges to reference
+/// the correct upstream branch (defaults to `origin/main` if `None`).
 pub fn build_nudge_context(
     nudge_type: NudgeType,
     state: &WorkerState,
     resolved: ResolvedNudgeConfig,
+    base_branch: Option<&str>,
 ) -> TemplateContext {
     let count = state
         .nudge_counts
         .get(nudge_type.count_key())
         .copied()
         .unwrap_or(0);
+
+    let base = base_branch.unwrap_or(crate::config::DEFAULT_BASE_BRANCH);
 
     let mut ctx = TemplateContext::new();
     ctx.set_num("nudge_count", count + 1);
@@ -149,10 +155,10 @@ pub fn build_nudge_context(
             // CI failures would be populated by the caller
         }
         NudgeType::Conflict => {
-            ctx.set("base_branch", "origin/main");
+            ctx.set("base_branch", base);
         }
         NudgeType::BadCommits => {
-            // bad_commits details populated by caller
+            ctx.set("base_branch", base);
         }
         _ => {}
     }
@@ -170,7 +176,7 @@ pub fn execute_nudge(
     tmux: &TmuxClient,
     event_log: &EventLog,
 ) -> Result<()> {
-    let ctx = build_nudge_context(nudge_type, state, resolved);
+    let ctx = build_nudge_context(nudge_type, state, resolved, None);
     let message = engine.render(nudge_type.template_name(), &ctx)?;
 
     tracing::info!(
@@ -338,7 +344,7 @@ mod tests {
             commit_count: 3,
             ..Default::default()
         };
-        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3), None);
         assert_eq!(ctx.vars["has_changes"], serde_json::json!(true));
         assert_eq!(ctx.vars["nudge_count"], serde_json::json!(1));
         assert_eq!(ctx.vars["max_nudges"], serde_json::json!(3));
@@ -348,7 +354,7 @@ mod tests {
     #[test]
     fn context_idle_no_commits() {
         let state = WorkerState::default();
-        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3), None);
         assert_eq!(ctx.vars["has_changes"], serde_json::json!(false));
     }
 
@@ -361,7 +367,7 @@ mod tests {
             nudge_counts: counts,
             ..Default::default()
         };
-        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3), None);
         assert_eq!(ctx.vars["nudge_count"], serde_json::json!(3));
         assert_eq!(ctx.vars["is_final_nudge"], serde_json::json!(true));
     }
@@ -383,7 +389,7 @@ mod tests {
             commit_count: 1,
             ..Default::default()
         };
-        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3));
+        let ctx = build_nudge_context(NudgeType::Idle, &state, resolved(3), None);
         let msg = engine.render("nudge-idle", &ctx).unwrap();
         assert!(msg.contains("STATUS CHECK"));
         assert!(msg.contains("nudge 1/3"));
@@ -394,7 +400,7 @@ mod tests {
     fn render_stuck_nudge_message() {
         let engine = TemplateEngine::new();
         let state = WorkerState::default();
-        let ctx = build_nudge_context(NudgeType::Stuck, &state, resolved(3));
+        let ctx = build_nudge_context(NudgeType::Stuck, &state, resolved(3), None);
         let msg = engine.render("nudge-stuck", &ctx).unwrap();
         assert!(msg.contains("STUCK PROMPT"));
         assert!(msg.contains("Auto-approving"));
