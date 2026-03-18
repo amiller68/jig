@@ -7,7 +7,7 @@ _wt
 
 # jig state
 .jig/
-
+jig.local.toml
 
 # Added by cargo
 

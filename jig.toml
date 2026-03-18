@@ -3,11 +3,3 @@
 base = "origin/main"
 # on_create = "cargo build"  # Command to run after worktree creation
 # copy = [".env"]            # Gitignored files to copy to new worktrees
-
-# Agent configuration
-[agent]
-type = "claude"
-
-# Issues configuration
-[issues]
-auto_spawn_labels = ["auto"]

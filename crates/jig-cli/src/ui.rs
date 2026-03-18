@@ -142,6 +142,15 @@ pub fn dim(s: &str) -> String {
     }
 }
 
+/// Source attribution text (green).
+pub fn source(s: &str) -> String {
+    if is_plain() {
+        s.to_string()
+    } else {
+        s.green().to_string()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Table helpers
 // ---------------------------------------------------------------------------

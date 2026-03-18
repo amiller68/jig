@@ -95,97 +95,141 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     let repo = ctx.repo()?;
     let display = ConfigDisplay::load(&repo.repo_root)?;
 
+    /// Format a source attribution tag.
+    fn src(s: &str) -> String {
+        ui::source(&format!("({})", s))
+    }
+
+    // -- Configuration --
     ui::header("Configuration");
     eprintln!();
     eprintln!(
         "  {} {}",
-        ui::dim("Effective base branch:"),
+        ui::bold("Base branch:"),
         ui::highlight(&display.effective_base)
     );
-
     if let Some(ref toml) = display.toml_base {
-        eprintln!("    {} {}", ui::dim("(jig.toml)"), toml);
+        eprintln!("    {} {}", src(&display.worktree_source), toml);
     }
     if let Some(ref repo_base) = display.repo_base {
-        eprintln!("    {} {}", ui::dim("(global config)"), repo_base);
+        eprintln!("    {} {}", src("global config"), repo_base);
     }
     if let Some(ref global) = display.global_base {
-        eprintln!("    {} {}", ui::dim("(global default)"), global);
+        eprintln!("    {} {}", src("global default"), global);
+    }
+
+    if display.has_local_overlay {
+        eprintln!(
+            "  {} {}",
+            ui::bold("Local overlay:"),
+            ui::highlight(jig_core::config::JIG_LOCAL_TOML)
+        );
     }
 
     if let Some(ref hook) = display.effective_on_create {
-        eprintln!();
-        eprintln!("  {} {}", ui::dim("On-create hook:"), ui::highlight(hook));
-        if display.toml_on_create.is_some() {
-            eprintln!("    {} jig.toml", ui::dim("(from)"));
-        } else {
-            eprintln!("    {} global config", ui::dim("(from)"));
-        }
+        eprintln!(
+            "  {} {} {}",
+            ui::bold("On-create hook:"),
+            ui::highlight(hook),
+            if display.toml_on_create.is_some() {
+                src(&display.worktree_source)
+            } else {
+                src("global config")
+            }
+        );
     }
 
+    // -- Agent --
     eprintln!();
-    ui::header("Auto-spawn");
+    ui::header("Agent");
     eprintln!();
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Type:"),
+        ui::highlight(&display.agent_type),
+        src(&display.agent_source)
+    );
+
+    // -- Issues --
+    eprintln!();
+    ui::header("Issues");
+    eprintln!();
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Provider:"),
+        ui::highlight(&display.issues_provider),
+        src(&display.issues_source)
+    );
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Directory:"),
+        ui::highlight(&display.issues_directory),
+        src(&display.issues_source)
+    );
     match &display.auto_spawn_labels {
         None => {
-            eprintln!(
-                "  {} {}",
-                ui::dim("Auto-spawn labels:"),
-                ui::warn_text("disabled (not configured)")
-            );
+            eprintln!("  {} {}", ui::dim("Auto-spawn:"), ui::warn_text("disabled"));
         }
         Some(labels) if labels.is_empty() => {
             eprintln!(
-                "  {} {}",
-                ui::dim("Auto-spawn labels:"),
-                ui::highlight("all issues")
+                "  {} {} {}",
+                ui::dim("Auto-spawn:"),
+                ui::highlight("all issues"),
+                src(&display.issues_source)
             );
         }
         Some(labels) => {
             eprintln!(
-                "  {} {}",
-                ui::dim("Auto-spawn labels:"),
-                ui::highlight(&labels.join(", "))
+                "  {} {} {}",
+                ui::dim("Auto-spawn:"),
+                ui::highlight(&labels.join(", ")),
+                src(&display.issues_source)
             );
         }
     }
+
+    // -- Spawn --
+    eprintln!();
+    ui::header("Spawn");
+    eprintln!();
     eprintln!(
         "  {} {} {}",
         ui::dim("Max workers:"),
         ui::highlight(&display.max_concurrent_workers.to_string()),
-        ui::dim(&format!("({})", display.max_concurrent_workers_source))
+        src(&display.max_concurrent_workers_source)
     );
     eprintln!(
         "  {} {} {}",
         ui::dim("Poll interval:"),
         ui::highlight(&format!("{}s", display.auto_spawn_interval)),
-        ui::dim(&format!("({})", display.auto_spawn_interval_source))
+        src(&display.auto_spawn_interval_source)
     );
 
+    // -- Health --
     eprintln!();
-    ui::header("Nudge Health");
+    ui::header("Health");
     eprintln!();
     eprintln!(
         "  {} {} {}",
         ui::dim("Silence threshold:"),
         ui::highlight(&format!("{}s", display.silence_threshold_seconds)),
-        ui::dim(&format!("({})", display.silence_threshold_source))
+        src(&display.silence_threshold_source)
     );
     eprintln!(
         "  {} {} {}",
-        ui::dim("Default max nudges:"),
+        ui::dim("Max nudges:"),
         ui::highlight(&display.max_nudges.to_string()),
-        ui::dim(&format!("({})", display.max_nudges_source))
+        src(&display.max_nudges_source)
     );
     eprintln!();
-    eprintln!("  {}", ui::dim("Per-type config:"));
+    eprintln!("  {}", ui::dim("Per-type:"));
     for (name, resolved, source) in &display.nudge_type_configs {
         eprintln!(
             "    {} max={} cooldown={}s {}",
             ui::highlight(name),
-            resolved.max,
-            resolved.cooldown_seconds,
-            ui::dim(&format!("({})", source))
+            ui::bold(&resolved.max.to_string()),
+            ui::bold(&resolved.cooldown_seconds.to_string()),
+            src(source)
         );
     }
 

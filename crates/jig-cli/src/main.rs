@@ -7,6 +7,8 @@ mod cli;
 mod commands;
 mod ui;
 
+use std::io::IsTerminal;
+
 use clap::Parser;
 
 use cli::Cli;
@@ -32,6 +34,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set global plain mode before any output
     ui::set_plain(cli.plain);
+
+    // The `colored` crate checks stdout for TTY detection, but all jig
+    // output goes to stderr. Override colorization based on stderr instead.
+    if !cli.plain && std::io::stderr().is_terminal() {
+        colored::control::set_override(true);
+    }
 
     // Best-effort global directory setup
     let _ = jig_core::ensure_global_dirs();

@@ -18,6 +18,10 @@ pub const JIG_DIR: &str = ".jig";
 pub const STATE_DIR: &str = ".state";
 /// State file name
 pub const STATE_FILE: &str = "state.json";
+/// Repo config file name
+pub const JIG_TOML: &str = "jig.toml";
+/// Local (gitignored) config overlay file name
+pub const JIG_LOCAL_TOML: &str = "jig.local.toml";
 
 /// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +315,15 @@ pub struct JigToml {
     pub health: RepoHealthConfig,
     #[serde(default)]
     pub commits: ConventionalCommitsConfig,
+    /// Whether a jig.local.toml overlay was merged into this config.
+    #[serde(skip)]
+    pub has_local_overlay: bool,
+    /// Raw top-level keys present in jig.toml (for provenance attribution).
+    #[serde(skip)]
+    pub base_keys: Vec<String>,
+    /// Raw top-level keys present in jig.local.toml (for provenance attribution).
+    #[serde(skip)]
+    pub local_keys: Vec<String>,
 }
 
 /// Per-repo health/nudge configuration in jig.toml `[health]`.
@@ -529,30 +542,87 @@ impl Default for AgentConfig {
 }
 
 impl JigToml {
-    /// Read jig.toml from a repository (falls back to jig.toml for compatibility)
+    /// Read jig.toml from a repository, with optional jig.local.toml deep-merge overlay.
+    ///
+    /// If `jig.local.toml` exists alongside `jig.toml`, it is deep-merged on top:
+    /// tables merge recursively, scalars and arrays from the local file win.
+    /// `jig.local.toml` alone (without `jig.toml`) returns `None`.
     pub fn load(repo_root: &Path) -> Result<Option<Self>> {
-        // Try jig.toml first
-        let toml_path = repo_root.join("jig.toml");
-        if toml_path.exists() {
-            let content = fs::read_to_string(&toml_path)?;
-            let config: JigToml = toml::from_str(&content)?;
-            return Ok(Some(config));
+        let toml_path = repo_root.join(JIG_TOML);
+        if !toml_path.exists() {
+            return Ok(None);
         }
 
-        // Fall back to jig.toml for backward compatibility
-        let legacy_path = repo_root.join("jig.toml");
-        if legacy_path.exists() {
-            let content = fs::read_to_string(&legacy_path)?;
-            let config: JigToml = toml::from_str(&content)?;
-            return Ok(Some(config));
-        }
+        let content = fs::read_to_string(&toml_path)?;
+        let local_path = repo_root.join(JIG_LOCAL_TOML);
 
-        Ok(None)
+        let base_value: toml::Value = toml::from_str(&content)?;
+        let base_keys: Vec<String> = base_value
+            .as_table()
+            .map(|t| t.keys().cloned().collect())
+            .unwrap_or_default();
+
+        if local_path.exists() {
+            let local_content = fs::read_to_string(&local_path)?;
+            let local_value: toml::Value = toml::from_str(&local_content)?;
+            let local_keys: Vec<String> = local_value
+                .as_table()
+                .map(|t| t.keys().cloned().collect())
+                .unwrap_or_default();
+            let mut merged = base_value;
+            deep_merge(&mut merged, local_value);
+            let mut config: JigToml = merged.try_into()?;
+            config.has_local_overlay = true;
+            config.base_keys = base_keys;
+            config.local_keys = local_keys;
+            Ok(Some(config))
+        } else {
+            let mut config: JigToml = base_value.try_into()?;
+            config.base_keys = base_keys;
+            Ok(Some(config))
+        }
     }
 
-    /// Check if jig.toml (or jig.toml) exists
+    /// Return a source attribution label for a top-level TOML section key.
+    ///
+    /// - Present in local only → `jig.local.toml`
+    /// - Present in both → `jig.toml + jig.local.toml`
+    /// - Present in base only → `jig.toml`
+    /// - Present in neither (serde default) → `default`
+    pub fn source_label(&self, section: &str) -> String {
+        let in_base = self.base_keys.iter().any(|k| k == section);
+        let in_local = self.local_keys.iter().any(|k| k == section);
+        match (in_base, in_local) {
+            (true, true) => format!("{} + {}", JIG_TOML, JIG_LOCAL_TOML),
+            (true, false) => JIG_TOML.to_string(),
+            (false, true) => JIG_LOCAL_TOML.to_string(),
+            (false, false) => "default".to_string(),
+        }
+    }
+
+    /// Check if jig.toml exists (jig.local.toml alone is not sufficient)
     pub fn exists(repo_root: &Path) -> bool {
-        repo_root.join("jig.toml").exists() || repo_root.join("jig.toml").exists()
+        repo_root.join(JIG_TOML).exists()
+    }
+}
+
+/// Deep-merge `overlay` into `base`. Tables merge recursively; scalars and arrays
+/// from the overlay replace the base value.
+fn deep_merge(base: &mut toml::Value, overlay: toml::Value) {
+    match (base.is_table(), overlay) {
+        (true, toml::Value::Table(overlay_table)) => {
+            let base_table = base.as_table_mut().unwrap();
+            for (key, value) in overlay_table {
+                if let Some(existing) = base_table.get_mut(&key) {
+                    deep_merge(existing, value);
+                } else {
+                    base_table.insert(key, value);
+                }
+            }
+        }
+        (_, overlay) => {
+            *base = overlay;
+        }
     }
 }
 
@@ -587,11 +657,19 @@ pub fn run_on_create_hook_for_repo(repo_root: &Path, worktree_path: &Path) -> Re
 pub struct ConfigDisplay {
     pub effective_base: String,
     pub toml_base: Option<String>,
+    pub worktree_source: String,
     pub repo_base: Option<String>,
     pub global_base: Option<String>,
     pub effective_on_create: Option<String>,
     pub toml_on_create: Option<String>,
     pub global_on_create: Option<String>,
+    // Agent config
+    pub agent_type: String,
+    pub agent_source: String,
+    // Issues config
+    pub issues_provider: String,
+    pub issues_directory: String,
+    pub issues_source: String,
     // Auto-spawn fields
     pub auto_spawn_labels: Option<Vec<String>>,
     pub max_concurrent_workers: usize,
@@ -605,6 +683,8 @@ pub struct ConfigDisplay {
     pub max_nudges_source: String,
     /// Per-nudge-type resolved configs: (type_name, resolved, source).
     pub nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)>,
+    /// Whether jig.local.toml was merged into the config.
+    pub has_local_overlay: bool,
 }
 
 impl ConfigDisplay {
@@ -612,6 +692,12 @@ impl ConfigDisplay {
         let config = Config::load()?;
         let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
         let global_config = crate::global::GlobalConfig::load().unwrap_or_default();
+        let has_local_overlay = jig_toml.has_local_overlay;
+
+        // Compute per-section source labels before moving fields out
+        let worktree_source = jig_toml.source_label("worktree");
+        let agent_source = jig_toml.source_label("agent");
+        let issues_source = jig_toml.source_label("issues");
 
         // Get effective base branch (jig.toml > repo config > global > default)
         let effective_base = jig_toml
@@ -633,11 +719,12 @@ impl ConfigDisplay {
         let global_spawn = &global_config.spawn;
         let spawn = &jig_toml.spawn;
 
+        let spawn_source = jig_toml.source_label("spawn");
         let (max_concurrent_workers, max_concurrent_workers_source) =
             if spawn.max_concurrent_workers.is_some() {
                 (
                     spawn.resolve_max_concurrent_workers(global_spawn),
-                    "jig.toml".to_string(),
+                    spawn_source.clone(),
                 )
             } else {
                 (
@@ -650,7 +737,7 @@ impl ConfigDisplay {
             if spawn.auto_spawn_interval.is_some() {
                 (
                     spawn.resolve_auto_spawn_interval(global_spawn),
-                    "jig.toml".to_string(),
+                    spawn_source,
                 )
             } else {
                 (
@@ -662,12 +749,13 @@ impl ConfigDisplay {
         // Resolve nudge health config
         let health = &jig_toml.health;
         let global_health = &global_config.health;
+        let health_source = jig_toml.source_label("health");
 
         let (silence_threshold_seconds, silence_threshold_source) =
             if health.silence_threshold_seconds.is_some() {
                 (
                     health.resolve_silence_threshold(global_health),
-                    "jig.toml".to_string(),
+                    health_source.clone(),
                 )
             } else {
                 (
@@ -679,7 +767,7 @@ impl ConfigDisplay {
         let (max_nudges, max_nudges_source) = if health.max_nudges.is_some() {
             (
                 health.resolve_max_nudges(global_health),
-                "jig.toml".to_string(),
+                health_source.clone(),
             )
         } else {
             (global_health.max_nudges, "global config".to_string())
@@ -701,10 +789,10 @@ impl ConfigDisplay {
                     _ => &None,
                 };
                 let source = if type_cfg.is_some() {
-                    "jig.toml [health.nudge]".to_string()
+                    format!("{} [health.nudge]", health_source)
                 } else if health.max_nudges.is_some() || health.silence_threshold_seconds.is_some()
                 {
-                    "jig.toml [health]".to_string()
+                    format!("{} [health]", health_source)
                 } else {
                     "global config".to_string()
                 };
@@ -715,11 +803,17 @@ impl ConfigDisplay {
         Ok(Self {
             effective_base,
             toml_base: jig_toml.worktree.base,
+            worktree_source,
             repo_base: config.get_repo_base_branch(repo_path),
             global_base: config.get_global_base_branch(),
             effective_on_create,
             toml_on_create: jig_toml.worktree.on_create,
             global_on_create: config.get_on_create_hook(repo_path),
+            agent_type: jig_toml.agent.agent_type,
+            agent_source,
+            issues_provider: jig_toml.issues.provider,
+            issues_directory: jig_toml.issues.directory,
+            issues_source,
             auto_spawn_labels: jig_toml.issues.auto_spawn_labels,
             max_concurrent_workers,
             max_concurrent_workers_source,
@@ -730,6 +824,7 @@ impl ConfigDisplay {
             max_nudges,
             max_nudges_source,
             nudge_type_configs,
+            has_local_overlay,
         })
     }
 }
@@ -998,5 +1093,197 @@ base = "origin/main"
         let review = repo_health.resolve_for_nudge_type("review", &global);
         assert_eq!(review.max, 10);
         assert_eq!(review.cooldown_seconds, 300); // from global silence_threshold
+    }
+
+    // -- deep_merge + local overlay tests --
+
+    #[test]
+    fn test_deep_merge_tables_merge_recursively() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+            [health]
+            max_nudges = 3
+            "#,
+        )
+        .unwrap();
+        let overlay: toml::Value = toml::from_str(
+            r#"
+            [health]
+            silence_threshold_seconds = 600
+            "#,
+        )
+        .unwrap();
+        deep_merge(&mut base, overlay);
+        let tbl = base.as_table().unwrap();
+        let health = tbl["health"].as_table().unwrap();
+        assert_eq!(health["max_nudges"].as_integer(), Some(3));
+        assert_eq!(health["silence_threshold_seconds"].as_integer(), Some(600));
+    }
+
+    #[test]
+    fn test_deep_merge_scalar_wins() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+            [agent]
+            type = "claude"
+            "#,
+        )
+        .unwrap();
+        let overlay: toml::Value = toml::from_str(
+            r#"
+            [agent]
+            type = "cursor"
+            "#,
+        )
+        .unwrap();
+        deep_merge(&mut base, overlay);
+        let tbl = base.as_table().unwrap();
+        assert_eq!(tbl["agent"]["type"].as_str(), Some("cursor"));
+    }
+
+    #[test]
+    fn test_deep_merge_array_replaces() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+            [worktree]
+            copy = [".env"]
+            "#,
+        )
+        .unwrap();
+        let overlay: toml::Value = toml::from_str(
+            r#"
+            [worktree]
+            copy = [".env", ".env.local"]
+            "#,
+        )
+        .unwrap();
+        deep_merge(&mut base, overlay);
+        let arr = base["worktree"]["copy"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn test_deep_merge_adds_new_keys() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+            [worktree]
+            base = "origin/main"
+            "#,
+        )
+        .unwrap();
+        let overlay: toml::Value = toml::from_str(
+            r#"
+            [issues]
+            auto_spawn_labels = []
+            "#,
+        )
+        .unwrap();
+        deep_merge(&mut base, overlay);
+        let tbl = base.as_table().unwrap();
+        assert!(tbl.contains_key("worktree"));
+        assert!(tbl.contains_key("issues"));
+    }
+
+    #[test]
+    fn test_load_with_local_overlay() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(JIG_TOML),
+            r#"
+[worktree]
+base = "origin/main"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(JIG_LOCAL_TOML),
+            r#"
+[issues]
+auto_spawn_labels = []
+"#,
+        )
+        .unwrap();
+        let config = JigToml::load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.worktree.base.as_deref(), Some("origin/main"));
+        assert_eq!(config.issues.auto_spawn_labels, Some(vec![]));
+        assert!(config.has_local_overlay);
+    }
+
+    #[test]
+    fn test_local_overlay_scalar_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(JIG_TOML),
+            r#"
+[agent]
+type = "claude"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(JIG_LOCAL_TOML),
+            r#"
+[agent]
+type = "cursor"
+"#,
+        )
+        .unwrap();
+        let config = JigToml::load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.agent.agent_type, "cursor");
+    }
+
+    #[test]
+    fn test_local_overlay_deep_merge_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(JIG_TOML),
+            r#"
+[health]
+max_nudges = 3
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(JIG_LOCAL_TOML),
+            r#"
+[health]
+silence_threshold_seconds = 600
+"#,
+        )
+        .unwrap();
+        let config = JigToml::load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.health.max_nudges, Some(3));
+        assert_eq!(config.health.silence_threshold_seconds, Some(600));
+    }
+
+    #[test]
+    fn test_no_local_overlay() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(JIG_TOML),
+            r#"
+[worktree]
+base = "origin/main"
+"#,
+        )
+        .unwrap();
+        let config = JigToml::load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.worktree.base.as_deref(), Some("origin/main"));
+        assert!(!config.has_local_overlay);
+    }
+
+    #[test]
+    fn test_local_only_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(JIG_LOCAL_TOML),
+            r#"
+[issues]
+auto_spawn_labels = []
+"#,
+        )
+        .unwrap();
+        let result = JigToml::load(dir.path()).unwrap();
+        assert!(result.is_none());
     }
 }

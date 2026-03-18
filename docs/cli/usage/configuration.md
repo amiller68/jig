@@ -29,6 +29,27 @@ projects = ["Backend"]         # Optional project filter
 
 ---
 
+## jig.local.toml (Machine-Specific Overrides)
+
+For settings that shouldn't be committed to version control (like `auto_spawn_labels` on a dev machine), create `jig.local.toml` alongside `jig.toml`:
+
+```toml
+# jig.local.toml — gitignored, not shared with team
+[issues]
+auto_spawn_labels = []    # enable auto-spawn on this machine only
+```
+
+`jig.local.toml` is deep-merged on top of `jig.toml`:
+- **Tables** merge recursively — keys from both files are combined.
+- **Scalars and arrays** from `jig.local.toml` replace the base value.
+- `jig.local.toml` alone (without `jig.toml`) has no effect — the base file must exist.
+
+`jig init` automatically adds `jig.local.toml` to `.gitignore`.
+
+When `jig.local.toml` is active, `jig config` shows source attribution as `(jig.toml + jig.local.toml)`.
+
+---
+
 ## Global Config
 
 You can also configure settings globally via `jig config`. This is stored in `~/.config/jig/config`.

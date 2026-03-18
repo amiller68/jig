@@ -4,6 +4,7 @@ use clap::Args;
 use std::fs;
 use std::path::Path;
 
+use jig_core::config::JIG_LOCAL_TOML;
 use jig_core::git::Repo;
 use jig_core::{adapter, session, terminal, Error, JigToml};
 
@@ -192,6 +193,9 @@ type = "{}"
             self.force,
             backup_dir_opt,
         )?;
+
+        // Ensure jig.local.toml is in .gitignore
+        ensure_local_toml_ignored(&repo_root)?;
 
         // Write generic docs files
         write_file(
@@ -543,5 +547,28 @@ fn write_file(
 
     fs::write(&path, content)?;
     eprintln!("  {} Created {}", ui::SYM_OK, relative_path);
+    Ok(())
+}
+
+/// Append `jig.local.toml` to `.gitignore` if not already present.
+fn ensure_local_toml_ignored(repo_root: &Path) -> Result<(), InitError> {
+    let gitignore_path = repo_root.join(".gitignore");
+
+    if gitignore_path.exists() {
+        let content = fs::read_to_string(&gitignore_path)?;
+        if content.lines().any(|line| line.trim() == JIG_LOCAL_TOML) {
+            return Ok(());
+        }
+        // Ensure we start on a new line
+        let separator = if content.ends_with('\n') { "" } else { "\n" };
+        fs::write(
+            &gitignore_path,
+            format!("{content}{separator}{JIG_LOCAL_TOML}\n"),
+        )?;
+    } else {
+        fs::write(&gitignore_path, format!("{JIG_LOCAL_TOML}\n"))?;
+    }
+
+    eprintln!("  {} Added {} to .gitignore", ui::SYM_OK, JIG_LOCAL_TOML);
     Ok(())
 }
