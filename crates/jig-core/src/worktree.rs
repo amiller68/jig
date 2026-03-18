@@ -164,24 +164,20 @@ impl Worktree {
         session::pane_is_running(&self.session_name, &self.name)
     }
 
-    /// Launch a tmux window for this worktree.
-    pub fn launch(&self, context: Option<&str>, auto: bool) -> Result<()> {
-        // Render preamble when auto=true
-        let effective_context = if auto {
-            let engine = TemplateEngine::new().with_repo(&self.repo_root);
-            let global_config = GlobalConfig::load()?;
-            let mut tpl_ctx = TemplateContext::new();
-            tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
-            tpl_ctx.set(
-                "task_context",
-                context.unwrap_or(
-                    "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
-                ),
-            );
-            Some(engine.render("spawn-preamble", &tpl_ctx)?)
-        } else {
-            context.map(|s| s.to_string())
-        };
+    /// Launch a tmux window for this worktree (always uses auto mode).
+    pub fn launch(&self, context: Option<&str>) -> Result<()> {
+        // Always render preamble
+        let engine = TemplateEngine::new().with_repo(&self.repo_root);
+        let global_config = GlobalConfig::load()?;
+        let mut tpl_ctx = TemplateContext::new();
+        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
+        tpl_ctx.set(
+            "task_context",
+            context.unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ),
+        );
+        let effective_context = engine.render("spawn-preamble", &tpl_ctx)?;
 
         // Get adapter from config
         let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
@@ -191,8 +187,8 @@ impl Worktree {
         // Create window in tmux
         session::create_window(&self.session_name, &self.name, &self.path)?;
 
-        // Build spawn command using adapter
-        let cmd = adapter::build_spawn_command(agent_adapter, effective_context.as_deref(), auto);
+        // Build spawn command using adapter (always auto)
+        let cmd = adapter::build_spawn_command(agent_adapter, Some(&effective_context));
 
         // Send command to window
         session::send_keys(&self.session_name, &self.name, &cmd)?;
@@ -212,7 +208,7 @@ impl Worktree {
             let _ = event_log.append(&event);
         }
 
-        self.launch(context, true)
+        self.launch(context)
     }
 
     // ---------------------------------------------------------------

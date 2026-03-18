@@ -414,10 +414,14 @@ pub struct IssuesConfig {
     /// Linear-specific configuration (required when provider = "linear").
     #[serde(default)]
     pub linear: Option<LinearIssuesConfig>,
-    /// Labels required for auto-spawn (all must match). When set, only issues
-    /// carrying all of these labels are eligible for daemon auto-spawning.
+    /// Labels required for auto-spawn. Controls whether the daemon auto-spawns
+    /// workers for eligible issues in this repo.
+    ///
+    /// - `None` (default, absent from TOML): auto-spawn disabled
+    /// - `Some([])`: auto-spawn all planned issues (no label filter)
+    /// - `Some(["x", "y"])`: only spawn issues carrying all listed labels
     #[serde(default)]
-    pub spawn_labels: Vec<String>,
+    pub auto_spawn_labels: Option<Vec<String>>,
 }
 
 /// Linear issue provider configuration in jig.toml.
@@ -439,10 +443,6 @@ pub struct LinearIssuesConfig {
     pub labels: Vec<String>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn default_issues_provider() -> String {
     "file".to_string()
 }
@@ -457,7 +457,7 @@ impl Default for IssuesConfig {
             provider: default_issues_provider(),
             directory: default_issues_directory(),
             linear: None,
-            spawn_labels: Vec::new(),
+            auto_spawn_labels: None,
         }
     }
 }
@@ -478,18 +478,11 @@ pub struct WorktreeConfig {
 
 /// Spawn configuration in jig.toml (per-repo, committed).
 ///
-/// `auto` is project-level (should the agent auto-start in spawned windows).
-/// The daemon fields (`auto_spawn`, `max_concurrent_workers`,
-/// `auto_spawn_interval`) are optional overrides of the global config
-/// defaults in `~/.config/jig/config.toml`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional overrides of the global config defaults in
+/// `~/.config/jig/config.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SpawnConfig {
-    /// Auto-start Claude in spawned windows (defaults to true).
-    #[serde(default = "default_true")]
-    pub auto: bool,
-    /// Override global auto_spawn setting for this repo.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_spawn: Option<bool>,
     /// Override global max_concurrent_workers for this repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrent_workers: Option<usize>,
@@ -498,23 +491,7 @@ pub struct SpawnConfig {
     pub auto_spawn_interval: Option<u64>,
 }
 
-impl Default for SpawnConfig {
-    fn default() -> Self {
-        Self {
-            auto: true,
-            auto_spawn: None,
-            max_concurrent_workers: None,
-            auto_spawn_interval: None,
-        }
-    }
-}
-
 impl SpawnConfig {
-    /// Resolve auto_spawn: jig.toml override → global config default.
-    pub fn resolve_auto_spawn(&self, global: &crate::global::GlobalSpawnConfig) -> bool {
-        self.auto_spawn.unwrap_or(global.auto_spawn)
-    }
-
     /// Resolve max_concurrent_workers: jig.toml override → global config default.
     pub fn resolve_max_concurrent_workers(
         &self,
@@ -616,14 +593,11 @@ pub struct ConfigDisplay {
     pub toml_on_create: Option<String>,
     pub global_on_create: Option<String>,
     // Auto-spawn fields
-    pub auto_spawn: bool,
-    pub auto_spawn_source: String,
-    pub auto_start: bool,
+    pub auto_spawn_labels: Option<Vec<String>>,
     pub max_concurrent_workers: usize,
     pub max_concurrent_workers_source: String,
     pub auto_spawn_interval: u64,
     pub auto_spawn_interval_source: String,
-    pub spawn_labels: Vec<String>,
     // Nudge health config
     pub silence_threshold_seconds: u64,
     pub silence_threshold_source: String,
@@ -658,15 +632,6 @@ impl ConfigDisplay {
         // Resolve auto-spawn settings (jig.toml override > global config > default)
         let global_spawn = &global_config.spawn;
         let spawn = &jig_toml.spawn;
-
-        let (auto_spawn, auto_spawn_source) = if spawn.auto_spawn.is_some() {
-            (
-                spawn.resolve_auto_spawn(global_spawn),
-                "jig.toml".to_string(),
-            )
-        } else {
-            (global_spawn.auto_spawn, "global config".to_string())
-        };
 
         let (max_concurrent_workers, max_concurrent_workers_source) =
             if spawn.max_concurrent_workers.is_some() {
@@ -755,14 +720,11 @@ impl ConfigDisplay {
             effective_on_create,
             toml_on_create: jig_toml.worktree.on_create,
             global_on_create: config.get_on_create_hook(repo_path),
-            auto_spawn,
-            auto_spawn_source,
-            auto_start: jig_toml.spawn.auto,
+            auto_spawn_labels: jig_toml.issues.auto_spawn_labels,
             max_concurrent_workers,
             max_concurrent_workers_source,
             auto_spawn_interval,
             auto_spawn_interval_source,
-            spawn_labels: jig_toml.issues.spawn_labels,
             silence_threshold_seconds,
             silence_threshold_source,
             max_nudges,

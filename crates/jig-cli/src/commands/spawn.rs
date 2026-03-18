@@ -27,10 +27,6 @@ pub struct Spawn {
     /// Base branch to create worktree from (overrides jig.toml default)
     #[arg(long, short = 'b')]
     pub base: Option<String>,
-
-    /// Auto-start Claude with full prompt
-    #[arg(long)]
-    pub auto: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -131,21 +127,14 @@ impl Op for Spawn {
             (None, None) => None,
         };
 
-        // Determine if auto mode should be used
-        let use_auto = if self.auto { true } else { jig_toml.spawn.auto };
-
         // Register and launch using Worktree methods
         wt.register(effective_context.as_deref(), issue_ref)?;
-        wt.launch(effective_context.as_deref(), use_auto)?;
+        wt.launch(effective_context.as_deref())?;
 
         ui::success(&format!(
             "Launched Claude in tmux window '{}'",
             ui::highlight(&name)
         ));
-
-        if use_auto {
-            ui::detail("Auto mode enabled");
-        }
 
         eprintln!();
         eprintln!(

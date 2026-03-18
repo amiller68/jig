@@ -94,8 +94,6 @@ pub struct LinearProfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalSpawnConfig {
-    /// Whether the daemon should auto-spawn workers for eligible issues.
-    pub auto_spawn: bool,
     /// Max concurrent workers the daemon will auto-spawn per repo.
     pub max_concurrent_workers: usize,
     /// Seconds between issue polls for auto-spawn.
@@ -105,7 +103,6 @@ pub struct GlobalSpawnConfig {
 impl Default for GlobalSpawnConfig {
     fn default() -> Self {
         Self {
-            auto_spawn: false,
             max_concurrent_workers: 3,
             auto_spawn_interval: 120,
         }

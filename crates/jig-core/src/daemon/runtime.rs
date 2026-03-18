@@ -22,8 +22,6 @@ pub struct TimerInfo {
 /// Runtime configuration for the daemon actors.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    /// Whether auto-spawn is enabled.
-    pub auto_spawn: bool,
     /// Max concurrent workers for auto-spawn.
     pub max_concurrent_workers: usize,
     /// Seconds between issue polls.
@@ -35,7 +33,6 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            auto_spawn: false,
             max_concurrent_workers: 3,
             auto_spawn_interval: 120,
             sync_interval: 60,
@@ -254,21 +251,17 @@ impl DaemonRuntime {
         self.github_cache.get(worker_key)
     }
 
-    /// Trigger an issue poll if auto-spawn is enabled and interval elapsed.
+    /// Trigger an issue poll if the interval has elapsed and no poll is pending.
     ///
     /// When `repo_filter` is set, only poll repos matching that name. Each repo's
-    /// own `jig.toml` controls whether auto-spawn is enabled and the worker budget —
-    /// this method just gates on the global interval and sends the request to the
-    /// issue actor.
+    /// own `jig.toml` controls whether auto-spawn is enabled (via
+    /// `issues.auto_spawn_labels`) and the worker budget.
     pub fn maybe_trigger_issue_poll(
         &mut self,
         registry: &RepoRegistry,
         existing_workers: &[(String, String)],
         repo_filter: Option<&str>,
     ) {
-        if !self.config.auto_spawn {
-            return;
-        }
         if self.issue_pending {
             return;
         }
@@ -407,12 +400,8 @@ impl DaemonRuntime {
         let sync_elapsed = self.last_sync.elapsed().as_secs();
         let sync_remaining = self.config.sync_interval.saturating_sub(sync_elapsed);
 
-        let poll_remaining = if self.config.auto_spawn {
-            let poll_elapsed = self.last_issue_poll.elapsed().as_secs();
-            Some(self.config.auto_spawn_interval.saturating_sub(poll_elapsed))
-        } else {
-            None
-        };
+        let poll_elapsed = self.last_issue_poll.elapsed().as_secs();
+        let poll_remaining = Some(self.config.auto_spawn_interval.saturating_sub(poll_elapsed));
 
         TimerInfo {
             sync_remaining,

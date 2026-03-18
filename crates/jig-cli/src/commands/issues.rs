@@ -126,7 +126,7 @@ pub enum IssuesError {
 
 #[derive(Debug)]
 pub enum IssuesOutput {
-    Table(Vec<CoreIssue>, Vec<String>),
+    Table(Vec<CoreIssue>, Option<Vec<String>>),
     Detail(CoreIssue),
     Interactive,
     Ids(Vec<String>),
@@ -189,7 +189,7 @@ impl Issues {
     fn finish(
         &self,
         all_issues: Vec<CoreIssue>,
-        spawn_labels: Vec<String>,
+        auto_spawn_labels: Option<Vec<String>>,
     ) -> Result<IssuesOutput, IssuesError> {
         if self.ids {
             let ids: Vec<String> = all_issues.into_iter().map(|i| i.id).collect();
@@ -197,11 +197,11 @@ impl Issues {
         }
 
         if self.interactive {
-            run_interactive(&all_issues, &spawn_labels)?;
+            run_interactive(&all_issues, auto_spawn_labels.as_deref())?;
             return Ok(IssuesOutput::Interactive);
         }
 
-        Ok(IssuesOutput::Table(all_issues, spawn_labels))
+        Ok(IssuesOutput::Table(all_issues, auto_spawn_labels))
     }
 
     fn run_list(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
@@ -219,8 +219,10 @@ impl Issues {
             return Ok(IssuesOutput::Detail(issue));
         }
 
+        let spawn_labels = jig_toml.issues.auto_spawn_labels.clone();
         let all_issues = if self.auto {
-            let spawnable = provider.list_spawnable(&jig_toml.issues.spawn_labels)?;
+            let labels = spawn_labels.as_deref().unwrap_or(&[]);
+            let spawnable = provider.list_spawnable(labels)?;
             // Apply additional filters on top of spawnable results
             filter.apply(spawnable)
         } else {
@@ -228,7 +230,7 @@ impl Issues {
         };
         let all_issues = self.exclude_completed(all_issues);
         let all_issues = self.apply_dep_filter(all_issues, provider.as_ref());
-        self.finish(all_issues, jig_toml.issues.spawn_labels.clone())
+        self.finish(all_issues, spawn_labels)
     }
 
     fn run_list_global(&self, ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
@@ -247,8 +249,10 @@ impl Issues {
                 continue;
             }
 
+            let spawn_labels = jig_toml.issues.auto_spawn_labels.clone();
             let repo_issues = if self.auto {
-                let spawnable = provider.list_spawnable(&jig_toml.issues.spawn_labels)?;
+                let labels = spawn_labels.as_deref().unwrap_or(&[]);
+                let spawnable = provider.list_spawnable(labels)?;
                 filter.apply(spawnable)
             } else {
                 provider.list(&filter)?
@@ -262,7 +266,7 @@ impl Issues {
         }
 
         let all_issues = self.exclude_completed(all_issues);
-        self.finish(all_issues, Vec::new())
+        self.finish(all_issues, None)
     }
 }
 
@@ -450,7 +454,7 @@ impl Op for Issues {
 impl fmt::Display for IssuesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Table(issues, spawn_labels) => {
+            Self::Table(issues, auto_spawn_labels) => {
                 if issues.is_empty() {
                     return write!(f, "No issues found");
                 }
@@ -463,7 +467,7 @@ impl fmt::Display for IssuesOutput {
                     }
                     return Ok(());
                 }
-                let table = render_table(issues, spawn_labels);
+                let table = render_table(issues, auto_spawn_labels.as_deref());
                 write!(f, "{table}")
             }
             Self::Detail(issue) => {
@@ -508,7 +512,7 @@ impl fmt::Display for IssuesOutput {
     }
 }
 
-fn render_table(issues: &[CoreIssue], spawn_labels: &[String]) -> comfy_table::Table {
+fn render_table(issues: &[CoreIssue], auto_spawn_labels: Option<&[String]>) -> comfy_table::Table {
     let mut table = ui::new_table(&["STATUS", "AUTO", "PRI", "CATEGORY", "ISSUE"]);
 
     for issue in issues {
@@ -527,7 +531,10 @@ fn render_table(issues: &[CoreIssue], spawn_labels: &[String]) -> comfy_table::T
             None => ("-", Color::DarkGrey),
         };
 
-        let auto_indicator = if issue.auto(spawn_labels) { "✓" } else { "" };
+        let auto_indicator = match auto_spawn_labels {
+            Some(labels) if issue.auto(labels) => "✓",
+            _ => "",
+        };
 
         let category = issue.category.as_deref().unwrap_or("-");
 
@@ -550,19 +557,22 @@ fn render_table(issues: &[CoreIssue], spawn_labels: &[String]) -> comfy_table::T
 }
 
 /// Interactive browse mode using alternate screen.
-fn run_interactive(issues: &[CoreIssue], spawn_labels: &[String]) -> Result<(), IssuesError> {
+fn run_interactive(
+    issues: &[CoreIssue],
+    auto_spawn_labels: Option<&[String]>,
+) -> Result<(), IssuesError> {
     if issues.is_empty() {
         eprintln!("No issues found");
         return Ok(());
     }
 
-    ui::with_alternate_screen(|w| interactive_loop(w, issues, spawn_labels))
+    ui::with_alternate_screen(|w| interactive_loop(w, issues, auto_spawn_labels))
 }
 
 fn interactive_loop(
     w: &mut io::Stderr,
     issues: &[CoreIssue],
-    spawn_labels: &[String],
+    auto_spawn_labels: Option<&[String]>,
 ) -> Result<(), IssuesError> {
     let mut cursor = 0usize;
     let mut scroll = 0usize;
@@ -599,10 +609,9 @@ fn interactive_loop(
 
             let pri = issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-");
 
-            let auto = if issue.auto(spawn_labels) {
-                " ✓"
-            } else {
-                "  "
+            let auto = match auto_spawn_labels {
+                Some(labels) if issue.auto(labels) => " ✓",
+                _ => "  ",
             };
 
             let title = ui::truncate(&issue.title, max_title);

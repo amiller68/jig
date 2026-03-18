@@ -12,15 +12,12 @@ base = "origin/main"           # Base branch for new worktrees
 on_create = "npm install"      # Command to run after worktree creation
 copy = [".env", ".env.local"]  # Gitignored files to copy to new worktrees
 
-[spawn]
-auto = true                    # Auto-start Claude with full permissions
-
 [agent]
 type = "claude"                # Agent framework (claude, cursor)
 
 [issues]
 provider = "linear"            # Issue provider ("file" or "linear")
-spawn_labels = ["jig-auto"]    # Only auto-spawn issues with all these labels
+auto_spawn_labels = ["jig-auto"] # Only auto-spawn issues with all these labels
 
 [issues.linear]
 profile = "work"               # References ~/.config/jig/config.toml profile
@@ -165,14 +162,16 @@ jig issues --label backend --label sprint-1   # must have BOTH labels
 
 Label matching is case-insensitive.
 
-### Auto-spawn with `spawn_labels`
+### Auto-spawn with `auto_spawn_labels`
 
-The `spawn_labels` config in `[issues]` controls which issues the daemon auto-spawns. Only issues carrying **all** of the configured labels are eligible:
+The `auto_spawn_labels` config in `[issues]` controls which issues the daemon auto-spawns:
 
 ```toml
 [issues]
-spawn_labels = ["jig-auto"]           # only auto-spawn issues labeled "jig-auto"
-spawn_labels = ["backend", "sprint-1"] # must have BOTH labels
+auto_spawn_labels = ["jig-auto"]           # only auto-spawn issues labeled "jig-auto"
+auto_spawn_labels = ["backend", "sprint-1"] # must have BOTH labels
+auto_spawn_labels = []                      # spawn ALL planned issues
+# (omit auto_spawn_labels entirely to disable auto-spawn)
 ```
 
-When `spawn_labels` is empty (the default), no issues are auto-spawned — auto-spawn is opt-in via labels. The AUTO column in `jig issues` shows `*` for issues matching the configured `spawn_labels`.
+When `auto_spawn_labels` is absent (the default), auto-spawn is disabled. When set to `[]`, all planned issues with satisfied dependencies are eligible. The AUTO column in `jig issues` shows `✓` for issues matching the configured labels.

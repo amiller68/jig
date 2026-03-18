@@ -43,7 +43,7 @@ jig spawn feature-auth --issue features/jwt-auth --auto
 
 ### Auto mode
 
-The `--auto` flag (or `spawn.auto = true` in `jig.toml`) launches the agent with `--dangerously-skip-permissions` and a structured preamble that tells the agent:
+The agent is always launched with `--dangerously-skip-permissions` and a structured preamble that tells the agent:
 
 - It's autonomous — don't ask for confirmation, don't enter plan mode
 - Its goal is to complete the task and create a draft PR
@@ -313,13 +313,12 @@ max = 2
 cooldown_seconds = 180
 
 [spawn]
-auto = true
 max_concurrent_workers = 3
 auto_spawn_interval = 120
 
 [issues]
 provider = "file"
-spawn_labels = ["auto"]
+auto_spawn_labels = ["auto"]
 ```
 
 Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits`) can set `max` and `cooldown_seconds` independently. Resolution: per-type repo → repo defaults → global → hardcoded defaults.

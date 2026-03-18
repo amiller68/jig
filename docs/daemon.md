@@ -178,14 +178,21 @@ The daemon can automatically spawn workers for eligible issues:
 ```toml
 # jig.toml
 [spawn]
-auto = true
 max_concurrent_workers = 3
-auto_spawn_interval = 120  # seconds between issue polls
+auto_spawn_interval = 120    # seconds between issue polls
 
 [issues]
-provider = "file"          # or "linear"
-spawn_labels = ["auto"]    # only spawn issues with these labels
+provider = "file"            # or "linear"
+auto_spawn_labels = ["auto"] # only spawn issues with these labels
+# auto_spawn_labels = []     # spawn ALL planned issues
+# (omit auto_spawn_labels to disable auto-spawn)
 ```
+
+The `auto_spawn_labels` field in `[issues]` controls auto-spawning:
+
+- **Absent** (default): auto-spawn is disabled
+- **`[]`** (empty): spawn all planned issues with satisfied dependencies
+- **`["x", "y"]`**: spawn only issues carrying all listed labels
 
 The issue actor polls at the configured interval and the spawn actor creates worktrees + launches agents for eligible issues (status: planned, has required labels, dependencies satisfied).
 

@@ -876,9 +876,9 @@ mod tests {
 
         let provider = FileProvider::new(tmp.path());
 
-        // No spawn_labels → empty (auto-spawn is opt-in)
+        // Empty spawn_labels → all planned issues
         let all = provider.list_spawnable(&[]).unwrap();
-        assert!(all.is_empty());
+        assert_eq!(all.len(), 3);
 
         // Filter to backend only
         let backend = provider.list_spawnable(&["backend".to_string()]).unwrap();

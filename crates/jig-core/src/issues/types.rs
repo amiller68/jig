@@ -129,14 +129,13 @@ impl IssueFilter {
 
 impl Issue {
     /// Whether this issue is eligible for auto-spawn given the repo's
-    /// `spawn_labels` config.
+    /// `auto_spawn_labels` config.
     ///
-    /// Returns `true` when `spawn_labels` is non-empty and the issue carries
-    /// all of the configured labels (case-insensitive). Returns `false` when
-    /// `spawn_labels` is empty — auto-spawn is opt-in via labels.
+    /// - Empty slice: all issues are eligible
+    /// - Non-empty slice: issue must carry all listed labels (case-insensitive)
     pub fn auto(&self, spawn_labels: &[String]) -> bool {
         if spawn_labels.is_empty() {
-            return false;
+            return true;
         }
         spawn_labels
             .iter()
@@ -279,8 +278,8 @@ mod tests {
             branch_name: None,
         };
 
-        // Empty spawn_labels → auto = false (opt-in via labels)
-        assert!(!issue.auto(&[]));
+        // Empty spawn_labels → auto = true (all issues eligible)
+        assert!(issue.auto(&[]));
 
         // Matching label → auto = true
         assert!(issue.auto(&["backend".into()]));

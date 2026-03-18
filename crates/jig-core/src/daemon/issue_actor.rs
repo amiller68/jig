@@ -47,10 +47,10 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             _ => continue,
         };
 
-        // Skip repos that don't have auto-spawn enabled
-        if !jig_toml.spawn.resolve_auto_spawn(&global_config.spawn) {
+        // Skip repos that don't have auto-spawn enabled (no auto_spawn_labels)
+        let Some(labels) = &jig_toml.issues.auto_spawn_labels else {
             continue;
-        }
+        };
 
         // Count existing workers for this repo
         let repo_name = repo_root
@@ -90,7 +90,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             }
         };
 
-        let issues = match provider.list_spawnable(&jig_toml.issues.spawn_labels) {
+        let issues = match provider.list_spawnable(labels) {
             Ok(issues) => issues,
             Err(e) => {
                 tracing::debug!(repo = %repo_name, error = %e, "failed to list spawnable issues");

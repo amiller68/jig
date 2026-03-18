@@ -22,10 +22,6 @@ pub struct Ps {
     #[arg(short, long, num_args = 0..=1, default_missing_value = "2")]
     pub watch: Option<u64>,
 
-    /// Enable auto-spawning of workers from eligible issues
-    #[arg(long)]
-    auto_spawn: bool,
-
     /// Maximum number of concurrent auto-spawned workers
     #[arg(long)]
     max_workers: Option<usize>,
@@ -101,13 +97,11 @@ impl Ps {
         let global_config = jig_core::global::GlobalConfig::load().unwrap_or_default();
         let spawn_config = &jig_toml.spawn;
 
-        let auto_spawn = self.auto_spawn || spawn_config.resolve_auto_spawn(&global_config.spawn);
         let max_concurrent_workers = self
             .max_workers
             .unwrap_or_else(|| spawn_config.resolve_max_concurrent_workers(&global_config.spawn));
 
         RuntimeConfig {
-            auto_spawn,
             max_concurrent_workers,
             auto_spawn_interval: spawn_config.resolve_auto_spawn_interval(&global_config.spawn),
             sync_interval: 60,
@@ -198,8 +192,6 @@ fn run_watch(
         ..Default::default()
     };
 
-    let auto_spawn = runtime_config.auto_spawn;
-
     // Shared state for the callback
     let mut view_mode = ViewMode::Table;
     let mut log_buffer: VecDeque<String> = VecDeque::with_capacity(LOG_BUFFER_SIZE);
@@ -279,11 +271,6 @@ fn run_watch(
                         ui::render_worker_table(&tick.worker_display, true).to_string()
                     };
                     let status_line = format_tick_status(&Some(tick));
-                    let auto_label = if auto_spawn {
-                        "  \x1B[33mauto\x1B[0m"
-                    } else {
-                        ""
-                    };
                     let spawning_section = if tick.spawning.is_empty() {
                         String::new()
                     } else {
@@ -296,7 +283,7 @@ fn run_watch(
                     let nudge_section = format_nudge_messages(&tick.nudge_messages);
                     let timer_section = format_timer_info(&tick.timer_info);
                     let output = format!(
-                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}{auto_label}\n\n{table_output}{spawning_section}{nudge_section}\n\x1B[2m[l]ogs  [q]uit{timer_section}\x1B[0m",
+                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}\n\n{table_output}{spawning_section}{nudge_section}\n\x1B[2m[l]ogs  [q]uit{timer_section}\x1B[0m",
                         tick.worker_display.len(), interval,
                     );
                     for line in output.lines() {

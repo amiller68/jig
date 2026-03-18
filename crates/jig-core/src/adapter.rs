@@ -67,8 +67,8 @@ pub fn supported_agents() -> &'static [&'static str] {
     &["claude"]
 }
 
-/// Build the spawn command for an agent
-pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>, auto: bool) -> String {
+/// Build the spawn command for an agent (always appends auto_flag)
+pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>) -> String {
     let mut cmd = adapter.command.to_string();
 
     if let Some(ctx) = context {
@@ -77,7 +77,7 @@ pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>, auto: 
         cmd = format!("{} '{}'", cmd, escaped);
     }
 
-    if auto && !adapter.auto_flag.is_empty() {
+    if !adapter.auto_flag.is_empty() {
         cmd.push(' ');
         cmd.push_str(adapter.auto_flag);
     }
@@ -105,37 +105,26 @@ mod tests {
     }
 
     #[test]
-    fn test_build_spawn_command_simple() {
+    fn test_build_spawn_command_no_context() {
         let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, None, false);
-        assert_eq!(cmd, "claude");
+        let cmd = build_spawn_command(adapter, None);
+        assert_eq!(cmd, "claude --dangerously-skip-permissions");
     }
 
     #[test]
     fn test_build_spawn_command_with_context() {
         let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, Some("hello world"), false);
-        assert_eq!(cmd, "claude 'hello world'");
-    }
-
-    #[test]
-    fn test_build_spawn_command_with_auto() {
-        let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, None, true);
-        assert_eq!(cmd, "claude --dangerously-skip-permissions");
-    }
-
-    #[test]
-    fn test_build_spawn_command_full() {
-        let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, Some("fix bug"), true);
-        assert_eq!(cmd, "claude 'fix bug' --dangerously-skip-permissions");
+        let cmd = build_spawn_command(adapter, Some("hello world"));
+        assert_eq!(cmd, "claude 'hello world' --dangerously-skip-permissions");
     }
 
     #[test]
     fn test_build_spawn_command_escapes_quotes() {
         let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, Some("it's a test"), false);
-        assert_eq!(cmd, "claude 'it'\\''s a test'");
+        let cmd = build_spawn_command(adapter, Some("it's a test"));
+        assert_eq!(
+            cmd,
+            "claude 'it'\\''s a test' --dangerously-skip-permissions"
+        );
     }
 }

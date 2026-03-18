@@ -121,15 +121,17 @@ Linear states map to jig statuses:
 
 ## Labels and auto-spawn
 
-Linear labels map directly to jig's label system. Use `spawn_labels` in `jig.toml` to control which Linear issues the daemon auto-spawns:
+Linear labels map directly to jig's label system. Use `auto_spawn_labels` in `jig.toml` to control which Linear issues the daemon auto-spawns:
 
 ```toml
 [issues]
 provider = "linear"
-spawn_labels = ["jig-auto"]    # only auto-spawn issues with this Linear label
+auto_spawn_labels = ["jig-auto"]  # only auto-spawn issues with this Linear label
+# auto_spawn_labels = []          # spawn all planned issues
+# (omit auto_spawn_labels to disable auto-spawn)
 ```
 
-When `spawn_labels` is empty, no issues are auto-spawned. The `*` in the AUTO column of `jig issues` indicates matching issues.
+When `auto_spawn_labels` is absent, auto-spawn is disabled. When set to `[]`, all planned issues are eligible. The `✓` in the AUTO column of `jig issues` indicates matching issues.
 
 ## Switching back to file-based issues
 

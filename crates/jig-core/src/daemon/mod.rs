@@ -1234,8 +1234,8 @@ impl<'a> Daemon<'a> {
         // Transition from Initializing → Spawned
         wt.emit_spawn_event();
 
-        // Launch tmux window — always auto-start for daemon-spawned workers
-        wt.launch(Some(&context), true)?;
+        // Launch tmux window
+        wt.launch(Some(&context))?;
 
         Ok(())
     }
@@ -1539,7 +1539,6 @@ mod tests {
     #[test]
     fn runtime_config_defaults() {
         let config = RuntimeConfig::default();
-        assert!(!config.auto_spawn);
         assert_eq!(config.max_concurrent_workers, 3);
         assert_eq!(config.auto_spawn_interval, 120);
         assert_eq!(config.sync_interval, 60);

@@ -103,7 +103,7 @@ fn spawn_single(issue: &SpawnableIssue) -> std::result::Result<(), String> {
     // Transition from Initializing → Spawned
     wt.emit_spawn_event();
 
-    wt.launch(Some(&context), true).map_err(|e| e.to_string())?;
+    wt.launch(Some(&context)).map_err(|e| e.to_string())?;
 
     Ok(())
 }

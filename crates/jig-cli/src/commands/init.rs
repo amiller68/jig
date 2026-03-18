@@ -44,7 +44,7 @@ const CLAUDE_SETTINGS_JSON: &str =
 pub struct Init {
     /// Agent framework to initialize (claude, cursor)
     #[arg(value_name = "AGENT")]
-    pub agent: String,
+    pub agent: Option<String>,
 
     /// Reinitialize, overwriting existing files
     #[arg(long, short)]
@@ -57,6 +57,10 @@ pub struct Init {
     /// Launch agent to audit and populate docs. Optionally pass extra instructions.
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     pub audit: Option<String>,
+
+    /// Initialize global config (~/.config/jig/config.toml) instead of a repo
+    #[arg(long)]
+    pub global: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -74,6 +78,21 @@ impl Op for Init {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+        // Handle --global: scaffold ~/.config/jig/config.toml
+        if self.global {
+            return init_global(self.force);
+        }
+
+        let agent_name = self.agent.as_deref().ok_or_else(|| {
+            InitError::UnknownAgent(
+                String::new(),
+                format!(
+                    "agent argument required. Supported: {}",
+                    adapter::supported_agents().join(", ")
+                ),
+            )
+        })?;
+
         // Init needs get_base_repo() directly because RepoContext may not exist
         // (init is often the first jig command run in a repo)
         let repo_root = match ctx.repo() {
@@ -85,8 +104,11 @@ impl Op for Init {
         };
 
         // Validate agent argument
-        let adapter = adapter::get_adapter(&self.agent).ok_or_else(|| {
-            InitError::UnknownAgent(self.agent.clone(), adapter::supported_agents().join(", "))
+        let adapter = adapter::get_adapter(agent_name).ok_or_else(|| {
+            InitError::UnknownAgent(
+                agent_name.to_string(),
+                adapter::supported_agents().join(", "),
+            )
         })?;
 
         // Check if agent is installed
@@ -161,15 +183,16 @@ impl Op for Init {
 # on_create = "npm install"  # Command to run after worktree creation
 # copy = [".env"]            # Gitignored files to copy to new worktrees
 
-# Spawn configuration
-[spawn]
-auto = true
-
 # Agent configuration
 [agent]
 type = "{}"
+
+# Issue configuration
+# [issues]
+# provider = "file"                    # or "linear"
+# auto_spawn_labels = []               # [] = all issues, ["x"] = filtered, omit = disabled
 "#,
-            self.agent
+            agent_name
         );
         write_file(
             &repo_root,
@@ -372,7 +395,7 @@ fn launch_audit(
     extra: Option<&str>,
 ) -> Result<(), InitError> {
     let prompt = audit_prompt(adapter, has_backup, extra);
-    let cmd = adapter::build_spawn_command(adapter, Some(&prompt), true);
+    let cmd = adapter::build_spawn_command(adapter, Some(&prompt));
 
     let session_name = "jig-init";
     let window_name = repo_root
@@ -396,6 +419,56 @@ fn launch_audit(
     );
 
     Ok(())
+}
+
+/// Initialize global config at ~/.config/jig/config.toml.
+fn init_global(force: bool) -> Result<NoOutput, InitError> {
+    let config_dir = jig_core::global::paths::global_config_dir()?;
+    let config_path = config_dir.join("config.toml");
+
+    if config_path.exists() && !force {
+        ui::success(&format!(
+            "Global config already exists: {}",
+            config_path.display()
+        ));
+        eprintln!(
+            "  Use {} to overwrite",
+            ui::highlight("jig init --global --force")
+        );
+        return Ok(NoOutput);
+    }
+
+    fs::create_dir_all(&config_dir)?;
+
+    let content = r#"# jig global configuration
+# See: docs/cli/usage/configuration.md
+
+[health]
+silence_threshold_seconds = 300  # seconds of silence before worker is "stalled"
+max_nudges = 3                   # nudges per type before escalating
+
+[github]
+auto_cleanup_merged = true       # clean up workers when PR merges
+auto_cleanup_closed = false      # clean up workers when PR closed without merge
+
+[spawn]
+max_concurrent_workers = 3       # max auto-spawned workers per repo
+auto_spawn_interval = 120        # seconds between issue polls
+
+# [notify]
+# exec = "~/.config/jig/hooks/notify.sh"
+# events = ["needs_intervention", "worker_failed"]
+
+# [linear.profiles.work]
+# api_key = "lin_api_xxxxxxxxxxxx"
+# team = "ENG"
+"#;
+
+    fs::write(&config_path, content)?;
+
+    ui::success(&format!("Created {}", config_path.display()));
+
+    Ok(NoOutput)
 }
 
 /// Install git hooks and agent-specific hooks (idempotent).

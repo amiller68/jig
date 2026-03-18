@@ -126,17 +126,29 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     eprintln!();
     ui::header("Auto-spawn");
     eprintln!();
-    eprintln!(
-        "  {} {} {}",
-        ui::dim("Enabled:"),
-        ui::highlight(&display.auto_spawn.to_string()),
-        ui::dim(&format!("({})", display.auto_spawn_source))
-    );
-    eprintln!(
-        "  {} {}",
-        ui::dim("Auto-start Claude:"),
-        ui::highlight(&display.auto_start.to_string())
-    );
+    match &display.auto_spawn_labels {
+        None => {
+            eprintln!(
+                "  {} {}",
+                ui::dim("Auto-spawn labels:"),
+                ui::warn_text("disabled (not configured)")
+            );
+        }
+        Some(labels) if labels.is_empty() => {
+            eprintln!(
+                "  {} {}",
+                ui::dim("Auto-spawn labels:"),
+                ui::highlight("all issues")
+            );
+        }
+        Some(labels) => {
+            eprintln!(
+                "  {} {}",
+                ui::dim("Auto-spawn labels:"),
+                ui::highlight(&labels.join(", "))
+            );
+        }
+    }
     eprintln!(
         "  {} {} {}",
         ui::dim("Max workers:"),
@@ -149,19 +161,6 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
         ui::highlight(&format!("{}s", display.auto_spawn_interval)),
         ui::dim(&format!("({})", display.auto_spawn_interval_source))
     );
-    if display.spawn_labels.is_empty() {
-        eprintln!(
-            "  {} {}",
-            ui::dim("Spawn labels:"),
-            ui::warn_text("(none — no issues will be eligible)")
-        );
-    } else {
-        eprintln!(
-            "  {} {}",
-            ui::dim("Spawn labels:"),
-            ui::highlight(&display.spawn_labels.join(", "))
-        );
-    }
 
     eprintln!();
     ui::header("Nudge Health");

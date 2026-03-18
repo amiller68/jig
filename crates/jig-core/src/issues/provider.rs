@@ -40,24 +40,20 @@ pub trait IssueProvider {
 
     /// List issues eligible for auto-spawning (status=Planned).
     ///
-    /// Returns an empty list when `spawn_labels` is empty — auto-spawn is
-    /// opt-in via labels. When non-empty, queries for Planned issues whose
-    /// labels match all of `spawn_labels` (case-insensitive) and whose
-    /// dependencies are satisfied.
+    /// - Empty slice: return ALL planned issues whose dependencies are satisfied
+    /// - Non-empty slice: filter to issues whose labels match all entries
+    ///   (case-insensitive), with satisfied dependencies
     ///
     /// Providers only need to implement `list` and `get`; override this only
     /// if the backend can push filtering server-side.
     fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>> {
-        if spawn_labels.is_empty() {
-            return Ok(Vec::new());
-        }
         let all = self.list(&IssueFilter {
             status: Some(IssueStatus::Planned),
             ..Default::default()
         })?;
         Ok(all
             .into_iter()
-            .filter(|i| i.auto(spawn_labels))
+            .filter(|i| spawn_labels.is_empty() || i.auto(spawn_labels))
             .filter(|i| self.is_spawnable_with_deps(i))
             .collect())
     }

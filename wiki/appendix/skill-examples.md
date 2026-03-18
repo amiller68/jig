@@ -44,13 +44,13 @@ When the user describes work to be done, create well-structured Linear issues.
 
 ## Steps
 
-1. **Discover context** — Use `mcp__linear-aut__list_teams` to find the team configured in `jig.toml`. Use `mcp__linear-aut__list_issue_labels` to find available labels for that team. Check `jig.toml` `[issues] spawn_labels` to see which labels are required for auto-spawn.
+1. **Discover context** — Use `mcp__linear-aut__list_teams` to find the team configured in `jig.toml`. Use `mcp__linear-aut__list_issue_labels` to find available labels for that team. Check `jig.toml` `[issues] auto_spawn_labels` to see which labels are required for auto-spawn.
 
 2. **Create issues** — For each piece of work, use `mcp__linear-aut__save_issue` with:
    - `teamId`: from step 1
    - `title`: concise summary (under 80 characters)
    - `description`: markdown body following the project's issue format (see below)
-   - `labelIds`: include the labels matching `spawn_labels` from `jig.toml`
+   - `labelIds`: include the labels matching `auto_spawn_labels` from `jig.toml`
 
 3. **Verify** — Run `jig issues` to confirm the new issues appear in the local issue list.
 
