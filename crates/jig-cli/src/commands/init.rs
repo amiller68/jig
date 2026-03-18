@@ -57,10 +57,6 @@ pub struct Init {
     /// Launch agent to audit and populate docs. Optionally pass extra instructions.
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     pub audit: Option<String>,
-
-    /// Initialize global config (~/.config/jig/config.toml) instead of a repo
-    #[arg(long)]
-    pub global: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -78,11 +74,6 @@ impl Op for Init {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        // Handle --global: scaffold ~/.config/jig/config.toml
-        if self.global {
-            return init_global(self.force);
-        }
-
         let agent_name = self.agent.as_deref().ok_or_else(|| {
             InitError::UnknownAgent(
                 String::new(),
@@ -315,6 +306,10 @@ type = "{}"
 
         Ok(NoOutput)
     }
+
+    fn run_global(&self, _ctx: &crate::op::GlobalCtx) -> Result<Self::Output, Self::Error> {
+        init_global(self.force)
+    }
 }
 
 /// Generate audit prompt with adapter-specific file paths.
@@ -433,7 +428,7 @@ fn init_global(force: bool) -> Result<NoOutput, InitError> {
         ));
         eprintln!(
             "  Use {} to overwrite",
-            ui::highlight("jig init --global --force")
+            ui::highlight("jig -g init --force")
         );
         return Ok(NoOutput);
     }
