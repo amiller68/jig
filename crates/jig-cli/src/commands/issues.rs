@@ -68,12 +68,12 @@ pub struct Issues {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum IssuesCommand {
-    /// Create a new issue from a template
+    /// Create a new issue
     Create {
         /// Issue title
         title: String,
 
-        /// Template to use (standalone, ticket, epic-index)
+        /// Template to use (standalone, ticket, epic-index) — file provider only
         #[arg(short, long, default_value = "standalone")]
         template: String,
 
@@ -81,13 +81,17 @@ pub enum IssuesCommand {
         #[arg(short, long)]
         priority: Option<String>,
 
-        /// Category/directory to create in (features, bugs, chores, etc.)
-        #[arg(short, long, default_value = "features")]
-        category: String,
+        /// Category/directory (file) or project name (Linear)
+        #[arg(short, long)]
+        category: Option<String>,
 
-        /// Labels to attach (comma-separated or multiple -l flags)
+        /// Labels to attach (can specify multiple -l flags)
         #[arg(short, long)]
         label: Vec<String>,
+
+        /// Issue body/description (use "-" to read from stdin)
+        #[arg(short, long)]
+        body: Option<String>,
     },
 
     /// Update issue status
@@ -275,23 +279,45 @@ fn run_create(
     title: &str,
     template: &str,
     priority: Option<&str>,
-    category: &str,
+    category: Option<&str>,
     labels: &[String],
+    body: Option<&str>,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
     let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-
-    if jig_toml.issues.provider == "linear" {
-        return Err(IssuesError::Usage(
-            "issue creation is only supported for file-based issues".into(),
-        ));
-    }
-
-    let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
     let pri = priority.and_then(IssuePriority::from_str_loose);
 
-    let id = file_provider.create_issue(title, category, template, pri.as_ref(), labels)?;
-    Ok(IssuesOutput::Created(id))
+    // Read body from stdin if "-" was passed
+    let body_text = match body {
+        Some("-") => {
+            let mut buf = String::new();
+            io::Read::read_to_string(&mut io::stdin(), &mut buf)?;
+            Some(buf)
+        }
+        Some(text) => Some(text.to_string()),
+        None => None,
+    };
+
+    match jig_toml.issues.provider.as_str() {
+        "linear" => {
+            let global_config = GlobalConfig::load().unwrap_or_default();
+            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            let id = linear_provider.create_issue(
+                title,
+                body_text.as_deref(),
+                pri.as_ref(),
+                labels,
+                category,
+            )?;
+            Ok(IssuesOutput::Created(id))
+        }
+        _ => {
+            let cat = category.unwrap_or("features");
+            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            let id = file_provider.create_issue(title, cat, template, pri.as_ref(), labels)?;
+            Ok(IssuesOutput::Created(id))
+        }
+    }
 }
 
 fn run_status_update(
@@ -431,7 +457,16 @@ impl Op for Issues {
                 priority,
                 category,
                 label,
-            }) => run_create(ctx, title, template, priority.as_deref(), category, label),
+                body,
+            }) => run_create(
+                ctx,
+                title,
+                template,
+                priority.as_deref(),
+                category.as_deref(),
+                label,
+                body.as_deref(),
+            ),
             Some(IssuesCommand::Status { id, status }) => run_status_update(ctx, id, status),
             Some(IssuesCommand::Complete { id, delete }) => run_complete(ctx, id, *delete),
             Some(IssuesCommand::Stats) => run_stats(ctx),

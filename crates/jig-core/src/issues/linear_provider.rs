@@ -99,6 +99,39 @@ impl LinearProvider {
         self.client
             .update_issue_status(identifier, &self.team, new_status)
     }
+
+    /// Create a new issue in Linear.
+    ///
+    /// Uses team, project, assignee, and labels from the provider's config,
+    /// with explicit arguments taking precedence.
+    pub fn create_issue(
+        &self,
+        title: &str,
+        body: Option<&str>,
+        priority: Option<&super::types::IssuePriority>,
+        labels: &[String],
+        category: Option<&str>,
+    ) -> Result<String> {
+        // Merge labels: explicit labels take precedence, fall back to config
+        let effective_labels = if labels.is_empty() {
+            &self.labels
+        } else {
+            labels
+        };
+
+        // Category maps to Linear project; explicit overrides config
+        let project = category.or_else(|| self.projects.first().map(|s| s.as_str()));
+
+        self.client.create_issue(
+            &self.team,
+            title,
+            body,
+            priority,
+            effective_labels,
+            project,
+            self.assignee.as_deref(),
+        )
+    }
 }
 
 impl IssueProvider for LinearProvider {

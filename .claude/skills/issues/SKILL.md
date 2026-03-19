@@ -62,6 +62,27 @@ jig issues --label backend --label auto
 jig issues --status planned --priority high --label auto
 ```
 
+### Create issue
+
+```bash
+# Basic — creates in Linear (or file provider, depending on config)
+jig issues create "Fix auth crash"
+
+# With body and metadata
+jig issues create "Fix auth crash" \
+  --body "Stack trace in session handler" \
+  --priority high \
+  --label backend --label bug
+
+# With project (Linear) or directory (file)
+jig issues create "Fix auth crash" --category Backend
+
+# Body from stdin
+echo "detailed description" | jig issues create "Title" --body -
+```
+
+Prints the created identifier to stdout (e.g. `AUT-1234`).
+
 ### Update status
 
 ```bash

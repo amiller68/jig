@@ -239,3 +239,63 @@ fn detail_still_works() {
         .success()
         .stdout(predicate::str::contains("Existing Feature"));
 }
+
+#[test]
+fn create_defaults_category_to_features() {
+    let repo = TestRepo::new();
+
+    // No --category flag should default to "features"
+    repo.jig()
+        .args(["issues", "create", "Default category test"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created issue: features/default-category-test",
+        ));
+
+    assert!(repo
+        .dir
+        .path()
+        .join("issues/features/default-category-test.md")
+        .exists());
+}
+
+#[test]
+fn create_with_body_from_stdin() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args(["issues", "create", "Stdin body test", "--body", "-"])
+        .write_stdin("body from stdin")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created issue: features/stdin-body-test",
+        ));
+}
+
+#[test]
+fn create_with_labels() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "create",
+            "Labeled issue",
+            "--label",
+            "backend",
+            "--label",
+            "auto",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created issue: features/labeled-issue",
+        ));
+
+    let content =
+        fs::read_to_string(repo.dir.path().join("issues/features/labeled-issue.md")).unwrap();
+    assert!(content.contains("backend"));
+    assert!(content.contains("auto"));
+}
