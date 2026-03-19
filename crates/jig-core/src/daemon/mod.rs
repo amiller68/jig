@@ -229,10 +229,60 @@ impl<'a> Daemon<'a> {
     pub fn tick(&self, runtime: &mut DaemonRuntime, quit: &AtomicBool) -> Result<TickResult> {
         let mut result = TickResult::default();
 
+        // Load current global state (previous worker states)
+        let mut workers_state = WorkersState::load().unwrap_or_default();
+
+        // Discover workers from repo registry (before draining actors so
+        // existing_workers is available for the inline first poll)
+        let registry = RepoRegistry::load().unwrap_or_default();
+
+        let mut worker_list = discover_workers(&registry);
+
+        // Filter to single repo if configured
+        if let Some(ref filter) = self.daemon_config.repo_filter {
+            worker_list.retain(|(repo_name, _)| repo_name == filter);
+        }
+
+        tracing::debug!(count = worker_list.len(), "discovered workers");
+
         // 1. Drain all pending actor responses (non-blocking)
         runtime.drain_sync();
         runtime.drain_github();
-        let spawnable = runtime.drain_issues();
+        let mut spawnable = runtime.drain_issues();
+
+        // First-tick inline poll: run issue poll synchronously so that spawn
+        // can happen in the same tick instead of waiting 3 ticks.
+        //
+        // Repo isolation: `filtered_repos` respects `repo_filter`, so when
+        // `jig ps -w` runs within a single repo only that repo is polled.
+        // Workers are never spawned for repos outside the filter scope.
+        if spawnable.is_empty() && runtime.should_first_poll() {
+            runtime.mark_first_poll_done();
+
+            let repos: Vec<(std::path::PathBuf, String)> = registry
+                .filtered_repos(self.daemon_config.repo_filter.as_deref())
+                .into_iter()
+                .map(|entry| {
+                    let base = RepoContext::resolve_base_branch_for(&entry.path)
+                        .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
+                    (entry.path.clone(), base)
+                })
+                .collect();
+
+            if !repos.is_empty() {
+                let req = messages::IssueRequest {
+                    repos,
+                    existing_workers: worker_list.clone(),
+                };
+                spawnable = issue_actor::process_request(&req);
+                if !spawnable.is_empty() {
+                    tracing::info!(
+                        count = spawnable.len(),
+                        "first-tick inline issue poll found spawnable issues"
+                    );
+                }
+            }
+        }
 
         // Drain nudge completions from previous tick
         for nudge_result in runtime.drain_nudges() {
@@ -270,25 +320,10 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Load current global state (previous worker states)
-        let mut workers_state = WorkersState::load().unwrap_or_default();
-
-        // Discover workers from repo registry
-        let registry = RepoRegistry::load().unwrap_or_default();
-
         // 2. Trigger background sync if interval elapsed
         if !self.daemon_config.skip_sync {
             runtime.maybe_trigger_sync(&registry, self.daemon_config.repo_filter.as_deref());
         }
-
-        let mut worker_list = discover_workers(&registry);
-
-        // Filter to single repo if configured
-        if let Some(ref filter) = self.daemon_config.repo_filter {
-            worker_list.retain(|(repo_name, _)| repo_name == filter);
-        }
-
-        tracing::debug!(count = worker_list.len(), "discovered workers");
 
         // 3. Process each worker
         let mut live_prune_targets = Vec::new();

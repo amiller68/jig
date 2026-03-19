@@ -79,6 +79,9 @@ pub struct DaemonRuntime {
 
     config: RuntimeConfig,
 
+    /// Whether the first inline issue poll has been performed.
+    first_poll_done: bool,
+
     // Thread handles (kept alive for clean shutdown)
     _handles: Vec<std::thread::JoinHandle<()>>,
 }
@@ -142,6 +145,7 @@ impl DaemonRuntime {
             nudge_rx: nudge_resp_rx,
 
             config,
+            first_poll_done: false,
             _handles: vec![
                 sync_handle,
                 gh_handle,
@@ -393,6 +397,16 @@ impl DaemonRuntime {
     /// Get runtime config reference.
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
+    }
+
+    /// Whether the first inline issue poll still needs to run.
+    pub fn should_first_poll(&self) -> bool {
+        !self.first_poll_done
+    }
+
+    /// Mark the first inline issue poll as complete.
+    pub fn mark_first_poll_done(&mut self) {
+        self.first_poll_done = true;
     }
 
     /// Compute timer info for display.

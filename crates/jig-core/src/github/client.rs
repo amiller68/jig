@@ -180,14 +180,25 @@ impl GitHubClient {
             .collect())
     }
 
-    /// Get inline review comments on a PR.
+    /// Get inline review comments from **unresolved** threads on a PR.
+    ///
+    /// Uses the GraphQL API to fetch only unresolved review threads, so
+    /// resolved conversations don't trigger review nudges.  Falls back to
+    /// the REST endpoint (all comments, replies excluded) if GraphQL fails.
     pub fn get_review_comments(&self, pr_number: u64) -> Result<Vec<ReviewComment>> {
+        // Try GraphQL first — it exposes thread resolution status.
+        if let Ok(comments) = self.get_unresolved_review_comments_graphql(pr_number) {
+            return Ok(comments);
+        }
+
+        // Fallback: REST API, filter out reply comments.
         let output = self.gh_api(&format!("repos/{}/pulls/{}/comments", self.repo, pr_number))?;
 
         let comments: Vec<serde_json::Value> = serde_json::from_str(&output)?;
 
         Ok(comments
             .iter()
+            .filter(|c| c.get("in_reply_to_id").and_then(|v| v.as_u64()).is_none())
             .map(|c| ReviewComment {
                 body: c["body"].as_str().unwrap_or("").to_string(),
                 path: c["path"].as_str().map(|s| s.to_string()),
@@ -271,6 +282,90 @@ impl GitHubClient {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Execute a `gh api graphql` call and return the parsed JSON response.
+    fn gh_graphql(&self, query: &str) -> Result<serde_json::Value> {
+        let output = Command::new("gh")
+            .args([
+                "api",
+                "graphql",
+                "--cache",
+                "60s",
+                "-f",
+                &format!("query={}", query),
+            ])
+            .stdin(Stdio::null())
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::Custom(format!("gh graphql failed: {}", stderr)));
+        }
+
+        let body = String::from_utf8_lossy(&output.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&body)?;
+        Ok(parsed)
+    }
+
+    /// Fetch review comments from unresolved threads only (via GraphQL).
+    fn get_unresolved_review_comments_graphql(&self, pr_number: u64) -> Result<Vec<ReviewComment>> {
+        let (owner, name) = self
+            .repo
+            .split_once('/')
+            .ok_or_else(|| Error::Custom("invalid repo format".to_string()))?;
+
+        let query = format!(
+            r#"{{
+              repository(owner: "{owner}", name: "{name}") {{
+                pullRequest(number: {pr_number}) {{
+                  reviewThreads(first: 100) {{
+                    nodes {{
+                      isResolved
+                      comments(first: 1) {{
+                        nodes {{
+                          body
+                          path
+                          line: originalLine
+                          author {{ login }}
+                        }}
+                      }}
+                    }}
+                  }}
+                }}
+              }}
+            }}"#,
+            owner = owner,
+            name = name,
+            pr_number = pr_number,
+        );
+
+        let data = self.gh_graphql(&query)?;
+
+        let threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+            .as_array()
+            .ok_or_else(|| Error::Custom("unexpected graphql response shape".to_string()))?;
+
+        let mut comments = Vec::new();
+        for thread in threads {
+            if thread["isResolved"].as_bool() == Some(true) {
+                continue;
+            }
+            if let Some(first) = thread["comments"]["nodes"]
+                .as_array()
+                .and_then(|a| a.first())
+            {
+                comments.push(ReviewComment {
+                    body: first["body"].as_str().unwrap_or("").to_string(),
+                    path: first["path"].as_str().map(|s| s.to_string()),
+                    line: first["line"].as_u64(),
+                    state: ReviewState::Commented,
+                    author: first["author"]["login"].as_str().unwrap_or("").to_string(),
+                });
+            }
+        }
+
+        Ok(comments)
     }
 }
 
