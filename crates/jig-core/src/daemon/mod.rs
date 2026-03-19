@@ -252,6 +252,10 @@ impl<'a> Daemon<'a> {
 
         // First-tick inline poll: run issue poll synchronously so that spawn
         // can happen in the same tick instead of waiting 3 ticks.
+        //
+        // Repo isolation: `filtered_repos` respects `repo_filter`, so when
+        // `jig ps -w` runs within a single repo only that repo is polled.
+        // Workers are never spawned for repos outside the filter scope.
         if spawnable.is_empty() && runtime.should_first_poll() {
             runtime.mark_first_poll_done();
 
