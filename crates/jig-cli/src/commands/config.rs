@@ -106,11 +106,7 @@ impl Op for Config {
 
         match &self.subcommand {
             None | Some(ConfigCommands::Show) => show_global_config(),
-            Some(ConfigCommands::Base {
-                branch,
-                unset,
-                ..
-            }) => {
+            Some(ConfigCommands::Base { branch, unset, .. }) => {
                 // Force global=true in -g mode
                 handle_base(&repo_ctx, branch.as_deref(), true, *unset)
             }
@@ -135,18 +131,10 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
     eprintln!();
     match config::get_global_base_branch()? {
         Some(branch) => {
-            eprintln!(
-                "  {} {}",
-                ui::bold("Base branch:"),
-                ui::highlight(&branch)
-            );
+            eprintln!("  {} {}", ui::bold("Base branch:"), ui::highlight(&branch));
         }
         None => {
-            eprintln!(
-                "  {} {}",
-                ui::bold("Base branch:"),
-                ui::dim("(not set)")
-            );
+            eprintln!("  {} {}", ui::bold("Base branch:"), ui::dim("(not set)"));
         }
     }
 
