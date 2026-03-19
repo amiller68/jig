@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build release for (e.g. v1.6.0)'
+        required: true
 
 permissions:
   contents: write
@@ -34,6 +39,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -56,7 +63,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${{ inputs.tag || github.ref_name }}
           BINARY=jig
 
           # Map target to friendly names
@@ -115,9 +122,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: artifacts/**/*
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
