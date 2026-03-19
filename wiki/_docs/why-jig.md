@@ -1,10 +1,8 @@
 ---
-layout: page
 title: Why jig?
-nav_order: 6
+slug: why-jig
+date: 2025-02-19
 ---
-
-# Why jig?
 
 ## Why not a full product like Cursor?
 
@@ -34,4 +32,4 @@ I like working in my terminal. jig is opinionated about the *general form* of ho
 
 Use whatever editor you want. Use whatever ACA you want. jig manages the orchestration layer.
 
-See [Tips & FAQ](/tips-faq) for patterns that help agents succeed.
+See [Tips & FAQ](/docs/tips-and-faq/) for patterns that help agents succeed.

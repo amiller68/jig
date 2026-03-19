@@ -1,10 +1,8 @@
 ---
-layout: page
 title: Tips & FAQ
-nav_order: 7
+slug: tips-and-faq
+date: 2025-02-19
 ---
-
-# Tips & FAQ
 
 ## FAQ
 

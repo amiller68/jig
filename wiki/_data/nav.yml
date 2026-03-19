@@ -1,0 +1,11 @@
+- title: Guides
+  items:
+    - background
+    - core-concepts
+    - getting-started
+    - workflow
+
+- title: Reference
+  items:
+    - why-jig
+    - tips-and-faq

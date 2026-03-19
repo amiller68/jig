@@ -1,11 +1,9 @@
 ---
-layout: page
 title: Autonomous Orchestration
-nav_order: 1
-parent: Appendix
+slug: autonomous-orchestration
+date: 2025-03-18
+releases: ["v0.5"]
 ---
-
-# Autonomous Orchestration
 
 jig includes a built-in daemon that supervises workers, monitors their PRs, and intervenes when things go wrong — no cron jobs, no bash scripts, no manual babysitting.
 
@@ -234,7 +232,7 @@ Workers don't need to tell jig about their PR. The daemon proactively checks Git
 
 `jig ps --watch` shows a live table updated every tick:
 
-<pre class="terminal-output">
+```text
 jig ps --watch — 3 workers  (every 2s)
 
 WORKER              STATE    COMMITS  PR     HEALTH  ISSUE
@@ -243,7 +241,7 @@ WORKER              STATE    COMMITS  PR     HEALTH  ISSUE
 ○ add-tests         idle           -  -      -       add-tests
 
                                               [l]ogs  [q]uit
-</pre>
+```
 
 Column meanings:
 
@@ -262,7 +260,7 @@ The HEALTH column gives you at-a-glance visibility into what's wrong with each w
 
 Press `l` in watch mode to switch to the log view. This shows timestamped daemon activity — which nudges fired, PR check results, errors — so you can see what the daemon is actually doing:
 
-<pre class="terminal-output">
+```text
 jig ps --watch — logs  (every 2s)
 
 [14:32:05] tick: 3 workers, 1 action, 1 nudge, 0 errors
@@ -273,7 +271,7 @@ jig ps --watch — logs  (every 2s)
 [14:32:35]   myrepo/fix-pagination PR: ok
 
                                                     [t]able  [q]uit
-</pre>
+```
 
 Press `t` or `l` again to switch back to the table. Press `q` to quit cleanly.
 
@@ -331,37 +329,6 @@ Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits
 | `~/.config/jig/workers.json` | Last-known state of all workers (for diff-based dispatch) |
 | `~/.config/jig/state/events/<repo>-<worker>/events.jsonl` | Per-worker event stream |
 | `~/.config/jig/notifications.jsonl` | Notification log |
-
-## Putting it all together
-
-A typical autonomous workflow:
-
-```bash
-# 1. Write issues with clear scope and acceptance criteria
-# 2. Spawn workers
-jig spawn feature-auth --issue features/jwt-auth --auto
-jig spawn fix-pagination --issue bugs/pagination --auto
-jig spawn add-tests --issue tasks/test-coverage --auto
-
-# 3. Watch them work
-jig ps -w
-
-# 4. Workers autonomously:
-#    - Read the issue, plan, implement
-#    - Commit with conventional format
-#    - Push and create draft PRs
-#    - Get nudged if they stall
-#    - Fix CI failures, conflicts, review comments
-
-# 5. You review PRs when they show up
-#    - HEALTH column tells you what's ready
-#    - Attach to a worker if you need to intervene: jig attach feature-auth
-#    - Merge when satisfied
-
-# 6. Daemon auto-cleans merged workers
-```
-
-The daemon handles the supervision loop that used to require manual checking, cron scripts, or custom bash automation. You focus on writing good tickets and reviewing good code.
 
 ## Customization
 

@@ -1,11 +1,9 @@
 ---
-layout: page
 title: Linear Integration
-nav_order: 2
-parent: Appendix
+slug: linear-integration
+date: 2025-03-12
+releases: ["v0.5"]
 ---
-
-# Linear Integration
 
 jig ships with a built-in Linear provider so teams already using Linear for project management can skip file-based issues entirely. Once configured, `jig issues` and `jig spawn --issue` talk directly to the Linear API.
 

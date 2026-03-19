@@ -1,11 +1,9 @@
 ---
-layout: page
 title: Skill File Examples
-nav_order: 3
-parent: Appendix
+slug: skill-examples
+date: 2025-03-18
+releases: ["v0.5"]
 ---
-
-# Skill File Examples
 
 Claude Code skill files live at `.claude/skills/<name>/SKILL.md` inside your repo. They teach Claude how to perform domain-specific workflows by combining tools, MCP servers, and CLI commands into a single repeatable action.
 
@@ -28,7 +26,7 @@ For instance, if you named your Linear MCP server `my-linear`, the tools would b
 
 **Prerequisites:**
 - A Linear MCP server configured in your `.claude/settings.json` (see [Claude Code MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp))
-- Linear integration configured in `jig.toml` (see [Linear Integration](linear-integration))
+- Linear integration configured in `jig.toml` (see [Linear Integration](/articles/linear-integration/))
 
 ### `.claude/skills/create-issues/SKILL.md`
 
@@ -94,5 +92,4 @@ return 429 with Retry-After header, and add integration tests
 
 Claude will discover your team, create the issue with the appropriate labels, and confirm it appears in `jig issues`.
 
-{: .note }
 > **Future improvement:** This workflow will be simplified by a native `jig issues create` command that reads team, project, and label config directly from `jig.toml` — no MCP discovery step needed.

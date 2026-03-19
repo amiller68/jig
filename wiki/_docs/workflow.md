@@ -1,10 +1,8 @@
 ---
-layout: page
-title: Putting It All Together
-nav_order: 5
+title: Workflow
+slug: workflow
+date: 2025-03-09
 ---
-
-# Putting It All Together
 
 You've read the concepts. You've installed jig. Now what does the actual workflow look like — end to end — when you sit down to ship a feature?
 
@@ -78,7 +76,7 @@ jig issues --status planned         # what's ready to pick up
 jig issues ENG-123                  # view a specific ticket
 ```
 
-See the [Linear Integration](/appendix/linear-integration) appendix for full setup.
+See the [Linear Integration](/articles/linear-integration/) article for full setup.
 
 ### What makes a good ticket?
 
@@ -134,7 +132,7 @@ jig ps -w
 
 This starts the live watch display:
 
-<pre class="terminal-output">
+```text
 jig ps --watch — 4 workers  (every 2s)
 
 WORKER              STATE    COMMITS  PR     HEALTH  ISSUE
@@ -144,13 +142,13 @@ WORKER              STATE    COMMITS  PR     HEALTH  ISSUE
 ● error-pages       review         5  #43    ok      ENG-126
 
                                               [l]ogs  [q]uit
-</pre>
+```
 
 At a glance you can see:
 
 - **Which agents are active** — `running` means tool use is flowing
 - **Who's stuck** — `stalled` means silence for 5+ minutes, the daemon will nudge
-- **Draft vs review** — `draft` (blue) means the PR is a draft and the agent is still working; `review` (cyan) means the PR is ready for human review
+- **Draft vs review** — `draft` means the PR is a draft and the agent is still working; `review` means the PR is ready for human review
 - **PR health** — `ci` means checks are failing, `conflicts` means merge conflicts
 - **Progress** — Commit count tells you how far along each worker is
 
@@ -168,12 +166,12 @@ You're now watching the agent work in real time. Read its output, see its tool c
 
 Press `l` in watch mode to see what the daemon is actually doing:
 
-<pre class="terminal-output">
+```text
 [14:32:05] tick: 3 workers, 1 action, 1 nudge, 0 errors
 [14:32:05]   myrepo/jwt-auth PR: -
 [14:32:05]   myrepo/test-coverage PR: ci
 [14:32:35] tick: 3 workers, 0 actions, 0 nudges, 0 errors
-</pre>
+```
 
 This is useful for understanding why a worker got nudged or when a PR was discovered.
 
@@ -196,8 +194,8 @@ The daemon treats draft and non-draft PRs differently:
 
 | PR state | STATE column | Nudges? | Rationale |
 |----------|-------------|---------|-----------|
-| Draft | `draft` (blue) | Yes — CI, conflicts, reviews, commits | Agent is still working, can act on problems |
-| Ready for review | `review` (cyan) | No | Human is reviewing, don't interrupt the agent |
+| Draft | `draft` | Yes — CI, conflicts, reviews, commits | Agent is still working, can act on problems |
+| Ready for review | `review` | No | Human is reviewing, don't interrupt the agent |
 
 This means the typical agent workflow is: work → push → create draft PR → fix any CI/conflict issues → mark ready for review → human takes over. The daemon nudges through the draft phase and backs off once the PR is promoted.
 
@@ -258,7 +256,7 @@ The cycle is:
 5. **Review**: As PRs come in, review and merge or send back.
 6. **End of day**: Check dashboard, clean up stale workers, plan tomorrow's tickets.
 
-## Putting it all together: a real session
+## A real session
 
 Here's what a productive 2-hour block looks like:
 

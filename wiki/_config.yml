@@ -4,31 +4,47 @@ description: Git worktree manager for orchestrating agentic coding assistants in
 baseurl: ""
 url: https://jig.krondor.org
 
-theme: minima
-
 markdown: kramdown
 highlighter: rouge
 
-header_pages:
-  - index.md
-  - background.md
-  - concepts.md
-  - getting-started.md
-  - putting-it-all-together.md
-  - appendix/index.md
+collections:
+  docs:
+    output: true
+    permalink: /docs/:slug/
+  articles:
+    output: true
+    permalink: /articles/:slug/
 
-minima:
-  skin: dark
-
-author:
-  name: jig
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+  - scope:
+      path: ""
+      type: docs
+    values:
+      layout: doc
+  - scope:
+      path: ""
+      type: articles
+    values:
+      layout: article
+  - scope:
+      path: "index.md"
+    values:
+      layout: home
+  - scope:
+      path: "articles.md"
+    values:
+      layout: articles
 
 exclude:
   - Gemfile
   - Gemfile.lock
+  - Makefile
 
-# Branding
 brand:
-  primary_color: "#fabd2f"    # gruvbox yellow
-  accent_color: "#8ec07c"     # gruvbox aqua
+  primary_color: "#fabd2f"
+  accent_color: "#fe8019"
   tagline: "Multiply yourself."

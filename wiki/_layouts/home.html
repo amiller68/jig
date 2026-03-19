@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  {% include head.html %}
+</head>
+<body>
+  {% include header.html %}
+  <main class="home">
+
+    <section class="hero">
+      <svg class="hero-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="72" height="72">
+        <rect x="0" y="0" width="10" height="10" rx="2" class="logo-surround"/>
+        <rect x="13" y="0" width="10" height="10" rx="2" class="logo-surround"/>
+        <rect x="26" y="0" width="10" height="10" rx="2" class="logo-surround" opacity="0.55"/>
+        <rect x="0" y="13" width="10" height="10" rx="2" class="logo-surround" opacity="0.15"/>
+        <rect x="13" y="13" width="10" height="10" rx="2" class="logo-center"/>
+        <rect x="26" y="13" width="10" height="10" rx="2" class="logo-surround" opacity="0.15"/>
+        <rect x="0" y="26" width="10" height="10" rx="2" class="logo-surround"/>
+        <rect x="13" y="26" width="10" height="10" rx="2" class="logo-surround" opacity="0.35"/>
+        <rect x="26" y="26" width="10" height="10" rx="2" class="logo-surround" opacity="0.15"/>
+      </svg>
+      <h1 class="hero-title">jig</h1>
+      <p class="hero-tagline">Multiply yourself across parallel agent sessions.</p>
+      <p class="hero-sub">Git worktree manager for orchestrating agentic coding assistants. Write tickets, spawn workers, ship features &mdash; in parallel.</p>
+      <div class="hero-install" id="hero-install">
+        <code>curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash</code>
+        <button class="copy-btn copy-btn-visible" onclick="navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash').then(function(){var b=document.querySelector('#hero-install .copy-btn');b.textContent='copied';setTimeout(function(){b.textContent='copy'},1500)})">copy</button>
+      </div>
+      <div class="hero-links">
+        <a href="{{ '/docs/getting-started/' | relative_url }}" class="hero-cta">Get started</a>
+        <a href="https://github.com/amiller68/jig" class="hero-link">GitHub</a>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="feature-grid">
+        <div class="feature">
+          <h3>Parallel workers</h3>
+          <p>Spawn multiple agents on independent tasks. Each gets its own worktree, branch, and tmux session. No conflicts, no waiting.</p>
+        </div>
+        <div class="feature">
+          <h3>Autonomous orchestration</h3>
+          <p>A background daemon monitors workers, nudges stuck agents, tracks CI failures, and cleans up merged PRs &mdash; automatically.</p>
+        </div>
+        <div class="feature">
+          <h3>Terminal-native</h3>
+          <p>Everything happens in your terminal. One dashboard shows all workers, their state, and PR health. Attach to any session instantly.</p>
+        </div>
+        <div class="feature">
+          <h3>Context engineering</h3>
+          <p>Scaffold docs, issues, and conventions that agents actually follow. Well-scoped tickets in, reviewed PRs out.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow-preview">
+      <h2>The loop</h2>
+      <div class="workflow-steps">
+        <div class="workflow-step">
+          <span class="step-num">1</span>
+          <div>
+            <strong>Write tickets</strong>
+            <p>Scope work into parallelizable units with clear acceptance criteria.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <span class="step-num">2</span>
+          <div>
+            <strong>Spawn agents</strong>
+            <p><code>jig spawn auth --issue ENG-123 --auto</code></p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <span class="step-num">3</span>
+          <div>
+            <strong>Monitor</strong>
+            <p><code>jig ps -w</code> &mdash; live dashboard, daemon handles nudges.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <span class="step-num">4</span>
+          <div>
+            <strong>Review &amp; merge</strong>
+            <p>PRs show up in the dashboard. Review, approve, ship.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lifecycle">
+      <h2>What happens after spawn</h2>
+      <div class="lifecycle-flow">
+        <div class="lifecycle-node">Agent works</div>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <div class="lifecycle-node">Pushes &amp; opens draft PR</div>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <div class="lifecycle-node lifecycle-daemon">
+          Daemon watches
+          <span class="lifecycle-detail">CI failing? Nudge. Merge conflict? Nudge. Idle too long? Nudge.</span>
+        </div>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <div class="lifecycle-node">Agent fixes &amp; pushes</div>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <div class="lifecycle-node lifecycle-you">You review &amp; merge</div>
+      </div>
+      <p class="lifecycle-caption">Agents that stall get nudged. PRs that fail CI get flagged. Merged PRs get cleaned up. You focus on review.</p>
+    </section>
+
+    <section class="home-bottom">
+      <p>Read the <a href="{{ '/docs/background/' | relative_url }}">docs</a> for the full story, or dive into <a href="{{ '/articles/' | relative_url }}">articles</a> on autonomous orchestration and integrations.</p>
+    </section>
+
+  </main>
+  {% include footer.html %}
+</body>
+</html>

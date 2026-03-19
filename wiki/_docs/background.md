@@ -1,10 +1,8 @@
 ---
-layout: page
 title: Background
-nav_order: 2
+slug: background
+date: 2025-02-19
 ---
-
-# Background
 
 ## ACAs vs Engineers
 

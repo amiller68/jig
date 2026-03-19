@@ -1,10 +1,8 @@
 ---
-layout: page
 title: Core Concepts
-nav_order: 3
+slug: core-concepts
+date: 2025-03-11
 ---
-
-# Core Concepts
 
 jig is built around five pillars: **worktrees**, **documentation**, **issues**, **quality**, and **skills**.
 
@@ -58,7 +56,7 @@ Plus a `CLAUDE.md` (or agent-specific config) at the repo root with:
 
 ## Issues
 
-Well-scoped tickets are the input to agent work. jig supports file-based issue tracking in `issues/` and can also pull issues directly from [Linear](/appendix/linear-integration):
+Well-scoped tickets are the input to agent work. jig supports file-based issue tracking in `issues/` and can also pull issues directly from [Linear](/articles/linear-integration/):
 
 ```text
 issues/

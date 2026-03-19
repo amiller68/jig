@@ -1,10 +1,8 @@
 ---
-layout: page
 title: Getting Started
-nav_order: 4
+slug: getting-started
+date: 2025-02-19
 ---
-
-# Getting Started
 
 ## Requirements
 
@@ -183,5 +181,5 @@ jig remove hello-world    # Clean up
 
 ## Next steps
 
-- Read [Core Concepts](/concepts) to understand the jig philosophy
-- Explore [Background](/background) for the "why" behind jig
+- Read [Core Concepts](/docs/core-concepts/) to understand the jig philosophy
+- Explore [Background](/docs/background/) for the "why" behind jig
