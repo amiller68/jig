@@ -1272,6 +1272,32 @@ impl<'a> Daemon<'a> {
         // Launch tmux window
         wt.launch(Some(&context))?;
 
+        // Update issue status to InProgress to prevent duplicate spawning.
+        // Use a non-ref provider so FileProvider writes to the working tree
+        // and LinearProvider updates via API.
+        let jig_toml = crate::config::JigToml::load(repo_root)?.unwrap_or_default();
+        let global_config = crate::global::GlobalConfig::load().unwrap_or_default();
+        match crate::issues::make_provider(repo_root, &jig_toml, &global_config) {
+            Ok(provider) => {
+                if let Err(e) =
+                    provider.update_status(&issue.issue_id, &crate::issues::IssueStatus::InProgress)
+                {
+                    tracing::warn!(
+                        issue = %issue.issue_id,
+                        error = %e,
+                        "failed to update issue status to InProgress"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    issue = %issue.issue_id,
+                    error = %e,
+                    "failed to create provider for issue status update"
+                );
+            }
+        }
+
         Ok(())
     }
 

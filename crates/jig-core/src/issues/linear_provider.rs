@@ -143,6 +143,10 @@ impl IssueProvider for LinearProvider {
         Self::PROVIDER_KIND
     }
 
+    fn update_status(&self, id: &str, new_status: &IssueStatus) -> Result<()> {
+        self.update_status(id, new_status)
+    }
+
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
         // Use project filter from IssueFilter if provided, else fall back to config.
         let projects = if let Some(ref cat) = filter.category {

@@ -38,6 +38,9 @@ pub trait IssueProvider {
     /// Get a single issue by ID.
     fn get(&self, id: &str) -> Result<Option<Issue>>;
 
+    /// Update the status of an issue by ID.
+    fn update_status(&self, id: &str, status: &IssueStatus) -> Result<()>;
+
     /// List issues eligible for auto-spawning (status=Planned).
     ///
     /// - Empty slice: return ALL planned issues whose dependencies are satisfied
