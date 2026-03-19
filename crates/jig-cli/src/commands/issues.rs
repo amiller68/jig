@@ -82,8 +82,8 @@ pub enum IssuesCommand {
         priority: Option<String>,
 
         /// Category/directory (file) or project name (Linear)
-        #[arg(short, long, default_value = "features")]
-        category: String,
+        #[arg(short, long)]
+        category: Option<String>,
 
         /// Labels to attach (can specify multiple -l flags)
         #[arg(short, long)]
@@ -279,7 +279,7 @@ fn run_create(
     title: &str,
     template: &str,
     priority: Option<&str>,
-    category: &str,
+    category: Option<&str>,
     labels: &[String],
     body: Option<&str>,
 ) -> Result<IssuesOutput, IssuesError> {
@@ -307,13 +307,14 @@ fn run_create(
                 body_text.as_deref(),
                 pri.as_ref(),
                 labels,
-                Some(category),
+                category,
             )?;
             Ok(IssuesOutput::Created(id))
         }
         _ => {
+            let cat = category.unwrap_or("features");
             let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
-            let id = file_provider.create_issue(title, category, template, pri.as_ref(), labels)?;
+            let id = file_provider.create_issue(title, cat, template, pri.as_ref(), labels)?;
             Ok(IssuesOutput::Created(id))
         }
     }
@@ -462,7 +463,7 @@ impl Op for Issues {
                 title,
                 template,
                 priority.as_deref(),
-                category,
+                category.as_deref(),
                 label,
                 body.as_deref(),
             ),

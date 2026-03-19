@@ -80,7 +80,22 @@ jig issues ENG-123
 
 # Spawn a worker from a Linear issue
 jig spawn auth-jwt --issue ENG-123
+
+# Create a new issue in Linear
+jig issues create "Fix auth crash"
+
+# With body, priority, labels, and project
+jig issues create "Fix auth crash" \
+  --body "Stack trace shows null pointer in session handler" \
+  --priority high \
+  --label backend --label bug \
+  --category Backend
+
+# Body from stdin
+echo "detailed description" | jig issues create "Fix auth crash" --body -
 ```
+
+When creating issues, `--category` maps to a Linear project name. If omitted, the first project from your `jig.toml` config (or profile) is used. Labels are resolved by name (case-insensitive) against the team's labels in Linear. The created issue's identifier (e.g. `ENG-456`) is printed to stdout.
 
 ## Status mapping
 
