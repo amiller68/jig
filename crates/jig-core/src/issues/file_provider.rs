@@ -330,6 +330,10 @@ impl IssueProvider for FileProvider {
         Self::PROVIDER_KIND
     }
 
+    fn update_status(&self, id: &str, new_status: &IssueStatus) -> Result<()> {
+        self.update_status(id, new_status)
+    }
+
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
         let all = self.scan_all()?;
         Ok(all.into_iter().filter(|i| i.matches(filter)).collect())

@@ -118,6 +118,8 @@ impl Op for Spawn {
             Worktree::open(&repo.repo_root, &repo.worktrees_dir, &name)?
         };
 
+        // Track issue ID before consuming the issue
+        let issue_id_for_status = issue.as_ref().map(|i| i.id.clone());
         let issue_context = issue.map(|i| i.body);
 
         // Build effective context: --context takes precedence, issue body as fallback
@@ -130,6 +132,23 @@ impl Op for Spawn {
         // Register and launch using Worktree methods
         wt.register(effective_context.as_deref(), issue_ref)?;
         wt.launch(effective_context.as_deref())?;
+
+        // Update issue status to InProgress to prevent duplicate spawning
+        if let Some(ref issue_id) = issue_id_for_status {
+            let global_config = GlobalConfig::load().unwrap_or_default();
+            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+            if let Err(e) =
+                provider.update_status(issue_id, &jig_core::issues::IssueStatus::InProgress)
+            {
+                eprintln!(
+                    "  {}",
+                    ui::warn_text(&format!(
+                        "Failed to update issue status to InProgress: {}",
+                        e
+                    ))
+                );
+            }
+        }
 
         ui::success(&format!(
             "Launched Claude in tmux window '{}'",
