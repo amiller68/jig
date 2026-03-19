@@ -100,6 +100,48 @@ query Viewer {
 }
 "#;
 
+const CREATE_ISSUE_MUTATION: &str = r#"
+mutation CreateIssue($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      identifier
+    }
+  }
+}
+"#;
+
+const TEAM_ID_QUERY: &str = r#"
+query TeamByKey($filter: TeamFilter) {
+  teams(filter: $filter, first: 1) {
+    nodes {
+      id
+    }
+  }
+}
+"#;
+
+const LABELS_QUERY: &str = r#"
+query LabelsByTeam($filter: IssueLabelFilter) {
+  issueLabels(filter: $filter, first: 100) {
+    nodes {
+      id
+      name
+    }
+  }
+}
+"#;
+
+const PROJECTS_QUERY: &str = r#"
+query ProjectsByName($filter: ProjectFilter) {
+  projects(filter: $filter, first: 1) {
+    nodes {
+      id
+    }
+  }
+}
+"#;
+
 /// Parse an identifier like "AUT-62" into (team_key, number).
 ///
 /// Also accepts branch-format strings like `feature/aut-5044-refactor-foo`
@@ -169,6 +211,56 @@ struct UpdateIssueData {
 struct UpdateIssueResult {
     #[allow(dead_code)]
     success: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateIssueData {
+    issue_create: CreateIssueResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateIssueResult {
+    #[allow(dead_code)]
+    success: bool,
+    issue: RawCreatedIssue,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCreatedIssue {
+    identifier: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamsData {
+    teams: NodeList<RawTeamId>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTeamId {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LabelsData {
+    issue_labels: NodeList<RawLabelWithId>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLabelWithId {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectsData {
+    projects: NodeList<RawProjectId>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawProjectId {
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -489,6 +581,122 @@ impl LinearClient {
 
         let _data: UpdateIssueData = self.execute(&request)?;
         Ok(())
+    }
+
+    /// Resolve a team key (e.g. "AUT") to its internal UUID.
+    pub fn team_id(&self, team_key: &str) -> Result<String> {
+        let filter = serde_json::json!({ "key": { "eq": team_key } });
+        let variables = serde_json::json!({ "filter": filter });
+        let request = GqlRequest {
+            query: TEAM_ID_QUERY,
+            variables,
+        };
+        let data: TeamsData = self.execute(&request)?;
+        data.teams
+            .nodes
+            .into_iter()
+            .next()
+            .map(|t| t.id)
+            .ok_or_else(|| Error::Linear(format!("team not found: {}", team_key)))
+    }
+
+    /// Resolve label names to their IDs for a given team.
+    pub fn label_ids(&self, team_key: &str, names: &[String]) -> Result<Vec<String>> {
+        if names.is_empty() {
+            return Ok(vec![]);
+        }
+        let filter = serde_json::json!({
+            "team": { "key": { "eq": team_key } }
+        });
+        let variables = serde_json::json!({ "filter": filter });
+        let request = GqlRequest {
+            query: LABELS_QUERY,
+            variables,
+        };
+        let data: LabelsData = self.execute(&request)?;
+        let ids: Vec<String> = data
+            .issue_labels
+            .nodes
+            .into_iter()
+            .filter(|l| names.iter().any(|n| n.eq_ignore_ascii_case(&l.name)))
+            .map(|l| l.id)
+            .collect();
+        Ok(ids)
+    }
+
+    /// Resolve a project name to its ID.
+    pub fn project_id(&self, name: &str) -> Result<Option<String>> {
+        let filter = serde_json::json!({
+            "name": { "eq": name }
+        });
+        let variables = serde_json::json!({ "filter": filter });
+        let request = GqlRequest {
+            query: PROJECTS_QUERY,
+            variables,
+        };
+        let data: ProjectsData = self.execute(&request)?;
+        Ok(data.projects.nodes.into_iter().next().map(|p| p.id))
+    }
+
+    /// Create a new issue in Linear.
+    ///
+    /// Returns the created issue's identifier (e.g. "AUT-1234").
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_issue(
+        &self,
+        team_key: &str,
+        title: &str,
+        body: Option<&str>,
+        priority: Option<&IssuePriority>,
+        labels: &[String],
+        project: Option<&str>,
+        assignee: Option<&str>,
+    ) -> Result<String> {
+        let team_id = self.team_id(team_key)?;
+
+        let mut input = serde_json::Map::new();
+        input.insert("teamId".into(), serde_json::json!(team_id));
+        input.insert("title".into(), serde_json::json!(title));
+
+        if let Some(desc) = body {
+            if !desc.is_empty() {
+                input.insert("description".into(), serde_json::json!(desc));
+            }
+        }
+
+        if let Some(p) = priority {
+            let num = match p {
+                IssuePriority::Urgent => 1,
+                IssuePriority::High => 2,
+                IssuePriority::Medium => 3,
+                IssuePriority::Low => 4,
+            };
+            input.insert("priority".into(), serde_json::json!(num));
+        }
+
+        let label_ids = self.label_ids(team_key, labels)?;
+        if !label_ids.is_empty() {
+            input.insert("labelIds".into(), serde_json::json!(label_ids));
+        }
+
+        if let Some(proj_name) = project {
+            if let Some(proj_id) = self.project_id(proj_name)? {
+                input.insert("projectId".into(), serde_json::json!(proj_id));
+            }
+        }
+
+        if let Some(assignee_val) = assignee {
+            input.insert("assigneeId".into(), serde_json::json!(assignee_val));
+        }
+
+        let variables = serde_json::json!({ "input": input });
+        let request = GqlRequest {
+            query: CREATE_ISSUE_MUTATION,
+            variables,
+        };
+
+        let data: CreateIssueData = self.execute(&request)?;
+        Ok(data.issue_create.issue.identifier)
     }
 
     /// Get a single issue by its identifier (e.g. "AUT-123").
