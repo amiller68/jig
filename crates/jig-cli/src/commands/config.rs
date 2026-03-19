@@ -5,7 +5,7 @@ use clap::{Args, Subcommand};
 use jig_core::config::{self, ConfigDisplay};
 use jig_core::Error as CoreError;
 
-use crate::op::{Op, RepoCtx};
+use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
 
 /// Manage configuration
@@ -78,7 +78,13 @@ impl Op for Config {
         }
 
         match &self.subcommand {
-            None | Some(ConfigCommands::Show) => show_config(ctx),
+            None | Some(ConfigCommands::Show) => {
+                if ctx.repo.is_some() {
+                    show_config(ctx)
+                } else {
+                    show_global_config()
+                }
+            }
             Some(ConfigCommands::Base {
                 branch,
                 global,
@@ -89,6 +95,139 @@ impl Op for Config {
             }
         }
     }
+
+    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
+        if self.list {
+            return show_list();
+        }
+
+        // In global mode, create a repo-less context for subcommands that need it
+        let repo_ctx = RepoCtx { repo: None };
+
+        match &self.subcommand {
+            None | Some(ConfigCommands::Show) => show_global_config(),
+            Some(ConfigCommands::Base { branch, unset, .. }) => {
+                // Force global=true in -g mode
+                handle_base(&repo_ctx, branch.as_deref(), true, *unset)
+            }
+            Some(ConfigCommands::OnCreate { .. }) => {
+                eprintln!("error: on-create hook is repo-specific, cannot use with -g/--global");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn show_global_config() -> Result<ConfigOutput, ConfigError> {
+    let global = jig_core::global::config::GlobalConfig::load()?;
+
+    /// Format a source attribution tag.
+    fn src(s: &str) -> String {
+        ui::source(&format!("({})", s))
+    }
+
+    // -- Base branch --
+    ui::header("Configuration");
+    eprintln!();
+    match config::get_global_base_branch()? {
+        Some(branch) => {
+            eprintln!("  {} {}", ui::bold("Base branch:"), ui::highlight(&branch));
+        }
+        None => {
+            eprintln!("  {} {}", ui::bold("Base branch:"), ui::dim("(not set)"));
+        }
+    }
+
+    // -- Spawn --
+    eprintln!();
+    ui::header("Spawn");
+    eprintln!();
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Max workers:"),
+        ui::highlight(&global.spawn.max_concurrent_workers.to_string()),
+        src("global config")
+    );
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Poll interval:"),
+        ui::highlight(&format!("{}s", global.spawn.auto_spawn_interval)),
+        src("global config")
+    );
+
+    // -- Health --
+    eprintln!();
+    ui::header("Health");
+    eprintln!();
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Silence threshold:"),
+        ui::highlight(&format!("{}s", global.health.silence_threshold_seconds)),
+        src("global config")
+    );
+    eprintln!(
+        "  {} {} {}",
+        ui::dim("Max nudges:"),
+        ui::highlight(&global.health.max_nudges.to_string()),
+        src("global config")
+    );
+
+    // -- Notify --
+    if global.notify.exec.is_some() || global.notify.webhook.is_some() {
+        eprintln!();
+        ui::header("Notify");
+        eprintln!();
+        if let Some(ref exec) = global.notify.exec {
+            eprintln!("  {} {}", ui::dim("Exec:"), ui::highlight(exec));
+        }
+        if let Some(ref webhook) = global.notify.webhook {
+            eprintln!("  {} {}", ui::dim("Webhook:"), ui::highlight(webhook));
+        }
+        if !global.notify.events.is_empty() {
+            eprintln!(
+                "  {} {}",
+                ui::dim("Events:"),
+                ui::highlight(&global.notify.events.join(", "))
+            );
+        }
+    }
+
+    // -- GitHub --
+    eprintln!();
+    ui::header("GitHub");
+    eprintln!();
+    eprintln!(
+        "  {} {}",
+        ui::dim("Auto-cleanup merged:"),
+        ui::highlight(&global.github.auto_cleanup_merged.to_string())
+    );
+    eprintln!(
+        "  {} {}",
+        ui::dim("Auto-cleanup closed:"),
+        ui::highlight(&global.github.auto_cleanup_closed.to_string())
+    );
+
+    // -- Daemon --
+    eprintln!();
+    ui::header("Daemon");
+    eprintln!();
+    eprintln!(
+        "  {} {}",
+        ui::dim("Auto-recover:"),
+        ui::highlight(&global.daemon.auto_recover.to_string())
+    );
+    eprintln!(
+        "  {} {}",
+        ui::dim("Tick interval:"),
+        ui::highlight(&format!("{}s", global.daemon.interval_seconds))
+    );
+    eprintln!(
+        "  {} {}",
+        ui::dim("Session prefix:"),
+        ui::highlight(&global.daemon.session_prefix)
+    );
+
+    Ok(ConfigOutput(None))
 }
 
 fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
@@ -160,12 +299,55 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
         ui::highlight(&display.issues_provider),
         src(&display.issues_source)
     );
-    eprintln!(
-        "  {} {} {}",
-        ui::dim("Directory:"),
-        ui::highlight(&display.issues_directory),
-        src(&display.issues_source)
-    );
+    if display.issues_provider == "linear" {
+        if let Some(ref linear) = display.linear {
+            eprintln!(
+                "  {} {} {}",
+                ui::dim("Profile:"),
+                ui::highlight(&linear.profile),
+                src(&display.issues_source)
+            );
+            if let Some(ref team) = linear.team {
+                eprintln!(
+                    "  {} {} {}",
+                    ui::dim("Team:"),
+                    ui::highlight(team),
+                    src(&display.issues_source)
+                );
+            }
+            if !linear.projects.is_empty() {
+                eprintln!(
+                    "  {} {} {}",
+                    ui::dim("Projects:"),
+                    ui::highlight(&linear.projects.join(", ")),
+                    src(&display.issues_source)
+                );
+            }
+            if let Some(ref assignee) = linear.assignee {
+                eprintln!(
+                    "  {} {} {}",
+                    ui::dim("Assignee:"),
+                    ui::highlight(assignee),
+                    src(&display.issues_source)
+                );
+            }
+            if !linear.labels.is_empty() {
+                eprintln!(
+                    "  {} {} {}",
+                    ui::dim("Labels:"),
+                    ui::highlight(&linear.labels.join(", ")),
+                    src(&display.issues_source)
+                );
+            }
+        }
+    } else {
+        eprintln!(
+            "  {} {} {}",
+            ui::dim("Directory:"),
+            ui::highlight(&display.issues_directory),
+            src(&display.issues_source)
+        );
+    }
     match &display.auto_spawn_labels {
         None => {
             eprintln!("  {} {}", ui::dim("Auto-spawn:"), ui::warn_text("disabled"));

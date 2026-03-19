@@ -670,6 +670,8 @@ pub struct ConfigDisplay {
     pub issues_provider: String,
     pub issues_directory: String,
     pub issues_source: String,
+    /// Linear config (populated when provider = "linear")
+    pub linear: Option<LinearIssuesConfig>,
     // Auto-spawn fields
     pub auto_spawn_labels: Option<Vec<String>>,
     pub max_concurrent_workers: usize,
@@ -814,6 +816,7 @@ impl ConfigDisplay {
             issues_provider: jig_toml.issues.provider,
             issues_directory: jig_toml.issues.directory,
             issues_source,
+            linear: jig_toml.issues.linear,
             auto_spawn_labels: jig_toml.issues.auto_spawn_labels,
             max_concurrent_workers,
             max_concurrent_workers_source,
