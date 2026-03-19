@@ -1,7 +1,7 @@
 //! PR lifecycle monitoring — checks merged/closed/open PRs and injects actions.
 
 use crate::config::ResolvedNudgeConfig;
-use crate::dispatch::Action;
+use crate::dispatch::{Action, NotifyKind};
 use crate::events::WorkerState;
 use crate::github::GitHubClient;
 use crate::global::GlobalConfig;
@@ -93,6 +93,9 @@ where
                     actions.push(Action::Notify {
                         worker_id: worker_name.to_string(),
                         message: format!("PR #{} merged, worker cleaned up", pr_number),
+                        kind: NotifyKind::WorkCompleted {
+                            pr_url: Some(pr_url.to_string()),
+                        },
                     });
                 }
             }
@@ -101,6 +104,7 @@ where
                 actions.push(Action::Notify {
                     worker_id: worker_name.to_string(),
                     message: format!("PR #{} closed without merge", pr_number),
+                    kind: NotifyKind::NeedsIntervention,
                 });
                 if self.config.github.auto_cleanup_closed {
                     actions.push(Action::Cleanup {
@@ -153,6 +157,16 @@ where
                                             "new review feedback detected, resetting review nudge count"
                                         );
                                         worker_state.nudge_counts.remove("review");
+                                        actions.push(Action::Notify {
+                                            worker_id: worker_name.to_string(),
+                                            message: format!(
+                                                "New review feedback on PR ({}→{} items)",
+                                                previous, current
+                                            ),
+                                            kind: NotifyKind::FeedbackReceived {
+                                                pr_url: pr_url.to_string(),
+                                            },
+                                        });
                                     }
                                 }
                             }
