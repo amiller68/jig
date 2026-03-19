@@ -1,5 +1,5 @@
 ---
-description: Discover and manage file-based work items. Use to explore tasks before spawning workers or to track project progress.
+description: Discover and manage work items. Use to explore tasks before spawning workers or to track project progress. Works with any configured issue provider.
 allowed-tools:
   - Bash(jig:*)
   - Bash(ls:*)
@@ -11,21 +11,7 @@ allowed-tools:
   - Grep
 ---
 
-Discover and manage work items in `issues/`.
-
-## Directory Structure
-
-```
-issues/
-├── _templates/           # Issue templates
-├── epics/                # Multi-ticket features (directories)
-│   └── feature-name/
-│       ├── index.md      # Epic overview
-│       └── 0-task.md     # Tickets (0-indexed)
-├── features/             # Single-ticket features
-├── bugs/                 # Bug fixes
-└── chores/               # Maintenance tasks
-```
+Discover and manage work items via `jig issues`. Works with any configured provider (file, Linear).
 
 ## Actions
 
@@ -49,7 +35,8 @@ jig issues --ids
 
 ```bash
 jig issues <id>
-# e.g. jig issues features/my-feature
+# e.g. jig issues features/my-feature (file provider)
+# e.g. jig issues ENG-123 (Linear provider)
 ```
 
 ### Create issue
@@ -65,33 +52,21 @@ jig issues create "Fix crash on exit" --priority high --category bugs
 jig issues create "Refactor auth" --label backend --label auto
 ```
 
-### Create epic
-
-Epics still use manual directory setup:
-
-```bash
-mkdir issues/epics/my-epic
-cp issues/_templates/epic-index.md issues/epics/my-epic/index.md
-cp issues/_templates/ticket.md issues/epics/my-epic/0-first-task.md
-```
-
-Update the epic's `index.md` ticket table.
-
 ### Update status
 
 ```bash
-jig issues status features/my-feature --status in-progress
-jig issues status bugs/crash-fix --status blocked
+jig issues status <id> --status in-progress
+jig issues status <id> --status blocked
 ```
 
 ### Complete issue
 
 ```bash
-# Mark complete (keeps file)
-jig issues complete features/my-feature
+# Mark complete
+jig issues complete <id>
 
-# Mark complete and delete file
-jig issues complete features/my-feature --delete
+# Mark complete and delete file (file provider only)
+jig issues complete <id> --delete
 ```
 
 ### Stats
@@ -114,7 +89,7 @@ Issues can depend on other issues via path:
 
 Dependencies must be `Complete` before starting dependent issue.
 
-### Epic tickets
+### Epic tickets (file provider)
 
 Epic tickets in `issues/epics/name/N-ticket.md` are ordered:
 - `0-*.md` must complete before `1-*.md`
@@ -130,7 +105,3 @@ See `issues/README.md` for full documentation.
 Typically for straightforward and well-defined tasks,
  we prefer setting the `auto` label such that said tasks
  are picked up and spawned by the jig daemon.
-
-## External Trackers
-
-For Linear, Jira, or GitHub Issues, use their MCP tools or CLI instead of file scanning.

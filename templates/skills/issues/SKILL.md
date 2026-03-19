@@ -1,6 +1,7 @@
 ---
-description: Discover and manage file-based work items. Use to explore tasks before spawning workers or to track project progress.
+description: Discover and manage work items. Use to explore tasks before spawning workers or to track project progress. Works with any configured issue provider.
 allowed-tools:
+  - Bash(jig:*)
   - Bash(ls:*)
   - Bash(find:*)
   - Bash(grep:*)
@@ -13,33 +14,22 @@ allowed-tools:
   - Grep
 ---
 
-Discover and manage work items in `issues/`.
+Discover and manage work items. Works with any configured provider (file, Linear).
 
-## Directory Structure
-
-```
-issues/
-├── _templates/           # Issue templates
-├── epics/                # Multi-ticket features (directories)
-│   └── feature-name/
-│       ├── index.md      # Epic overview
-│       └── 0-task.md     # Tickets (0-indexed)
-├── features/             # Single-ticket features
-├── bugs/                 # Bug fixes
-└── chores/               # Maintenance tasks
-```
+If `jig` CLI is available, prefer `jig issues` commands. Otherwise fall back to raw file operations for the file provider.
 
 ## Actions
 
 ### List issues
 
-Scan `issues/` and show all work items:
-
 ```bash
-# All issues
-find issues -name "*.md" -not -path "*/_templates/*" -not -name "README.md"
+# Via jig CLI
+jig issues
+jig issues --status planned
+jig issues --priority high
 
-# By status
+# Via file system (fallback)
+find issues -name "*.md" -not -path "*/_templates/*" -not -name "README.md"
 grep -r "Status.*Planned" issues/
 ```
 
@@ -51,41 +41,52 @@ Display with status indicators:
 
 ### Show issue
 
-Read and display a specific issue file.
+```bash
+# Via jig CLI
+jig issues <id>
 
-### Create standalone issue
+# Via file system (fallback)
+# Read the issue file directly
+```
+
+### Create issue
 
 ```bash
+# Via jig CLI
+jig issues create "Add verbose flag"
+jig issues create "Fix crash on exit" --priority high --category bugs
+jig issues create "Refactor auth" --label backend --label auto
+
+# Via file system (fallback, file provider only)
 cp issues/_templates/standalone.md issues/features/my-feature.md
 # or issues/bugs/, issues/chores/
 ```
 
-### Create epic
-
-```bash
-mkdir issues/epics/my-epic
-cp issues/_templates/epic-index.md issues/epics/my-epic/index.md
-cp issues/_templates/ticket.md issues/epics/my-epic/0-first-task.md
-```
-
-### Create ticket in epic
-
-```bash
-cp issues/_templates/ticket.md issues/epics/my-epic/1-next-task.md
-```
-
-Update the epic's `index.md` ticket table.
-
 ### Update status
 
-Change the `**Status:**` field:
-- `Planned` → `In Progress` → `Complete`
-- Or `Blocked` if waiting on something
+```bash
+# Via jig CLI
+jig issues status <id> --status in-progress
+
+# Via file system (fallback)
+# Change the **Status:** field in the issue file
+```
+
+### Complete issue
+
+```bash
+# Via jig CLI
+jig issues complete <id>
+jig issues complete <id> --delete
+```
+
+### Stats
+
+```bash
+jig issues stats
+jig issues stats -g
+```
 
 ## Convention
 
 See `issues/README.md` for full documentation.
-
-## External Trackers
-
-For Linear, Jira, or GitHub Issues, use their MCP tools or CLI instead of file scanning.
