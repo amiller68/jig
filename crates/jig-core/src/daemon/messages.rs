@@ -112,6 +112,10 @@ pub struct SpawnRequest {
 /// Result of spawning a single worker.
 pub struct SpawnResult {
     pub worker_name: String,
+    /// Repo name (derived from repo root path) for notifications.
+    pub repo_name: String,
+    /// Issue ID for notifications.
+    pub issue_id: Option<String>,
     pub error: Option<String>,
 }
 

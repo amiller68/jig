@@ -5,5 +5,5 @@
 mod actions;
 mod rules;
 
-pub use actions::Action;
+pub use actions::{Action, NotifyKind};
 pub use rules::dispatch_actions;

@@ -5,7 +5,7 @@ use crate::events::WorkerState;
 use crate::nudge::classify_nudge;
 use crate::worker::WorkerStatus;
 
-use super::Action;
+use super::{Action, NotifyKind};
 
 /// Given an old and new worker state, return actions to execute.
 ///
@@ -48,6 +48,7 @@ where
                     _ => "unknown",
                 }
             ),
+            kind: NotifyKind::NeedsIntervention,
         });
     }
 
@@ -60,12 +61,11 @@ where
 
     // PR opened
     if old_state.pr_url.is_none() && new_state.pr_url.is_some() {
+        let pr_url = new_state.pr_url.clone().unwrap_or_default();
         actions.push(Action::Notify {
             worker_id: worker_id.to_string(),
-            message: format!(
-                "PR opened: {}",
-                new_state.pr_url.as_deref().unwrap_or("unknown")
-            ),
+            message: format!("PR opened: {}", &pr_url),
+            kind: NotifyKind::PrOpened { pr_url },
         });
     }
 
@@ -74,6 +74,7 @@ where
         actions.push(Action::Notify {
             worker_id: worker_id.to_string(),
             message: "Worker failed".to_string(),
+            kind: NotifyKind::NeedsIntervention,
         });
     }
 
@@ -130,7 +131,7 @@ mod tests {
         let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(
-            matches!(&actions[0], Action::Notify { message, .. } if message.contains("Max nudges"))
+            matches!(&actions[0], Action::Notify { message, kind: NotifyKind::NeedsIntervention, .. } if message.contains("Max nudges"))
         );
     }
 
@@ -167,7 +168,7 @@ mod tests {
         let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(
-            matches!(&actions[0], Action::Notify { message, .. } if message.contains("PR opened"))
+            matches!(&actions[0], Action::Notify { kind: NotifyKind::PrOpened { .. }, message, .. } if message.contains("PR opened"))
         );
     }
 
@@ -214,7 +215,7 @@ mod tests {
         let actions = dispatch_actions("test", &old, &new, default_resolve);
         assert_eq!(actions.len(), 1);
         assert!(
-            matches!(&actions[0], Action::Notify { message, .. } if message.contains("failed"))
+            matches!(&actions[0], Action::Notify { kind: NotifyKind::NeedsIntervention, message, .. } if message.contains("failed"))
         );
     }
 

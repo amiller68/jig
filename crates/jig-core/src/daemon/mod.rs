@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use crate::config::{JigToml, RepoHealthConfig, ResolvedNudgeConfig};
 use crate::context::RepoContext;
-use crate::dispatch::{dispatch_actions, Action};
+use crate::dispatch::{dispatch_actions, Action, NotifyKind};
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::global::{GlobalConfig, HealthConfig, WorkerEntry, WorkersState};
@@ -315,6 +315,18 @@ impl<'a> Daemon<'a> {
                         .errors
                         .push(format!("auto-spawn {}: {}", sr.worker_name, err));
                 } else {
+                    // Emit WorkStarted notification for successfully spawned workers
+                    let event = NotificationEvent::WorkStarted {
+                        repo: sr.repo_name.clone(),
+                        worker: sr.worker_name.clone(),
+                        issue: sr.issue_id.clone(),
+                    };
+                    if let Err(e) = self.notifier.emit(event) {
+                        tracing::warn!(
+                            worker = %sr.worker_name,
+                            "WorkStarted notification failed: {}", e
+                        );
+                    }
                     result.auto_spawned.push(sr.worker_name);
                 }
             }
@@ -673,11 +685,15 @@ impl<'a> Daemon<'a> {
                 actions.push(Action::Notify {
                     worker_id: worker_name.to_string(),
                     message: "PR merged, worker cleaned up".to_string(),
+                    kind: NotifyKind::WorkCompleted {
+                        pr_url: cached.pr_url.clone(),
+                    },
                 });
             } else if cached.pr_closed {
                 actions.push(Action::Notify {
                     worker_id: worker_name.to_string(),
                     message: "PR closed without merge".to_string(),
+                    kind: NotifyKind::NeedsIntervention,
                 });
                 if self.config.github.auto_cleanup_closed {
                     actions.push(Action::Cleanup {
@@ -699,6 +715,18 @@ impl<'a> Daemon<'a> {
                             "new review feedback detected, resetting review nudge count"
                         );
                         new_state.nudge_counts.remove("review");
+                        if let Some(ref pr_url) = cached.pr_url {
+                            actions.push(Action::Notify {
+                                worker_id: worker_name.to_string(),
+                                message: format!(
+                                    "New review feedback on PR ({}→{} items)",
+                                    previous, current
+                                ),
+                                kind: NotifyKind::FeedbackReceived {
+                                    pr_url: pr_url.clone(),
+                                },
+                            });
+                        }
                     }
                 }
 
@@ -1121,12 +1149,35 @@ impl<'a> Daemon<'a> {
                         );
                     }
                 }
-                Action::Notify { worker_id, message } => {
+                Action::Notify {
+                    worker_id,
+                    message,
+                    kind,
+                } => {
                     tracing::info!(worker = key, message = %message, "notification sent");
-                    let event = NotificationEvent::NeedsIntervention {
-                        repo: repo_name.to_string(),
-                        worker: worker_id.clone(),
-                        reason: message.clone(),
+                    let event = match kind {
+                        NotifyKind::NeedsIntervention => NotificationEvent::NeedsIntervention {
+                            repo: repo_name.to_string(),
+                            worker: worker_id.clone(),
+                            reason: message.clone(),
+                        },
+                        NotifyKind::PrOpened { pr_url } => NotificationEvent::PrOpened {
+                            repo: repo_name.to_string(),
+                            worker: worker_id.clone(),
+                            pr_url: pr_url.clone(),
+                        },
+                        NotifyKind::WorkCompleted { pr_url } => NotificationEvent::WorkCompleted {
+                            repo: repo_name.to_string(),
+                            worker: worker_id.clone(),
+                            pr_url: pr_url.clone(),
+                        },
+                        NotifyKind::FeedbackReceived { pr_url } => {
+                            NotificationEvent::FeedbackReceived {
+                                repo: repo_name.to_string(),
+                                worker: worker_id.clone(),
+                                pr_url: pr_url.clone(),
+                            }
+                        }
                     };
                     if let Err(e) = self.notifier.emit(event) {
                         tracing::warn!("notification failed for {}: {}", worker_id, e);
@@ -1296,6 +1347,20 @@ impl<'a> Daemon<'a> {
                     "failed to create provider for issue status update"
                 );
             }
+        }
+
+        // Emit WorkStarted notification
+        let repo_name = repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let event = NotificationEvent::WorkStarted {
+            repo: repo_name,
+            worker: issue.worker_name.clone(),
+            issue: Some(issue.issue_id.clone()),
+        };
+        if let Err(e) = self.notifier.emit(event) {
+            tracing::warn!(worker = %issue.worker_name, "WorkStarted notification failed: {}", e);
         }
 
         Ok(())

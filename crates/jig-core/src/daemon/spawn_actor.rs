@@ -25,11 +25,19 @@ pub fn spawn(
                 for issue in &req.issues {
                     let result = spawn_single(issue);
                     let worker_name = issue.worker_name.clone();
+                    let repo_name = issue
+                        .repo_root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let issue_id = Some(issue.issue_id.clone());
                     match result {
                         Ok(()) => {
                             tracing::info!(worker = %worker_name, "auto-spawned worker");
                             results.push(SpawnResult {
                                 worker_name,
+                                repo_name,
+                                issue_id,
                                 error: None,
                             });
                         }
@@ -37,6 +45,8 @@ pub fn spawn(
                             tracing::warn!(worker = %worker_name, "auto-spawn failed: {}", msg);
                             results.push(SpawnResult {
                                 worker_name,
+                                repo_name,
+                                issue_id,
                                 error: Some(msg),
                             });
                         }
