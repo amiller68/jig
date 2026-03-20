@@ -135,19 +135,7 @@ impl Op for Spawn {
 
         // Update issue status to InProgress to prevent duplicate spawning
         if let Some(ref issue_id) = issue_id_for_status {
-            let global_config = GlobalConfig::load().unwrap_or_default();
-            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
-            if let Err(e) =
-                provider.update_status(issue_id, &jig_core::issues::IssueStatus::InProgress)
-            {
-                eprintln!(
-                    "  {}",
-                    ui::warn_text(&format!(
-                        "Failed to update issue status to InProgress: {}",
-                        e
-                    ))
-                );
-            }
+            jig_core::spawn::update_issue_status(&repo.repo_root, issue_id);
         }
 
         ui::success(&format!(

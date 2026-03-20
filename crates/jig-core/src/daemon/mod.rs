@@ -1250,107 +1250,26 @@ impl<'a> Daemon<'a> {
     }
 
     /// Auto-spawn a worker for an issue.
+    ///
+    /// Delegates to [`crate::spawn::spawn_worker_for_issue`] for the core spawn
+    /// sequence, then emits the WorkStarted notification.
     fn auto_spawn_worker(&self, issue: &SpawnableIssue) -> Result<()> {
-        use crate::config::JIG_DIR;
-        use crate::worktree::Worktree;
+        use crate::spawn::{self, SpawnIssueInput};
 
-        let repo_root = &issue.repo_root;
-        let worktrees_dir = repo_root.join(JIG_DIR);
-        let worktree_path = crate::config::worktree_path(repo_root, &issue.worker_name);
-
-        if worktree_path.exists() {
-            tracing::debug!(worker = %issue.worker_name, "worktree already exists, skipping");
-            return Ok(());
-        }
-
-        // Resolve base branch
-        let base_branch = RepoContext::resolve_base_branch_for(repo_root)
-            .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
-
-        // Get copy files and on-create hook
-        let copy_files = crate::config::get_copy_files(repo_root)?;
-        let on_create_hook = crate::config::get_on_create_hook(repo_root)?;
-        let git_common_dir = crate::git::Repo::open(repo_root)?.common_dir();
-
-        // Create worktree WITHOUT on-create hook — we run it after registration
-        let wt = Worktree::create(
-            repo_root,
-            &worktrees_dir,
-            &git_common_dir,
-            &issue.worker_name,
-            None,
-            &base_branch,
-            None, // defer on-create hook
-            &copy_files,
-            true, // auto_spawned
-        )?;
-
-        // Register worker with issue context and provider-specific completion instructions
-        let completion_instructions = match issue.provider_kind {
-            crate::issues::ProviderKind::File => format!(
-                "\n\nISSUE COMPLETION: This issue is tracked by the file provider. \
-                 After your PR is created, mark the issue as done by changing \
-                 `**Status:** Planned` to `**Status:** Complete` in the issue file \
-                 (`issues/{}.md`) and committing the change.",
-                issue.issue_id
-            ),
-            crate::issues::ProviderKind::Linear => {
-                "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
-                 Status sync is handled automatically — no manual status update is needed."
-                    .to_string()
-            }
+        let input = SpawnIssueInput {
+            repo_root: &issue.repo_root,
+            issue_id: &issue.issue_id,
+            issue_title: &issue.issue_title,
+            issue_body: &issue.issue_body,
+            worker_name: &issue.worker_name,
+            provider_kind: issue.provider_kind,
+            branch_name: issue.branch_name.as_deref(),
         };
-        let context = format!(
-            "{}\n\n{}{}",
-            issue.issue_title, issue.issue_body, completion_instructions
-        );
-
-        // Register as Initializing so jig ps/ls show the worker immediately
-        wt.register_initializing(Some(&context), Some(&issue.issue_id))?;
-
-        // Run on-create hook now that the worker is visible
-        if let Some(hook) = on_create_hook.as_deref() {
-            let success = crate::config::run_on_create_hook(hook, &wt.path)?;
-            if !success {
-                wt.emit_setup_failed("on-create hook failed");
-                return Err(crate::error::Error::OnCreateHookFailed);
-            }
-        }
-
-        // Transition from Initializing → Spawned
-        wt.emit_spawn_event();
-
-        // Launch tmux window
-        wt.launch(Some(&context))?;
-
-        // Update issue status to InProgress to prevent duplicate spawning.
-        // Use a non-ref provider so FileProvider writes to the working tree
-        // and LinearProvider updates via API.
-        let jig_toml = crate::config::JigToml::load(repo_root)?.unwrap_or_default();
-        let global_config = crate::global::GlobalConfig::load().unwrap_or_default();
-        match crate::issues::make_provider(repo_root, &jig_toml, &global_config) {
-            Ok(provider) => {
-                if let Err(e) =
-                    provider.update_status(&issue.issue_id, &crate::issues::IssueStatus::InProgress)
-                {
-                    tracing::warn!(
-                        issue = %issue.issue_id,
-                        error = %e,
-                        "failed to update issue status to InProgress"
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    issue = %issue.issue_id,
-                    error = %e,
-                    "failed to create provider for issue status update"
-                );
-            }
-        }
+        spawn::spawn_worker_for_issue(&input).map_err(crate::error::Error::Custom)?;
 
         // Emit WorkStarted notification
-        let repo_name = repo_root
+        let repo_name = issue
+            .repo_root
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
