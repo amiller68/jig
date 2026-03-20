@@ -97,9 +97,14 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
 
     let context = build_issue_context(input);
 
-    // Register as Initializing so jig ps/ls show the worker immediately
-    wt.register_initializing(Some(&context), Some(input.issue_id))
-        .map_err(|e| e.to_string())?;
+    // Register as Initializing so jig ps/ls show the worker immediately,
+    // injecting the issue title into the event data for later retrieval.
+    wt.register_initializing_with_issue_text(
+        Some(&context),
+        Some(input.issue_id),
+        input.issue_title,
+    )
+    .map_err(|e| e.to_string())?;
 
     // Run on-create hook now that the worker is visible
     if let Some(hook) = on_create_hook.as_deref() {

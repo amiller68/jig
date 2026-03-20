@@ -223,18 +223,35 @@ impl Worktree {
         context: Option<&str>,
         issue_ref: Option<&str>,
     ) -> Result<()> {
-        self.register_with_event(context, issue_ref, EventType::Initializing)
+        self.register_with_event(context, issue_ref, None, EventType::Initializing)
+    }
+
+    /// Register this worktree as a worker in the orchestrator state,
+    /// emitting an Initializing event with the issue title stored in the event data.
+    pub fn register_initializing_with_issue_text(
+        &self,
+        context: Option<&str>,
+        issue_ref: Option<&str>,
+        issue_title: &str,
+    ) -> Result<()> {
+        self.register_with_event(
+            context,
+            issue_ref,
+            Some(issue_title),
+            EventType::Initializing,
+        )
     }
 
     /// Register this worktree as a worker in the orchestrator state.
     pub fn register(&self, context: Option<&str>, issue_ref: Option<&str>) -> Result<()> {
-        self.register_with_event(context, issue_ref, EventType::Spawn)
+        self.register_with_event(context, issue_ref, None, EventType::Spawn)
     }
 
     fn register_with_event(
         &self,
         context: Option<&str>,
         issue_ref: Option<&str>,
+        issue_title: Option<&str>,
         initial_event_type: EventType,
     ) -> Result<()> {
         let config = RepoConfig {
@@ -280,6 +297,9 @@ impl Worktree {
             }
             if let Some(issue) = issue_ref {
                 event = event.with_field("issue", issue);
+            }
+            if let Some(title) = issue_title {
+                event = event.with_field("issue_title", title);
             }
             let _ = event_log.append(&event);
         }
