@@ -4,6 +4,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::provider::ProviderKind;
+
 /// Issue status values matching the convention in `issues/README.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IssueStatus {
@@ -128,6 +130,26 @@ impl IssueFilter {
 }
 
 impl Issue {
+    /// Produce the full agent context text for spawning a worker on this issue.
+    ///
+    /// Combines the title, body, and provider-specific completion instructions
+    /// into a single string ready for the spawn preamble.
+    pub fn to_spawn_context(&self, provider_kind: ProviderKind) -> String {
+        let completion_instructions = match provider_kind {
+            ProviderKind::File => format!(
+                "\n\nISSUE COMPLETION: This issue is tracked by the file provider. \
+                 After your PR is created, mark the issue as done by changing \
+                 `**Status:** Planned` to `**Status:** Complete` in the issue file \
+                 (`issues/{}.md`) and committing the change.",
+                self.id
+            ),
+            ProviderKind::Linear => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
+                 Status sync is handled automatically — no manual status update is needed."
+                .to_string(),
+        };
+        format!("{}\n\n{}{}", self.title, self.body, completion_instructions)
+    }
+
     /// Whether this issue is eligible for auto-spawn given the repo's
     /// `auto_spawn_labels` config.
     ///
@@ -295,5 +317,51 @@ mod tests {
 
         // One present, one missing → auto = false
         assert!(!issue.auto(&["backend".into(), "frontend".into()]));
+    }
+
+    #[test]
+    fn to_spawn_context_file_provider() {
+        let issue = Issue {
+            id: "features/my-feature".into(),
+            title: "Add my feature".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: "Some body text".into(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+        };
+
+        let context = issue.to_spawn_context(ProviderKind::File);
+        assert!(context.contains("Add my feature"));
+        assert!(context.contains("Some body text"));
+        assert!(context.contains("issues/features/my-feature.md"));
+        assert!(context.contains("file provider"));
+    }
+
+    #[test]
+    fn to_spawn_context_linear_provider() {
+        let issue = Issue {
+            id: "ENG-123".into(),
+            title: "Fix the bug".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: "Bug details".into(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+        };
+
+        let context = issue.to_spawn_context(ProviderKind::Linear);
+        assert!(context.contains("Fix the bug"));
+        assert!(context.contains("Bug details"));
+        assert!(context.contains("Linear"));
+        assert!(!context.contains("file provider"));
     }
 }

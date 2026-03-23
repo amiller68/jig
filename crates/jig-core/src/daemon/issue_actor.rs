@@ -106,12 +106,9 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             }
             all_spawnable.push(SpawnableIssue {
                 repo_root: repo_root.clone(),
-                issue_id: issue.id,
-                issue_title: issue.title,
-                issue_body: issue.body,
+                issue,
                 worker_name,
                 provider_kind,
-                branch_name: issue.branch_name,
             });
             repo_spawned += 1;
         }

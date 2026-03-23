@@ -517,7 +517,7 @@ impl<'a> Daemon<'a> {
                         Ok(()) => {
                             tracing::info!(
                                 worker = %issue.worker_name,
-                                issue = %issue.issue_id,
+                                issue = %issue.issue.id,
                                 "auto-spawned worker"
                             );
                             result.auto_spawned.push(issue.worker_name.clone());
@@ -525,7 +525,7 @@ impl<'a> Daemon<'a> {
                         Err(e) => {
                             result
                                 .errors
-                                .push(format!("auto-spawn {}: {}", issue.issue_id, e));
+                                .push(format!("auto-spawn {}: {}", issue.issue.id, e));
                         }
                     }
                 }
@@ -1258,12 +1258,9 @@ impl<'a> Daemon<'a> {
 
         let input = SpawnIssueInput {
             repo_root: &issue.repo_root,
-            issue_id: &issue.issue_id,
-            issue_title: &issue.issue_title,
-            issue_body: &issue.issue_body,
+            issue: &issue.issue,
             worker_name: &issue.worker_name,
             provider_kind: issue.provider_kind,
-            branch_name: issue.branch_name.as_deref(),
         };
         spawn::spawn_worker_for_issue(&input).map_err(crate::error::Error::Custom)?;
 
@@ -1276,7 +1273,7 @@ impl<'a> Daemon<'a> {
         let event = NotificationEvent::WorkStarted {
             repo: repo_name,
             worker: issue.worker_name.clone(),
-            issue: Some(issue.issue_id.clone()),
+            issue: Some(issue.issue.id.clone()),
         };
         if let Err(e) = self.notifier.emit(event) {
             tracing::warn!(worker = %issue.worker_name, "WorkStarted notification failed: {}", e);

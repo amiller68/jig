@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::issues::ProviderKind;
+use crate::issues::{Issue, ProviderKind};
 
 /// Request sent to the sync actor to fetch repos.
 pub struct SyncRequest {
@@ -90,18 +90,12 @@ pub struct PruneComplete {
 pub struct SpawnableIssue {
     /// Repo root path for spawning.
     pub repo_root: PathBuf,
-    /// Issue identifier (e.g., "ENG-123" or "features/my-feature").
-    pub issue_id: String,
-    /// Issue title.
-    pub issue_title: String,
-    /// Issue body (markdown).
-    pub issue_body: String,
+    /// The parsed issue.
+    pub issue: Issue,
     /// Derived worker name (e.g., "eng-123" or "feature/eng-123-some-slug").
     pub worker_name: String,
     /// Provider kind for completion instructions.
     pub provider_kind: ProviderKind,
-    /// Suggested branch name from the issue provider (e.g., Linear's `branchName`).
-    pub branch_name: Option<String>,
 }
 
 /// Request sent to the spawn actor to create workers.
