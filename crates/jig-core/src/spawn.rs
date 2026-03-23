@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::git::Repo;
 use crate::global::GlobalConfig;
-use crate::issues::{self, IssueStatus, ProviderKind};
+use crate::issues::{IssueStatus, ProviderKind};
 use crate::session;
 use crate::state::OrchestratorState;
 use crate::templates::{TemplateContext, TemplateEngine};
@@ -131,15 +131,14 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
 /// Logs warnings on failure but never propagates errors — spawning should
 /// succeed even if the status update fails.
 pub fn update_issue_status(repo_root: &Path, issue_id: &str) {
-    let jig_toml = match JigToml::load(repo_root) {
-        Ok(t) => t.unwrap_or_default(),
+    let ctx = match RepoContext::from_path(repo_root) {
+        Ok(ctx) => ctx,
         Err(e) => {
-            tracing::warn!(issue = %issue_id, error = %e, "failed to load jig.toml for issue status update");
+            tracing::warn!(issue = %issue_id, error = %e, "failed to load repo context for issue status update");
             return;
         }
     };
-    let global_config = GlobalConfig::load().unwrap_or_default();
-    match issues::make_provider(repo_root, &jig_toml, &global_config) {
+    match ctx.issue_provider() {
         Ok(provider) => {
             if let Err(e) = provider.update_status(issue_id, &IssueStatus::InProgress) {
                 tracing::warn!(

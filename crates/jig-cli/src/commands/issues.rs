@@ -8,8 +8,6 @@ use comfy_table::{Cell, Color};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 
-use jig_core::config::JigToml;
-use jig_core::global::GlobalConfig;
 use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
@@ -237,11 +235,8 @@ impl Issues {
 
     fn run_list(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
         let repo = ctx.repo()?;
-        let global_config = GlobalConfig::load().unwrap_or_default();
         let filter = self.filter();
-
-        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+        let provider = repo.issue_provider()?;
 
         if let Some(ref id) = self.id {
             let issue = provider
@@ -250,7 +245,7 @@ impl Issues {
             return Ok(IssuesOutput::Detail(issue));
         }
 
-        let spawn_labels = jig_toml.issues.auto_spawn_labels.clone();
+        let spawn_labels = repo.jig_toml.issues.auto_spawn_labels.clone();
         let all_issues = if self.auto {
             let labels = spawn_labels.as_deref().unwrap_or(&[]);
             let spawnable = provider.list_spawnable(labels)?;
@@ -265,13 +260,11 @@ impl Issues {
     }
 
     fn run_list_global(&self, ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
-        let global_config = GlobalConfig::load().unwrap_or_default();
         let filter = self.filter();
 
         let mut all_issues = Vec::new();
         for repo in &ctx.repos {
-            let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+            let provider = repo.issue_provider()?;
 
             if let Some(ref id) = self.id {
                 if let Some(issue) = provider.get(id)? {
@@ -280,7 +273,7 @@ impl Issues {
                 continue;
             }
 
-            let spawn_labels = jig_toml.issues.auto_spawn_labels.clone();
+            let spawn_labels = repo.jig_toml.issues.auto_spawn_labels.clone();
             let repo_issues = if self.auto {
                 let labels = spawn_labels.as_deref().unwrap_or(&[]);
                 let spawnable = provider.list_spawnable(labels)?;
@@ -311,7 +304,6 @@ fn run_create(
     body: Option<&str>,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
-    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
     let pri = priority.and_then(IssuePriority::from_str_loose);
 
     // Read body from stdin if "-" was passed
@@ -325,10 +317,9 @@ fn run_create(
         None => None,
     };
 
-    match jig_toml.issues.provider.as_str() {
+    match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
-            let global_config = GlobalConfig::load().unwrap_or_default();
-            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            let linear_provider = repo.linear_provider()?;
             let id = linear_provider.create_issue(
                 title,
                 body_text.as_deref(),
@@ -340,7 +331,7 @@ fn run_create(
         }
         _ => {
             let cat = category.unwrap_or("features");
-            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            let file_provider = repo.file_provider();
             let id = file_provider.create_issue(title, cat, template, pri.as_ref(), labels)?;
             Ok(IssuesOutput::Created(id))
         }
@@ -357,7 +348,6 @@ fn run_update(
     category: Option<&str>,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
-    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
     let pri = priority.and_then(IssuePriority::from_str_loose);
 
     // Read body from stdin if "-" was passed
@@ -383,10 +373,9 @@ fn run_update(
         ));
     }
 
-    match jig_toml.issues.provider.as_str() {
+    match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
-            let global_config = GlobalConfig::load().unwrap_or_default();
-            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            let linear_provider = repo.linear_provider()?;
             linear_provider.update_issue(
                 id,
                 title,
@@ -397,7 +386,7 @@ fn run_update(
             )?;
         }
         _ => {
-            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            let file_provider = repo.file_provider();
             file_provider.update_issue(
                 id,
                 title,
@@ -418,19 +407,17 @@ fn run_status_update(
     new_status: &str,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
-    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-    let global_config = GlobalConfig::load().unwrap_or_default();
 
     let status = IssueStatus::from_str_loose(new_status)
         .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", new_status)))?;
 
-    match jig_toml.issues.provider.as_str() {
+    match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
-            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            let linear_provider = repo.linear_provider()?;
             linear_provider.update_status(id, &status)?;
         }
         _ => {
-            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            let file_provider = repo.file_provider();
             file_provider.update_status(id, &status)?;
         }
     }
@@ -443,16 +430,14 @@ fn run_status_update(
 
 fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
-    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-    let global_config = GlobalConfig::load().unwrap_or_default();
 
-    match jig_toml.issues.provider.as_str() {
+    match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
-            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            let linear_provider = repo.linear_provider()?;
             linear_provider.update_status(id, &IssueStatus::Complete)?;
         }
         _ => {
-            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            let file_provider = repo.file_provider();
             file_provider.update_status(id, &IssueStatus::Complete)?;
             if delete {
                 file_provider.delete_issue(id)?;
@@ -465,21 +450,17 @@ fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, I
 
 fn run_stats(ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
-    let global_config = GlobalConfig::load().unwrap_or_default();
-    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-    let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+    let provider = repo.issue_provider()?;
 
     let all_issues = provider.list(&IssueFilter::default())?;
     Ok(IssuesOutput::Stats(compute_stats(&all_issues)))
 }
 
 fn run_stats_global(ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
-    let global_config = GlobalConfig::load().unwrap_or_default();
     let mut all_issues = Vec::new();
 
     for repo in &ctx.repos {
-        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-        let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+        let provider = repo.issue_provider()?;
         all_issues.extend(provider.list(&IssueFilter::default())?);
     }
 
