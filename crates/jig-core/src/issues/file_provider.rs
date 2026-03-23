@@ -264,6 +264,46 @@ impl FileProvider {
         Ok(())
     }
 
+    /// Update fields of an existing issue file.
+    ///
+    /// Only fields that are `Some` / non-empty are updated.
+    pub fn update_issue(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+        priority: Option<&IssuePriority>,
+        labels: &[String],
+        category: Option<&str>,
+    ) -> Result<()> {
+        let path = self.resolve_path(id)?;
+        let mut content = std::fs::read_to_string(&path)?;
+
+        if let Some(new_title) = title {
+            content = replace_title(&content, new_title);
+        }
+
+        if let Some(pri) = priority {
+            content = replace_field(&content, "Priority", pri.as_str());
+        }
+
+        if !labels.is_empty() {
+            let labels_str = labels.join(", ");
+            content = replace_field(&content, "Labels", &labels_str);
+        }
+
+        if let Some(cat) = category {
+            content = replace_field(&content, "Category", cat);
+        }
+
+        if let Some(new_body) = body {
+            content = replace_body(&content, new_body);
+        }
+
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
+
     /// Delete an issue file.
     pub fn delete_issue(&self, id: &str) -> Result<()> {
         let path = self.resolve_path(id)?;
@@ -319,6 +359,61 @@ fn replace_field(content: &str, key: &str, new_value: &str) -> String {
     }
 
     result.join("\n")
+}
+
+/// Replace the first `# Heading` in markdown content with a new title.
+fn replace_title(content: &str, new_title: &str) -> String {
+    let mut result = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        if !replaced && line.trim().starts_with("# ") {
+            result.push(format!("# {}", new_title));
+            replaced = true;
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    result.join("\n")
+}
+
+/// Replace the body content (everything after the frontmatter section) with new text.
+///
+/// Frontmatter is defined as: the title heading, blank lines, and `**Key:** Value` lines.
+/// Everything after the last frontmatter line is replaced.
+fn replace_body(content: &str, new_body: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut last_frontmatter_idx = 0;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("# ") || trimmed.starts_with("**") || trimmed.is_empty() {
+            last_frontmatter_idx = i;
+        } else {
+            break;
+        }
+    }
+
+    let mut result: Vec<String> = lines[..=last_frontmatter_idx]
+        .iter()
+        .map(|l| l.to_string())
+        .collect();
+
+    // Ensure blank line before body
+    if !result.last().map(|l| l.is_empty()).unwrap_or(true) {
+        result.push(String::new());
+    }
+
+    result.push(new_body.to_string());
+
+    // Ensure trailing newline
+    let joined = result.join("\n");
+    if joined.ends_with('\n') {
+        joined
+    } else {
+        format!("{}\n", joined)
+    }
 }
 
 impl IssueProvider for FileProvider {
@@ -1107,5 +1202,81 @@ mod tests {
         let content = "# Title\n\n## Body\n";
         let updated = replace_field(content, "Status", "Planned");
         assert!(updated.contains("**Status:** Planned"));
+    }
+
+    #[test]
+    fn replace_title_changes_heading() {
+        let content = "# Old Title\n\n**Status:** Planned\n\n## Objective\n";
+        let updated = replace_title(content, "New Title");
+        assert!(updated.contains("# New Title"));
+        assert!(!updated.contains("# Old Title"));
+        assert!(updated.contains("**Status:** Planned"));
+    }
+
+    #[test]
+    fn replace_body_replaces_content_after_frontmatter() {
+        let content =
+            "# Title\n\n**Status:** Planned\n**Priority:** High\n\n## Objective\n\nOld body.\n";
+        let updated = replace_body(content, "New body content.");
+        assert!(updated.contains("# Title"));
+        assert!(updated.contains("**Status:** Planned"));
+        assert!(updated.contains("**Priority:** High"));
+        assert!(updated.contains("New body content."));
+        assert!(!updated.contains("Old body."));
+    }
+
+    #[test]
+    fn update_issue_title_and_priority() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+        std::fs::write(
+            features.join("my-feature.md"),
+            "# My Feature\n\n**Status:** Planned\n**Priority:** High\n\n## Objective\n\nDo stuff.\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        provider
+            .update_issue(
+                "features/my-feature",
+                Some("Renamed Feature"),
+                None,
+                Some(&IssuePriority::Urgent),
+                &[],
+                None,
+            )
+            .unwrap();
+
+        let issue = provider.get("features/my-feature").unwrap().unwrap();
+        assert_eq!(issue.title, "Renamed Feature");
+        assert_eq!(issue.priority, Some(IssuePriority::Urgent));
+    }
+
+    #[test]
+    fn update_issue_labels() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+        std::fs::write(
+            features.join("my-feature.md"),
+            "# My Feature\n\n**Status:** Planned\n\n## Objective\n\nDo stuff.\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        provider
+            .update_issue(
+                "features/my-feature",
+                None,
+                None,
+                None,
+                &["backend".to_string(), "auto".to_string()],
+                None,
+            )
+            .unwrap();
+
+        let issue = provider.get("features/my-feature").unwrap().unwrap();
+        assert_eq!(issue.labels, vec!["backend", "auto"]);
     }
 }

@@ -275,6 +275,127 @@ fn create_with_body_from_stdin() {
 }
 
 #[test]
+fn update_title() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--title",
+            "Renamed Feature",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("# Renamed Feature"));
+    assert!(!content.contains("# Existing Feature"));
+}
+
+#[test]
+fn update_priority() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--priority",
+            "urgent",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("**Priority:** Urgent"));
+    assert!(!content.contains("**Priority:** High"));
+}
+
+#[test]
+fn update_labels() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--label",
+            "backend",
+            "--label",
+            "auto",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("**Labels:** backend, auto"));
+}
+
+#[test]
+fn update_multiple_fields() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--title",
+            "New Title",
+            "--priority",
+            "low",
+            "--category",
+            "chores",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("# New Title"));
+    assert!(content.contains("**Priority:** Low"));
+    assert!(content.contains("**Category:** chores"));
+}
+
+#[test]
+fn update_no_fields_errors() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args(["issues", "update", "features/existing"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("at least one field"));
+}
+
+#[test]
+fn update_body() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--body",
+            "New description here.",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("New description here."));
+}
+
+#[test]
 fn create_with_labels() {
     let repo = TestRepo::new();
 
