@@ -538,18 +538,19 @@ impl LinearClient {
         team_key: &str,
         new_status: &IssueStatus,
     ) -> Result<()> {
-        // Map IssueStatus to Linear state type(s) we want to transition to
-        let target_state_type = match new_status {
-            IssueStatus::Planned => "unstarted",
-            IssueStatus::InProgress => "started",
-            IssueStatus::Complete => "completed",
-            IssueStatus::Blocked => "started", // Linear has no "blocked" state type
+        // Map IssueStatus to Linear state type and preferred name
+        let (target_state_type, target_state_name) = match new_status {
+            IssueStatus::Planned => ("unstarted", "Todo"),
+            IssueStatus::InProgress => ("started", "In Progress"),
+            IssueStatus::Complete => ("completed", "Done"),
+            IssueStatus::Blocked => ("started", "In Progress"), // Linear has no "blocked" state type
         };
 
-        // Find the workflow state ID for the target type
+        // Find the workflow state ID matching both type and name
         let filter = serde_json::json!({
             "team": { "key": { "eq": team_key } },
-            "type": { "eq": target_state_type }
+            "type": { "eq": target_state_type },
+            "name": { "eqIgnoreCase": target_state_name }
         });
         let variables = serde_json::json!({ "filter": filter });
         let request = GqlRequest {
@@ -558,12 +559,40 @@ impl LinearClient {
         };
 
         let data: WorkflowStatesData = self.execute(&request)?;
-        let state = data.workflow_states.nodes.first().ok_or_else(|| {
-            Error::Linear(format!(
-                "no workflow state of type '{}' found for team {}",
-                target_state_type, team_key,
-            ))
-        })?;
+        // Fall back to type-only filter if name doesn't match (team may have renamed states)
+        let state = if data.workflow_states.nodes.is_empty() {
+            let filter = serde_json::json!({
+                "team": { "key": { "eq": team_key } },
+                "type": { "eq": target_state_type }
+            });
+            let variables = serde_json::json!({ "filter": filter });
+            let request = GqlRequest {
+                query: LIST_WORKFLOW_STATES_QUERY,
+                variables,
+            };
+            let data: WorkflowStatesData = self.execute(&request)?;
+            data.workflow_states
+                .nodes
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    Error::Linear(format!(
+                        "no workflow state of type '{}' found for team {}",
+                        target_state_type, team_key,
+                    ))
+                })?
+        } else {
+            data.workflow_states
+                .nodes
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    Error::Linear(format!(
+                        "no workflow state of type '{}' found for team {}",
+                        target_state_type, team_key,
+                    ))
+                })?
+        };
 
         // Get issue's internal ID (we need to fetch it first)
         let issue = self
