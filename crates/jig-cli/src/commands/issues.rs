@@ -94,6 +94,32 @@ pub enum IssuesCommand {
         body: Option<String>,
     },
 
+    /// Update an existing issue's fields
+    Update {
+        /// Issue ID (e.g. "features/my-feature" or "AUT-123")
+        id: String,
+
+        /// New title
+        #[arg(short, long)]
+        title: Option<String>,
+
+        /// New body/description (use "-" to read from stdin)
+        #[arg(short, long)]
+        body: Option<String>,
+
+        /// New priority (urgent, high, medium, low)
+        #[arg(short, long)]
+        priority: Option<String>,
+
+        /// Labels to set (can specify multiple -l flags)
+        #[arg(short, long)]
+        label: Vec<String>,
+
+        /// Category/directory (file) or project name (Linear)
+        #[arg(short, long)]
+        category: Option<String>,
+    },
+
     /// Update issue status
     Status {
         /// Issue ID (e.g. "features/my-feature")
@@ -135,6 +161,7 @@ pub enum IssuesOutput {
     Interactive,
     Ids(Vec<String>),
     Created(String),
+    Updated(String),
     StatusUpdated(String, String),
     Completed(String, bool),
     Stats(StatsData),
@@ -320,6 +347,71 @@ fn run_create(
     }
 }
 
+fn run_update(
+    ctx: &RepoCtx,
+    id: &str,
+    title: Option<&str>,
+    body: Option<&str>,
+    priority: Option<&str>,
+    labels: &[String],
+    category: Option<&str>,
+) -> Result<IssuesOutput, IssuesError> {
+    let repo = ctx.repo()?;
+    let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+    let pri = priority.and_then(IssuePriority::from_str_loose);
+
+    // Read body from stdin if "-" was passed
+    let body_text = match body {
+        Some("-") => {
+            let mut buf = String::new();
+            io::Read::read_to_string(&mut io::stdin(), &mut buf)?;
+            Some(buf)
+        }
+        Some(text) => Some(text.to_string()),
+        None => None,
+    };
+
+    // Require at least one field to update
+    if title.is_none()
+        && body_text.is_none()
+        && pri.is_none()
+        && labels.is_empty()
+        && category.is_none()
+    {
+        return Err(IssuesError::Usage(
+            "at least one field to update is required (--title, --body, --priority, --label, --category)".to_string(),
+        ));
+    }
+
+    match jig_toml.issues.provider.as_str() {
+        "linear" => {
+            let global_config = GlobalConfig::load().unwrap_or_default();
+            let linear_provider = issues::make_linear_provider(&jig_toml, &global_config)?;
+            linear_provider.update_issue(
+                id,
+                title,
+                body_text.as_deref(),
+                pri.as_ref(),
+                labels,
+                category,
+            )?;
+        }
+        _ => {
+            let file_provider = issues::make_file_provider(&repo.repo_root, &jig_toml);
+            file_provider.update_issue(
+                id,
+                title,
+                body_text.as_deref(),
+                pri.as_ref(),
+                labels,
+                category,
+            )?;
+        }
+    }
+
+    Ok(IssuesOutput::Updated(id.to_string()))
+}
+
 fn run_status_update(
     ctx: &RepoCtx,
     id: &str,
@@ -467,6 +559,22 @@ impl Op for Issues {
                 label,
                 body.as_deref(),
             ),
+            Some(IssuesCommand::Update {
+                id,
+                title,
+                body,
+                priority,
+                label,
+                category,
+            }) => run_update(
+                ctx,
+                id,
+                title.as_deref(),
+                body.as_deref(),
+                priority.as_deref(),
+                label,
+                category.as_deref(),
+            ),
             Some(IssuesCommand::Status { id, status }) => run_status_update(ctx, id, status),
             Some(IssuesCommand::Complete { id, delete }) => run_complete(ctx, id, *delete),
             Some(IssuesCommand::Stats) => run_stats(ctx),
@@ -517,6 +625,9 @@ impl fmt::Display for IssuesOutput {
             }
             Self::Created(id) => {
                 write!(f, "Created issue: {}", id)
+            }
+            Self::Updated(id) => {
+                write!(f, "Updated issue: {}", id)
             }
             Self::StatusUpdated(id, status) => {
                 write!(f, "Updated {} -> {}", id, status)

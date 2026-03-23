@@ -100,6 +100,17 @@ query Viewer {
 }
 "#;
 
+const UPDATE_ISSUE_MUTATION: &str = r#"
+mutation UpdateIssue($issueId: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $issueId, input: $input) {
+    success
+    issue {
+      identifier
+    }
+  }
+}
+"#;
+
 const CREATE_ISSUE_MUTATION: &str = r#"
 mutation CreateIssue($input: IssueCreateInput!) {
   issueCreate(input: $input) {
@@ -576,6 +587,74 @@ impl LinearClient {
         });
         let request = GqlRequest {
             query: UPDATE_ISSUE_STATUS_MUTATION,
+            variables,
+        };
+
+        let _data: UpdateIssueData = self.execute(&request)?;
+        Ok(())
+    }
+
+    /// Update an issue's fields (title, description, priority, labels, project).
+    ///
+    /// Only fields that are `Some` / non-empty are sent in the mutation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_issue(
+        &self,
+        identifier: &str,
+        team_key: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+        priority: Option<&IssuePriority>,
+        labels: &[String],
+        project: Option<&str>,
+    ) -> Result<()> {
+        let issue = self
+            .get_issue(identifier)?
+            .ok_or_else(|| Error::Linear(format!("issue not found: {}", identifier)))?;
+
+        let mut input = serde_json::Map::new();
+
+        if let Some(t) = title {
+            input.insert("title".into(), serde_json::json!(t));
+        }
+
+        if let Some(desc) = body {
+            input.insert("description".into(), serde_json::json!(desc));
+        }
+
+        if let Some(p) = priority {
+            let num = match p {
+                IssuePriority::Urgent => 1,
+                IssuePriority::High => 2,
+                IssuePriority::Medium => 3,
+                IssuePriority::Low => 4,
+            };
+            input.insert("priority".into(), serde_json::json!(num));
+        }
+
+        if !labels.is_empty() {
+            let label_ids = self.label_ids(team_key, labels)?;
+            if !label_ids.is_empty() {
+                input.insert("labelIds".into(), serde_json::json!(label_ids));
+            }
+        }
+
+        if let Some(proj_name) = project {
+            if let Some(proj_id) = self.project_id(proj_name)? {
+                input.insert("projectId".into(), serde_json::json!(proj_id));
+            }
+        }
+
+        if input.is_empty() {
+            return Ok(());
+        }
+
+        let variables = serde_json::json!({
+            "issueId": issue.id,
+            "input": input,
+        });
+        let request = GqlRequest {
+            query: UPDATE_ISSUE_MUTATION,
             variables,
         };
 

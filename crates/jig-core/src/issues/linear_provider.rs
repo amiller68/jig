@@ -100,6 +100,23 @@ impl LinearProvider {
             .update_issue_status(identifier, &self.team, new_status)
     }
 
+    /// Update an existing issue's fields in Linear.
+    ///
+    /// Only fields that are `Some` / non-empty are updated.
+    pub fn update_issue(
+        &self,
+        identifier: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+        priority: Option<&super::types::IssuePriority>,
+        labels: &[String],
+        category: Option<&str>,
+    ) -> Result<()> {
+        self.client.update_issue(
+            identifier, &self.team, title, body, priority, labels, category,
+        )
+    }
+
     /// Create a new issue in Linear.
     ///
     /// Uses team, project, assignee, and labels from the provider's config,
