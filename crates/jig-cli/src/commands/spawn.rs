@@ -2,10 +2,9 @@
 
 use clap::Args;
 
-use jig_core::global::GlobalConfig;
 use jig_core::issues::naming::{derive_worker_name, extract_linear_identifier};
 use jig_core::worktree::Worktree;
-use jig_core::{config, issues, terminal, Error, JigToml};
+use jig_core::{config, terminal, Error};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -55,7 +54,6 @@ impl Op for Spawn {
         }
 
         // Resolve issue early so we can derive the name if needed
-        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
         let issue_ref = self.issue.as_deref();
 
         // Resolve the issue ID — if the input is a branch-format string,
@@ -64,8 +62,7 @@ impl Op for Spawn {
             .and_then(|raw| extract_linear_identifier(raw).or_else(|| Some(raw.to_string())));
 
         let issue = if let Some(ref id) = resolved_issue_id {
-            let global_config = GlobalConfig::load().unwrap_or_default();
-            let provider = issues::make_provider(&repo.repo_root, &jig_toml, &global_config)?;
+            let provider = repo.issue_provider()?;
             Some(
                 provider
                     .get(id)?

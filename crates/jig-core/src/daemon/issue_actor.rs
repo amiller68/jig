@@ -1,7 +1,6 @@
 //! Issue actor — polls for auto-spawnable issues in a background thread.
 
-use crate::config::JigToml;
-use crate::global::GlobalConfig;
+use crate::context::RepoContext;
 
 use crate::issues::naming::derive_worker_name;
 
@@ -31,24 +30,19 @@ pub fn spawn(
 /// Each repo is checked independently: its own `jig.toml` controls whether
 /// auto-spawn is enabled and the per-repo worker budget.
 pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
-    let global_config = match GlobalConfig::load() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to load global config for issue poll");
-            return vec![];
-        }
-    };
-
     let mut all_spawnable = Vec::new();
 
     for (repo_root, base_branch) in &req.repos {
-        let jig_toml = match JigToml::load(repo_root) {
-            Ok(Some(t)) => t,
-            _ => continue,
+        let ctx = match RepoContext::from_path(repo_root) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::debug!(error = %e, "failed to load repo context for issue poll");
+                continue;
+            }
         };
 
         // Skip repos that don't have auto-spawn enabled (no auto_spawn_labels)
-        let Some(labels) = &jig_toml.issues.auto_spawn_labels else {
+        let Some(labels) = &ctx.jig_toml.issues.auto_spawn_labels else {
             continue;
         };
 
@@ -62,9 +56,10 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             .iter()
             .filter(|(rn, _)| rn == &repo_name)
             .count();
-        let max_workers = jig_toml
+        let max_workers = ctx
+            .jig_toml
             .spawn
-            .resolve_max_concurrent_workers(&global_config.spawn);
+            .resolve_max_concurrent_workers(&ctx.global_config.spawn);
         let budget = max_workers.saturating_sub(repo_worker_count);
 
         if budget == 0 {
@@ -77,12 +72,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             continue;
         }
 
-        let provider = match crate::issues::make_provider_with_ref(
-            repo_root,
-            &jig_toml,
-            &global_config,
-            base_branch,
-        ) {
+        let provider = match ctx.issue_provider_with_ref(base_branch) {
             Ok(p) => p,
             Err(e) => {
                 tracing::debug!(repo = %repo_name, error = %e, "failed to create issue provider");

@@ -1,10 +1,12 @@
 //! Repository context — derived once at startup, threaded through all operations.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::{Config, JigToml, JIG_DIR};
 use crate::error::Result;
 use crate::git::Repo;
+use crate::global::GlobalConfig;
+use crate::issues::{self, FileProvider, IssueProvider, LinearProvider};
 
 /// All repo-derived state needed by jig operations.
 /// Created once at startup to avoid redundant git subprocess calls.
@@ -19,6 +21,10 @@ pub struct RepoContext {
     pub base_branch: String,
     /// Tmux session name for this repo ("jig-<repo_name>")
     pub session_name: String,
+    /// Repository configuration (jig.toml merged with jig.local.toml)
+    pub jig_toml: JigToml,
+    /// Global user configuration (~/.config/jig/config.toml)
+    pub global_config: GlobalConfig,
 }
 
 impl RepoContext {
@@ -34,7 +40,7 @@ impl RepoContext {
     }
 
     /// Derive full repo context from a specific path.
-    pub fn from_path(path: &std::path::Path) -> Result<Self> {
+    pub fn from_path(path: &Path) -> Result<Self> {
         let repo = Repo::open(path)?;
         let git_common_dir = repo.common_dir();
         let repo_root = git_common_dir
@@ -47,7 +53,11 @@ impl RepoContext {
     fn build(repo_root: PathBuf, git_common_dir: PathBuf) -> Result<Self> {
         let worktrees_dir = repo_root.join(JIG_DIR);
 
-        let base_branch = Self::resolve_base_branch(&repo_root)?;
+        // Load configs once — reused for base branch resolution and issue providers.
+        let jig_toml = JigToml::load(&repo_root)?.unwrap_or_default();
+        let global_config = GlobalConfig::load().unwrap_or_default();
+
+        let base_branch = Self::resolve_base_branch(&repo_root, &jig_toml)?;
 
         let repo_name = repo_root
             .file_name()
@@ -61,18 +71,14 @@ impl RepoContext {
             git_common_dir,
             base_branch,
             session_name,
+            jig_toml,
+            global_config,
         })
     }
 
     /// Resolve the effective base branch for an arbitrary repo path.
     /// Useful for daemon code that needs to resolve base branches without a full RepoContext.
-    pub fn resolve_base_branch_for(repo_root: &std::path::Path) -> Result<String> {
-        Self::resolve_base_branch(repo_root)
-    }
-
-    /// Resolve the effective base branch.
-    /// Priority: jig.toml > repo-specific config > global default > hardcoded fallback.
-    fn resolve_base_branch(repo_root: &std::path::Path) -> Result<String> {
+    pub fn resolve_base_branch_for(repo_root: &Path) -> Result<String> {
         // Check jig.toml first — parse errors are non-fatal so a malformed
         // jig.toml doesn't prevent basic repo operations.
         if let Ok(Some(jig_toml)) = JigToml::load(repo_root) {
@@ -84,6 +90,50 @@ impl RepoContext {
         // Fall back to global config
         let config = Config::load()?;
         Ok(config.get_base_branch(repo_root))
+    }
+
+    /// Resolve the effective base branch.
+    /// Priority: jig.toml > repo-specific config > global default > hardcoded fallback.
+    fn resolve_base_branch(repo_root: &Path, jig_toml: &JigToml) -> Result<String> {
+        // Use the already-loaded jig.toml
+        if let Some(base) = jig_toml.worktree.base.clone() {
+            return Ok(base);
+        }
+
+        // Fall back to global config
+        let config = Config::load()?;
+        Ok(config.get_base_branch(repo_root))
+    }
+
+    // -- Issue provider convenience methods ----------------------------------
+
+    /// Create an issue provider based on repo and global configuration.
+    ///
+    /// Reads file-based issues from the working tree. For reading from a git
+    /// ref (e.g. `"origin/main"`), use [`issue_provider_with_ref`](Self::issue_provider_with_ref).
+    pub fn issue_provider(&self) -> Result<Box<dyn IssueProvider>> {
+        issues::make_provider(&self.repo_root, &self.jig_toml, &self.global_config)
+    }
+
+    /// Like [`issue_provider`](Self::issue_provider), but reads file-based
+    /// issues from the given git ref instead of the working tree.
+    pub fn issue_provider_with_ref(&self, git_ref: &str) -> Result<Box<dyn IssueProvider>> {
+        issues::make_provider_with_ref(
+            &self.repo_root,
+            &self.jig_toml,
+            &self.global_config,
+            git_ref,
+        )
+    }
+
+    /// Create a file-based provider (for mutation operations).
+    pub fn file_provider(&self) -> FileProvider {
+        issues::make_file_provider(&self.repo_root, &self.jig_toml)
+    }
+
+    /// Create a Linear provider (for mutation operations).
+    pub fn linear_provider(&self) -> Result<LinearProvider> {
+        issues::make_linear_provider(&self.jig_toml, &self.global_config)
     }
 }
 
