@@ -433,6 +433,7 @@ pub fn render_worker_table(workers: &[WorkerDisplayInfo], borders: bool) -> Tabl
     };
     table
         .load_preset(preset)
+        .enforce_styling()
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(table_header());
 
@@ -470,6 +471,7 @@ pub fn render_worker_table_grouped(workers: &[WorkerDisplayInfo], borders: bool)
         let mut table = Table::new();
         table
             .load_preset(preset)
+            .enforce_styling()
             .set_content_arrangement(ContentArrangement::Dynamic)
             .set_header(table_header());
 

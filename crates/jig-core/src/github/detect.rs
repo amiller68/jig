@@ -121,6 +121,23 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
         });
     }
 
+    // If the dev already pushed commits after the latest review feedback,
+    // suppress the nudge — the ball is in the reviewer's court now.
+    tracing::debug!(
+        pr_number,
+        has_changes_requested,
+        review_comment_count,
+        "check_reviews: has feedback, checking if dev pushed after"
+    );
+    if client.dev_pushed_after_reviews(pr_number) {
+        return Ok(PrCheck {
+            nudge: None,
+            details: vec!["Dev pushed after latest review feedback".to_string()],
+            review_comment_count: Some(review_comment_count),
+            changes_requested_count: Some(changes_requested_count),
+        });
+    }
+
     let mut details = vec![];
     if has_changes_requested {
         details.push("Changes requested by reviewer".to_string());
