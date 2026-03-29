@@ -27,6 +27,8 @@ pub enum PrState {
 pub struct PrStateInfo {
     pub state: PrState,
     pub is_draft: bool,
+    /// HEAD commit SHA of the PR branch.
+    pub head_sha: Option<String>,
 }
 
 /// CI check run.
