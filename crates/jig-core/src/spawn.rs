@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::git::Repo;
 use crate::global::GlobalConfig;
-use crate::issues::{IssueStatus, ProviderKind};
+use crate::issues::{Issue, IssueStatus, ProviderKind};
 use crate::session;
 use crate::state::OrchestratorState;
 use crate::templates::{TemplateContext, TemplateEngine};
@@ -49,12 +49,9 @@ impl TaskStatus {
 /// for the spawn sequence. Daemon code converts `SpawnableIssue` → `SpawnIssueInput`.
 pub struct SpawnIssueInput<'a> {
     pub repo_root: &'a Path,
-    pub issue_id: &'a str,
-    pub issue_title: &'a str,
-    pub issue_body: &'a str,
+    pub issue: &'a Issue,
     pub worker_name: &'a str,
     pub provider_kind: ProviderKind,
-    pub branch_name: Option<&'a str>,
 }
 
 /// Spawn a single worker for an issue: create worktree, register, run on-create
@@ -87,7 +84,7 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         &worktrees_dir,
         &git_common_dir,
         input.worker_name,
-        input.branch_name,
+        input.issue.branch_name.as_deref(),
         &base_branch,
         None, // defer on-create hook
         &copy_files,
@@ -95,14 +92,14 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
     )
     .map_err(|e| e.to_string())?;
 
-    let context = build_issue_context(input);
+    let context = input.issue.to_spawn_context(input.provider_kind);
 
     // Register as Initializing so jig ps/ls show the worker immediately,
     // injecting the issue title into the event data for later retrieval.
     wt.register_initializing_with_issue_text(
         Some(&context),
-        Some(input.issue_id),
-        input.issue_title,
+        Some(&input.issue.id),
+        &input.issue.title,
     )
     .map_err(|e| e.to_string())?;
 
@@ -121,7 +118,7 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
     wt.launch(Some(&context)).map_err(|e| e.to_string())?;
 
     // Update issue status to InProgress to prevent duplicate spawning
-    update_issue_status(repo_root, input.issue_id);
+    update_issue_status(repo_root, &input.issue.id);
 
     Ok(())
 }
@@ -156,26 +153,6 @@ pub fn update_issue_status(repo_root: &Path, issue_id: &str) {
             );
         }
     }
-}
-
-/// Build the context string for a spawned worker from issue details.
-fn build_issue_context(input: &SpawnIssueInput<'_>) -> String {
-    let completion_instructions = match input.provider_kind {
-        ProviderKind::File => format!(
-            "\n\nISSUE COMPLETION: This issue is tracked by the file provider. \
-             After your PR is created, mark the issue as done by changing \
-             `**Status:** Planned` to `**Status:** Complete` in the issue file \
-             (`issues/{}.md`) and committing the change.",
-            input.issue_id
-        ),
-        ProviderKind::Linear => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
-             Status sync is handled automatically — no manual status update is needed."
-            .to_string(),
-    };
-    format!(
-        "{}\n\n{}{}",
-        input.issue_title, input.issue_body, completion_instructions
-    )
 }
 
 /// Task info for ps command

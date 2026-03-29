@@ -29,7 +29,7 @@ pub fn spawn(
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    let issue_id = Some(issue.issue_id.clone());
+                    let issue_id = Some(issue.issue.id.clone());
                     match result {
                         Ok(()) => {
                             tracing::info!(worker = %worker_name, "auto-spawned worker");
@@ -64,12 +64,9 @@ pub fn spawn(
 fn spawn_single(issue: &SpawnableIssue) -> std::result::Result<(), String> {
     let input = SpawnIssueInput {
         repo_root: &issue.repo_root,
-        issue_id: &issue.issue_id,
-        issue_title: &issue.issue_title,
-        issue_body: &issue.issue_body,
+        issue: &issue.issue,
         worker_name: &issue.worker_name,
         provider_kind: issue.provider_kind,
-        branch_name: issue.branch_name.as_deref(),
     };
     spawn::spawn_worker_for_issue(&input)
 }
