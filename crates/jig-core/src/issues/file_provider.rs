@@ -319,7 +319,7 @@ impl FileProvider {
             .collect();
 
         // Don't add duplicate
-        if deps.iter().any(|d| *d == blocker_id) {
+        if deps.contains(&blocker_id) {
             return Ok(());
         }
 
@@ -353,7 +353,7 @@ impl FileProvider {
             .filter(|d| !d.is_empty())
             .collect();
 
-        if !deps.iter().any(|d| *d == blocker_id) {
+        if !deps.contains(&blocker_id) {
             return Err(Error::Custom(format!(
                 "issue {} is not blocked by {}",
                 id, blocker_id,
