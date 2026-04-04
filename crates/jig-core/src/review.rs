@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::config::{JIG_DIR, REVIEWS_DIR};
+
 // ---------------------------------------------------------------------------
 // Error
 // ---------------------------------------------------------------------------
@@ -546,7 +548,7 @@ impl ReviewResponse {
 
 /// `.jig/reviews/` directory in a worktree
 pub fn reviews_dir(worktree: &Path) -> PathBuf {
-    worktree.join(".jig/reviews")
+    worktree.join(JIG_DIR).join(REVIEWS_DIR)
 }
 
 /// Next review file path: count existing NNN.md files + 1, zero-padded to 3 digits
@@ -612,39 +614,13 @@ pub fn latest_verdict(worktree: &Path) -> Option<ReviewVerdict> {
 }
 
 // ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ReviewConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    pub model: Option<String>,
-    #[serde(default = "default_max_rounds")]
-    pub max_rounds: u32,
-}
-
-fn default_max_rounds() -> u32 {
-    5
-}
-
-impl Default for ReviewConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            model: None,
-            max_rounds: default_max_rounds(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ReviewConfig;
     use tempfile::TempDir;
 
     fn sample_review() -> Review {

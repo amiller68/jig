@@ -9,7 +9,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::review::ReviewConfig;
 
 pub const DEFAULT_BASE_BRANCH: &str = "origin/main";
 
@@ -23,6 +22,8 @@ pub const STATE_FILE: &str = "state.json";
 pub const JIG_TOML: &str = "jig.toml";
 /// Local (gitignored) config overlay file name
 pub const JIG_LOCAL_TOML: &str = "jig.local.toml";
+/// Subdirectory within JIG_DIR (inside a worktree) for review files
+pub const REVIEWS_DIR: &str = "reviews";
 
 /// Repository configuration (stored in jig.toml and state file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -540,6 +541,32 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             agent_type: default_agent_type(),
+        }
+    }
+}
+
+/// Review configuration in jig.toml `[review]`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ReviewConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Optional model override for review agent
+    pub model: Option<String>,
+    /// Max review cycles before human escalation
+    #[serde(default = "default_max_rounds")]
+    pub max_rounds: u32,
+}
+
+fn default_max_rounds() -> u32 {
+    5
+}
+
+impl Default for ReviewConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: None,
+            max_rounds: default_max_rounds(),
         }
     }
 }

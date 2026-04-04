@@ -35,7 +35,7 @@ pub mod worker;
 pub mod worktree;
 
 pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
-pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig};
+pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig, ReviewConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
 pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
@@ -50,7 +50,6 @@ pub use issues::{
 };
 pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;
-pub use review::ReviewConfig;
 pub use state::OrchestratorState;
 pub use templates::{TemplateContext, TemplateEngine};
 pub use tmux::{TmuxClient, TmuxTarget};
