@@ -252,8 +252,7 @@ impl<'a> Daemon<'a> {
         let entry = Self::find_repo_path(registry, repo_name)?;
         let jig_toml = JigToml::load(&entry.path).ok().flatten()?;
         let global_config = GlobalConfig::load().unwrap_or_default();
-        let provider =
-            crate::issues::make_provider(&entry.path, &jig_toml, &global_config).ok()?;
+        let provider = crate::issues::make_provider(&entry.path, &jig_toml, &global_config).ok()?;
         let issue = provider.get(issue_id).ok().flatten()?;
 
         if issue.status == crate::issues::IssueStatus::Triage {
@@ -726,7 +725,12 @@ impl<'a> Daemon<'a> {
         // exited (tmux window gone, wasn't already exited last tick), check if the
         // issue is still in Triage status. If so, the triage worker failed silently.
         if let Some(action) = self.check_triage_completion(
-            repo_name, worker_name, key, &old_state, &new_state, registry,
+            repo_name,
+            worker_name,
+            key,
+            &old_state,
+            &new_state,
+            registry,
         ) {
             actions.push(action);
         }
@@ -1007,7 +1011,12 @@ impl<'a> Daemon<'a> {
 
         // Triage completion verification (blocking path)
         if let Some(action) = self.check_triage_completion(
-            repo_name, worker_name, key, &old_state, &new_state, registry,
+            repo_name,
+            worker_name,
+            key,
+            &old_state,
+            &new_state,
+            registry,
         ) {
             actions.push(action);
         }
