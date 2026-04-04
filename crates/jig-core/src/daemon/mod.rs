@@ -1009,7 +1009,8 @@ impl<'a> Daemon<'a> {
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
 
-        // Triage completion verification (blocking path)
+        // Triage completion verification (blocking path — mirrors the async
+        // path in process_worker; both code paths need this check).
         if let Some(action) = self.check_triage_completion(
             repo_name,
             worker_name,

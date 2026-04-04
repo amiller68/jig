@@ -61,7 +61,9 @@ Once configured, existing commands work transparently:
 jig issues
 
 # Filter by status
-jig issues --status planned        # backlog + unstarted
+jig issues --status triage         # triage
+jig issues --status backlog        # backlog
+jig issues --status planned        # unstarted
 jig issues --status in-progress    # started
 
 # Filter by priority
@@ -102,6 +104,13 @@ jig issues update ENG-21 --parent ENG-19
 
 # Remove parent relation
 jig issues update ENG-21 --remove-parent
+
+# Update an issue's description (append to existing)
+jig issues update ENG-123 --body "## Investigation findings..." --append
+
+# Update an issue's status
+jig issues status ENG-123 --status backlog
+jig issues status ENG-123 --status planned
 ```
 
 When creating issues, `--category` maps to a Linear project name. If omitted, the first project from your `jig.toml` config (or profile) is used. Labels are resolved by name (case-insensitive) against the team's labels in Linear. The created issue's identifier (e.g. `ENG-456`) is printed to stdout.
@@ -131,7 +140,8 @@ Linear states map to jig statuses:
 
 | Linear state type | jig status |
 |-------------------|------------|
-| `backlog` | Planned |
+| `triage` | Triage |
+| `backlog` | Backlog |
 | `unstarted` | Planned |
 | `started` | In Progress |
 | `completed` | Complete |
