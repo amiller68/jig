@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::review::ReviewConfig;
 
 pub const DEFAULT_BASE_BRANCH: &str = "origin/main";
 
@@ -316,7 +317,7 @@ pub struct JigToml {
     #[serde(default)]
     pub commits: ConventionalCommitsConfig,
     #[serde(default)]
-    pub review: crate::review::ReviewConfig,
+    pub review: ReviewConfig,
     /// Whether a jig.local.toml overlay was merged into this config.
     #[serde(skip)]
     pub has_local_overlay: bool,
