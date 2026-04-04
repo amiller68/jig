@@ -24,6 +24,7 @@ pub mod issues;
 pub mod notify;
 pub mod nudge;
 pub mod registry;
+pub mod review;
 pub mod session;
 pub mod spawn;
 pub mod state;
@@ -34,7 +35,7 @@ pub mod worker;
 pub mod worktree;
 
 pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
-pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig};
+pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig, ReviewConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
 pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
