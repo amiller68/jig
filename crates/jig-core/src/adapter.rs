@@ -28,6 +28,9 @@ pub struct AgentAdapter {
     pub project_file: &'static str,
     /// Flag to run in auto mode
     pub auto_flag: &'static str,
+    /// Flags for ephemeral (one-shot, non-interactive) execution mode.
+    /// Empty string means ephemeral mode is unsupported for this adapter.
+    pub ephemeral_flags: &'static str,
 }
 
 /// Claude Code adapter
@@ -40,6 +43,7 @@ pub const CLAUDE_CODE: AgentAdapter = AgentAdapter {
     settings_file: Some(".claude/settings.json"),
     project_file: "CLAUDE.md",
     auto_flag: "--dangerously-skip-permissions",
+    ephemeral_flags: "--print --no-session-persistence --dangerously-skip-permissions",
 };
 
 // Future adapters:
@@ -51,7 +55,32 @@ pub const CLAUDE_CODE: AgentAdapter = AgentAdapter {
 //     settings_file: None,
 //     project_file: ".cursorrules",
 //     auto_flag: "",
+//     ephemeral_flags: "",
 // };
+
+impl AgentAdapter {
+    /// Returns true if this adapter supports ephemeral (one-shot) execution mode.
+    pub fn supports_ephemeral(&self) -> bool {
+        !self.ephemeral_flags.is_empty()
+    }
+
+    /// Build a command string for ephemeral (one-shot, non-interactive) execution.
+    ///
+    /// The command includes the adapter's ephemeral flags, optional allowed-tools,
+    /// and the prompt as a single-quoted shell argument.
+    pub fn build_ephemeral_command(&self, prompt: &str, allowed_tools: &[&str]) -> String {
+        let mut cmd = format!("{} {}", self.command, self.ephemeral_flags);
+
+        if !allowed_tools.is_empty() {
+            let tools = allowed_tools.join(",");
+            cmd = format!("{} --allowed-tools \"{}\"", cmd, tools);
+        }
+
+        // Escape single quotes in prompt
+        let escaped = prompt.replace('\'', "'\\''");
+        format!("{} '{}'", cmd, escaped)
+    }
+}
 
 /// Get an adapter by name
 pub fn get_adapter(name: &str) -> Option<&'static AgentAdapter> {
@@ -125,6 +154,57 @@ mod tests {
         assert_eq!(
             cmd,
             "claude 'it'\\''s a test' --dangerously-skip-permissions"
+        );
+    }
+
+    #[test]
+    fn test_supports_ephemeral_claude() {
+        assert!(CLAUDE_CODE.supports_ephemeral());
+    }
+
+    #[test]
+    fn test_supports_ephemeral_false_when_empty() {
+        let adapter = AgentAdapter {
+            agent_type: AgentType::Claude,
+            name: "test",
+            command: "test",
+            skills_dir: "",
+            skill_file: "",
+            settings_file: None,
+            project_file: "",
+            auto_flag: "",
+            ephemeral_flags: "",
+        };
+        assert!(!adapter.supports_ephemeral());
+    }
+
+    #[test]
+    fn test_build_ephemeral_command() {
+        let cmd = CLAUDE_CODE
+            .build_ephemeral_command("review this code", &["Read", "Grep", "Glob", "Bash(jig:*)"]);
+        assert_eq!(
+            cmd,
+            "claude --print --no-session-persistence --dangerously-skip-permissions \
+             --allowed-tools \"Read,Grep,Glob,Bash(jig:*)\" 'review this code'"
+        );
+    }
+
+    #[test]
+    fn test_build_ephemeral_command_escapes_quotes() {
+        let cmd = CLAUDE_CODE.build_ephemeral_command("it's a test", &[]);
+        assert_eq!(
+            cmd,
+            "claude --print --no-session-persistence --dangerously-skip-permissions \
+             'it'\\''s a test'"
+        );
+    }
+
+    #[test]
+    fn test_build_ephemeral_command_empty_tools() {
+        let cmd = CLAUDE_CODE.build_ephemeral_command("hello", &[]);
+        assert_eq!(
+            cmd,
+            "claude --print --no-session-persistence --dangerously-skip-permissions 'hello'"
         );
     }
 }
