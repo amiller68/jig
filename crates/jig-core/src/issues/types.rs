@@ -9,6 +9,8 @@ use super::provider::ProviderKind;
 /// Issue status values matching the convention in `issues/README.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IssueStatus {
+    Triage,
+    Backlog,
     Planned,
     InProgress,
     Complete,
@@ -18,7 +20,9 @@ pub enum IssueStatus {
 impl IssueStatus {
     pub fn from_str_loose(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
-            "planned" => Some(Self::Planned),
+            "triage" => Some(Self::Triage),
+            "backlog" => Some(Self::Backlog),
+            "planned" | "todo" => Some(Self::Planned),
             "in progress" | "in_progress" | "in-progress" | "inprogress" => Some(Self::InProgress),
             "complete" | "done" => Some(Self::Complete),
             "blocked" => Some(Self::Blocked),
@@ -28,6 +32,8 @@ impl IssueStatus {
 
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Triage => "Triage",
+            Self::Backlog => "Backlog",
             Self::Planned => "Planned",
             Self::InProgress => "In Progress",
             Self::Complete => "Complete",
@@ -37,6 +43,8 @@ impl IssueStatus {
 
     pub fn symbol(&self) -> &'static str {
         match self {
+            Self::Triage => "[?]",
+            Self::Backlog => "[.]",
             Self::Planned => "[ ]",
             Self::InProgress => "[~]",
             Self::Complete => "[x]",
@@ -199,6 +207,8 @@ mod tests {
     #[test]
     fn status_roundtrip() {
         for status in [
+            IssueStatus::Triage,
+            IssueStatus::Backlog,
             IssueStatus::Planned,
             IssueStatus::InProgress,
             IssueStatus::Complete,

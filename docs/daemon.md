@@ -196,6 +196,20 @@ The `auto_spawn_labels` field in `[issues]` controls auto-spawning:
 
 The issue actor polls at the configured interval and the spawn actor creates worktrees + launches agents for eligible issues (status: planned, has required labels, dependencies satisfied).
 
+## Triage verification
+
+When a worker with a linked issue exits (tmux window gone), the daemon checks whether the issue is still in **Triage** status. If so, the triage worker failed silently — the daemon emits a `NeedsIntervention` notification so a human can investigate.
+
+This check only fires once on the transition (not repeatedly each tick). If the issue has moved to **Backlog** or any other status, the triage is considered successful and no notification is emitted.
+
+The triage workflow:
+1. Triage worker spawns, investigates the issue, appends findings to the description (`jig issues update <id> --body "..." --append`)
+2. Worker transitions the issue to Backlog (`jig issues status <id> --status backlog`)
+3. Worker exits
+4. Daemon detects exit, checks issue status — Backlog means success, Triage means failure
+
+No auto-retry on failure. Failed triage requires human attention.
+
 ## Auto-pruning
 
 The daemon automatically cleans up worktrees when their PRs are merged or closed.

@@ -399,7 +399,9 @@ struct GqlRequest {
 
 fn map_status(state_type: &str) -> IssueStatus {
     match state_type {
-        "backlog" | "unstarted" => IssueStatus::Planned,
+        "triage" => IssueStatus::Triage,
+        "backlog" => IssueStatus::Backlog,
+        "unstarted" => IssueStatus::Planned,
         "started" => IssueStatus::InProgress,
         "completed" | "canceled" => IssueStatus::Complete,
         _ => IssueStatus::Planned,
@@ -538,7 +540,9 @@ impl LinearClient {
 
         if let Some(s) = status {
             let state_types = match s {
-                IssueStatus::Planned => vec!["backlog", "unstarted"],
+                IssueStatus::Triage => vec!["triage"],
+                IssueStatus::Backlog => vec!["backlog"],
+                IssueStatus::Planned => vec!["unstarted"],
                 IssueStatus::InProgress => vec!["started"],
                 IssueStatus::Complete => vec!["completed", "canceled"],
                 IssueStatus::Blocked => vec!["started"], // no direct mapping; return started
@@ -609,6 +613,8 @@ impl LinearClient {
     ) -> Result<()> {
         // Map IssueStatus to Linear state type and preferred name
         let (target_state_type, target_state_name) = match new_status {
+            IssueStatus::Triage => ("triage", "Triage"),
+            IssueStatus::Backlog => ("backlog", "Backlog"),
             IssueStatus::Planned => ("unstarted", "Todo"),
             IssueStatus::InProgress => ("started", "In Progress"),
             IssueStatus::Complete => ("completed", "Done"),
