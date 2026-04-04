@@ -89,6 +89,7 @@ macro_rules! command_enum {
         }
 
         #[derive(Debug)]
+        #[allow(clippy::large_enum_variant)]
         pub enum OpOutput {
             $($variant(<$type as $crate::op::Op>::Output),)*
         }

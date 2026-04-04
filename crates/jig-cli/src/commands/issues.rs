@@ -175,7 +175,7 @@ pub enum IssuesError {
 #[derive(Debug)]
 pub enum IssuesOutput {
     Table(Vec<CoreIssue>, Option<Vec<String>>),
-    Detail(CoreIssue),
+    Detail(Box<CoreIssue>),
     Interactive,
     Ids(Vec<String>),
     Created(String),
@@ -262,7 +262,7 @@ impl Issues {
             let issue = provider
                 .get(id)?
                 .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
-            return Ok(IssuesOutput::Detail(issue));
+            return Ok(IssuesOutput::Detail(Box::new(issue)));
         }
 
         let spawn_labels = repo.jig_toml.issues.auto_spawn_labels.clone();
@@ -288,7 +288,7 @@ impl Issues {
 
             if let Some(ref id) = self.id {
                 if let Some(issue) = provider.get(id)? {
-                    return Ok(IssuesOutput::Detail(issue));
+                    return Ok(IssuesOutput::Detail(Box::new(issue)));
                 }
                 continue;
             }
