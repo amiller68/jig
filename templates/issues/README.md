@@ -78,6 +78,7 @@ issues/epics/plan-and-execute/
 # [Title]
 
 **Status:** Planned | In Progress | Complete | Blocked
+**Parent:** JIG-19 *(optional — links this as a sub-issue)*
 
 ## Objective
 
