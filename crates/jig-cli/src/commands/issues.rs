@@ -109,6 +109,10 @@ pub enum IssuesCommand {
         #[arg(short, long)]
         body: Option<String>,
 
+        /// Append body to existing description instead of replacing it
+        #[arg(short, long)]
+        append: bool,
+
         /// New priority (urgent, high, medium, low)
         #[arg(short, long)]
         priority: Option<String>,
@@ -143,7 +147,7 @@ pub enum IssuesCommand {
         /// Issue ID (e.g. "features/my-feature")
         id: String,
 
-        /// New status (planned, in-progress, complete, blocked)
+        /// New status (triage, backlog, planned, in-progress, complete, blocked)
         #[arg(short, long)]
         status: String,
     },
@@ -368,6 +372,7 @@ fn run_update(
     id: &str,
     title: Option<&str>,
     body: Option<&str>,
+    append: bool,
     priority: Option<&str>,
     labels: &[String],
     category: Option<&str>,
@@ -406,8 +411,30 @@ fn run_update(
         ));
     }
 
+    // If --append is set and body is provided, fetch existing description and prepend it
+    let effective_body = match (append, body_text) {
+        (true, Some(new_body)) => {
+            let provider = repo.issue_provider()?;
+            let existing = provider
+                .get(id)?
+                .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
+            // The issue body includes `# Title\n\n` prefix from Linear conversion;
+            // extract only the description portion (after the first heading).
+            let existing_desc = existing
+                .body
+                .strip_prefix(&format!("# {}\n\n", existing.title))
+                .unwrap_or(&existing.body);
+            if existing_desc.is_empty() {
+                Some(new_body)
+            } else {
+                Some(format!("{}\n\n{}", existing_desc, new_body))
+            }
+        }
+        (_, body) => body,
+    };
+
     let has_field_updates = title.is_some()
-        || body_text.is_some()
+        || effective_body.is_some()
         || pri.is_some()
         || !labels.is_empty()
         || category.is_some();
@@ -419,7 +446,7 @@ fn run_update(
                 linear_provider.update_issue(
                     id,
                     title,
-                    body_text.as_deref(),
+                    effective_body.as_deref(),
                     pri.as_ref(),
                     labels,
                     category,
@@ -440,7 +467,7 @@ fn run_update(
                 file_provider.update_issue(
                     id,
                     title,
-                    body_text.as_deref(),
+                    effective_body.as_deref(),
                     pri.as_ref(),
                     labels,
                     category,
@@ -527,6 +554,8 @@ fn run_stats_global(ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
 }
 
 fn compute_stats(issues: &[CoreIssue]) -> StatsData {
+    let mut triage = 0usize;
+    let mut backlog = 0usize;
     let mut planned = 0usize;
     let mut in_progress = 0usize;
     let mut complete = 0usize;
@@ -540,6 +569,8 @@ fn compute_stats(issues: &[CoreIssue]) -> StatsData {
 
     for issue in issues {
         match issue.status {
+            IssueStatus::Triage => triage += 1,
+            IssueStatus::Backlog => backlog += 1,
             IssueStatus::Planned => planned += 1,
             IssueStatus::InProgress => in_progress += 1,
             IssueStatus::Complete => complete += 1,
@@ -555,6 +586,8 @@ fn compute_stats(issues: &[CoreIssue]) -> StatsData {
     }
 
     let mut by_status = vec![
+        ("Triage".to_string(), triage),
+        ("Backlog".to_string(), backlog),
         ("Planned".to_string(), planned),
         ("In Progress".to_string(), in_progress),
         ("Complete".to_string(), complete),
@@ -605,6 +638,7 @@ impl Op for Issues {
                 id,
                 title,
                 body,
+                append,
                 priority,
                 label,
                 category,
@@ -617,6 +651,7 @@ impl Op for Issues {
                 id,
                 title.as_deref(),
                 body.as_deref(),
+                *append,
                 priority.as_deref(),
                 label,
                 category.as_deref(),
@@ -721,6 +756,8 @@ fn render_table(issues: &[CoreIssue], auto_spawn_labels: Option<&[String]>) -> c
 
     for issue in issues {
         let (status_sym, status_color) = match issue.status {
+            IssueStatus::Triage => ("[?]", Color::Magenta),
+            IssueStatus::Backlog => ("[.]", Color::DarkGrey),
             IssueStatus::Planned => ("[ ]", Color::White),
             IssueStatus::InProgress => ("[~]", Color::Yellow),
             IssueStatus::Complete => ("[x]", Color::Green),
@@ -805,6 +842,8 @@ fn interactive_loop(
             let marker = if idx == cursor { ">" } else { " " };
 
             let status_sym = match issue.status {
+                IssueStatus::Triage => "[?]",
+                IssueStatus::Backlog => "[.]",
                 IssueStatus::Planned => "[ ]",
                 IssueStatus::InProgress => "[~]",
                 IssueStatus::Complete => "[x]",

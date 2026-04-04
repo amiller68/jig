@@ -671,6 +671,44 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        // Triage completion verification: when a worker with an issue_ref has exited
+        // (tmux window gone), check if the issue is still in Triage status. If so,
+        // the triage worker failed silently — emit NeedsIntervention.
+        {
+            let tmux_status = self.get_tmux_status(repo_name, worker_name);
+            let tmux_exited = matches!(tmux_status, TaskStatus::Exited | TaskStatus::NoWindow);
+            if tmux_exited {
+                if let Some(ref issue_id) = new_state.issue_ref {
+                    if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                        if let Ok(Some(jig_toml)) = JigToml::load(&entry.path) {
+                            let global_config = GlobalConfig::load().unwrap_or_default();
+                            if let Ok(provider) =
+                                crate::issues::make_provider(&entry.path, &jig_toml, &global_config)
+                            {
+                                if let Ok(Some(issue)) = provider.get(issue_id) {
+                                    if issue.status == crate::issues::IssueStatus::Triage {
+                                        tracing::warn!(
+                                            worker = key,
+                                            issue = %issue_id,
+                                            "triage worker exited but issue is still in Triage status"
+                                        );
+                                        actions.push(Action::Notify {
+                                            worker_id: worker_name.to_string(),
+                                            message: format!(
+                                                "Triage worker exited but issue {} is still in Triage status",
+                                                issue_id
+                                            ),
+                                            kind: NotifyKind::NeedsIntervention,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Track review feedback count for nudge reset logic
         let mut current_review_feedback_count: Option<u32> = None;
 
@@ -944,6 +982,42 @@ impl<'a> Daemon<'a> {
         );
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
+
+        // Triage completion verification (blocking path)
+        {
+            let tmux_status = self.get_tmux_status(repo_name, worker_name);
+            let tmux_exited = matches!(tmux_status, TaskStatus::Exited | TaskStatus::NoWindow);
+            if tmux_exited {
+                if let Some(ref issue_id) = new_state.issue_ref {
+                    if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                        if let Ok(Some(jig_toml)) = JigToml::load(&entry.path) {
+                            let global_config = GlobalConfig::load().unwrap_or_default();
+                            if let Ok(provider) =
+                                crate::issues::make_provider(&entry.path, &jig_toml, &global_config)
+                            {
+                                if let Ok(Some(issue)) = provider.get(issue_id) {
+                                    if issue.status == crate::issues::IssueStatus::Triage {
+                                        tracing::warn!(
+                                            worker = key,
+                                            issue = %issue_id,
+                                            "triage worker exited but issue is still in Triage status"
+                                        );
+                                        actions.push(Action::Notify {
+                                            worker_id: worker_name.to_string(),
+                                            message: format!(
+                                                "Triage worker exited but issue {} is still in Triage status",
+                                                issue_id
+                                            ),
+                                            kind: NotifyKind::NeedsIntervention,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Check PR lifecycle
         let mut worker_tick_info = WorkerTickInfo::default();
