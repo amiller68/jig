@@ -110,6 +110,8 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// Suggested branch name (e.g. from Linear's `branchName` field).
     pub branch_name: Option<String>,
+    /// Parent issue reference: (identifier, title).
+    pub parent: Option<(String, String)>,
 }
 
 /// Filter criteria for listing issues.
@@ -227,6 +229,7 @@ mod tests {
             children: vec![],
             labels: vec![],
             branch_name: None,
+            parent: None,
         };
 
         assert!(issue.matches(&IssueFilter::default()));
@@ -254,6 +257,7 @@ mod tests {
             children: vec![],
             labels: vec!["backend".into(), "Auth".into()],
             branch_name: None,
+            parent: None,
         };
 
         // Single label match (case-insensitive)
@@ -298,6 +302,7 @@ mod tests {
             children: vec![],
             labels: vec!["backend".into(), "sprint-1".into()],
             branch_name: None,
+            parent: None,
         };
 
         // Empty spawn_labels → auto = true (all issues eligible)
@@ -333,6 +338,7 @@ mod tests {
             children: vec![],
             labels: vec![],
             branch_name: None,
+            parent: None,
         };
 
         let context = issue.to_spawn_context(ProviderKind::File);
@@ -356,6 +362,7 @@ mod tests {
             children: vec![],
             labels: vec![],
             branch_name: None,
+            parent: None,
         };
 
         let context = issue.to_spawn_context(ProviderKind::Linear);

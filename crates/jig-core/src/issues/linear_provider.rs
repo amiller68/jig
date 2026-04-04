@@ -103,6 +103,7 @@ impl LinearProvider {
     /// Update an existing issue's fields in Linear.
     ///
     /// Only fields that are `Some` / non-empty are updated.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_issue(
         &self,
         identifier: &str,
@@ -111,9 +112,19 @@ impl LinearProvider {
         priority: Option<&super::types::IssuePriority>,
         labels: &[String],
         category: Option<&str>,
+        parent: Option<&str>,
+        remove_parent: bool,
     ) -> Result<()> {
         self.client.update_issue(
-            identifier, &self.team, title, body, priority, labels, category,
+            identifier,
+            &self.team,
+            title,
+            body,
+            priority,
+            labels,
+            category,
+            parent,
+            remove_parent,
         )
     }
 
@@ -142,6 +153,7 @@ impl LinearProvider {
         priority: Option<&super::types::IssuePriority>,
         labels: &[String],
         category: Option<&str>,
+        parent: Option<&str>,
     ) -> Result<String> {
         // Merge labels: explicit labels take precedence, fall back to config
         let effective_labels = if labels.is_empty() {
@@ -161,6 +173,7 @@ impl LinearProvider {
             effective_labels,
             project,
             self.assignee.as_deref(),
+            parent,
         )
     }
 }

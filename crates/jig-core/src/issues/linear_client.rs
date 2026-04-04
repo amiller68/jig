@@ -29,6 +29,7 @@ query ListIssues($filter: IssueFilter, $first: Int) {
       state { type }
       project { name }
       team { name }
+      parent { identifier title }
       children { nodes { identifier } }
       labels { nodes { name } }
       relations {
@@ -80,6 +81,7 @@ query GetIssue($filter: IssueFilter, $first: Int) {
       state { type }
       project { name }
       team { name }
+      parent { identifier title }
       children { nodes { identifier } }
       labels { nodes { name } }
       relations {
@@ -312,9 +314,16 @@ struct RawIssue {
     state: RawState,
     project: Option<RawProject>,
     team: RawTeam,
+    parent: Option<RawParentRef>,
     children: NodeList<RawChildRef>,
     labels: NodeList<RawLabel>,
     relations: NodeList<RawRelation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawParentRef {
+    identifier: String,
+    title: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -451,6 +460,7 @@ impl From<RawIssue> for Issue {
             children,
             labels,
             branch_name: raw.branch_name,
+            parent: raw.parent.map(|p| (p.identifier, p.title)),
         }
     }
 }
@@ -684,6 +694,8 @@ impl LinearClient {
         priority: Option<&IssuePriority>,
         labels: &[String],
         project: Option<&str>,
+        parent: Option<&str>,
+        remove_parent: bool,
     ) -> Result<()> {
         let issue = self
             .get_issue(identifier)?
@@ -720,6 +732,15 @@ impl LinearClient {
             if let Some(proj_id) = self.project_id(proj_name)? {
                 input.insert("projectId".into(), serde_json::json!(proj_id));
             }
+        }
+
+        if remove_parent {
+            input.insert("parentId".into(), serde_json::Value::Null);
+        } else if let Some(parent_id) = parent {
+            let parent_issue = self
+                .get_issue(parent_id)?
+                .ok_or_else(|| Error::Linear(format!("parent issue not found: {}", parent_id)))?;
+            input.insert("parentId".into(), serde_json::json!(parent_issue.id));
         }
 
         if input.is_empty() {
@@ -807,6 +828,7 @@ impl LinearClient {
         labels: &[String],
         project: Option<&str>,
         assignee: Option<&str>,
+        parent: Option<&str>,
     ) -> Result<String> {
         let team_id = self.team_id(team_key)?;
 
@@ -843,6 +865,13 @@ impl LinearClient {
 
         if let Some(assignee_val) = assignee {
             input.insert("assigneeId".into(), serde_json::json!(assignee_val));
+        }
+
+        if let Some(parent_id) = parent {
+            let parent_issue = self
+                .get_issue(parent_id)?
+                .ok_or_else(|| Error::Linear(format!("parent issue not found: {}", parent_id)))?;
+            input.insert("parentId".into(), serde_json::json!(parent_issue.id));
         }
 
         let variables = serde_json::json!({ "input": input });

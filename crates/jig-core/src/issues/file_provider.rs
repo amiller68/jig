@@ -147,6 +147,7 @@ impl FileProvider {
         template: &str,
         priority: Option<&IssuePriority>,
         labels: &[String],
+        parent: Option<&str>,
     ) -> Result<String> {
         // Load template content
         let template_path = self
@@ -227,6 +228,17 @@ impl FileProvider {
             content
         };
 
+        // Inject parent if provided
+        let content = if let Some(parent_id) = parent {
+            if content.contains("**Parent:**") {
+                content
+            } else {
+                replace_field(&content, "Parent", parent_id)
+            }
+        } else {
+            content
+        };
+
         // Derive filename from title (kebab-case)
         let slug: String = title
             .to_lowercase()
@@ -267,6 +279,7 @@ impl FileProvider {
     /// Update fields of an existing issue file.
     ///
     /// Only fields that are `Some` / non-empty are updated.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_issue(
         &self,
         id: &str,
@@ -275,6 +288,8 @@ impl FileProvider {
         priority: Option<&IssuePriority>,
         labels: &[String],
         category: Option<&str>,
+        parent: Option<&str>,
+        remove_parent: bool,
     ) -> Result<()> {
         let path = self.resolve_path(id)?;
         let mut content = std::fs::read_to_string(&path)?;
@@ -294,6 +309,12 @@ impl FileProvider {
 
         if let Some(cat) = category {
             content = replace_field(&content, "Category", cat);
+        }
+
+        if remove_parent {
+            content = remove_field(&content, "Parent");
+        } else if let Some(parent_id) = parent {
+            content = replace_field(&content, "Parent", parent_id);
         }
 
         if let Some(new_body) = body {
@@ -634,6 +655,14 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         })
         .unwrap_or_default();
 
+    let parent = extract_field(content, "Parent").map(|s| {
+        if let Some((id, title)) = s.split_once(" — ") {
+            (id.trim().to_string(), title.trim().to_string())
+        } else {
+            (s.clone(), s)
+        }
+    });
+
     Ok(Issue {
         id,
         title,
@@ -646,6 +675,7 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
+        parent,
     })
 }
 
@@ -717,6 +747,14 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         })
         .unwrap_or_default();
 
+    let parent = extract_field(&content, "Parent").map(|s| {
+        if let Some((id, title)) = s.split_once(" — ") {
+            (id.trim().to_string(), title.trim().to_string())
+        } else {
+            (s.clone(), s)
+        }
+    });
+
     Ok(Issue {
         id,
         title,
@@ -729,6 +767,7 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
+        parent,
     })
 }
 
@@ -1132,6 +1171,7 @@ mod tests {
                 children: vec![],
                 labels: vec![],
                 branch_name: None,
+                parent: None,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -1145,6 +1185,7 @@ mod tests {
                 children: vec![],
                 labels: vec![],
                 branch_name: None,
+                parent: None,
             },
         ];
         sort_issues(&mut issues);
@@ -1165,7 +1206,14 @@ mod tests {
 
         let provider = FileProvider::new(tmp.path());
         let id = provider
-            .create_issue("Add verbose flag", "features", "standalone", None, &[])
+            .create_issue(
+                "Add verbose flag",
+                "features",
+                "standalone",
+                None,
+                &[],
+                None,
+            )
             .unwrap();
 
         assert_eq!(id, "features/add-verbose-flag");
@@ -1195,6 +1243,7 @@ mod tests {
                 "standalone",
                 Some(&IssuePriority::High),
                 &["auto".to_string(), "backend".to_string()],
+                None,
             )
             .unwrap();
 
@@ -1209,10 +1258,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let provider = FileProvider::new(tmp.path());
         provider
-            .create_issue("My Feature", "features", "standalone", None, &[])
+            .create_issue("My Feature", "features", "standalone", None, &[], None)
             .unwrap();
 
-        let result = provider.create_issue("My Feature", "features", "standalone", None, &[]);
+        let result = provider.create_issue("My Feature", "features", "standalone", None, &[], None);
         assert!(result.is_err());
     }
 
@@ -1328,6 +1377,8 @@ mod tests {
                 Some(&IssuePriority::Urgent),
                 &[],
                 None,
+                None,
+                false,
             )
             .unwrap();
 
@@ -1356,6 +1407,8 @@ mod tests {
                 None,
                 &["backend".to_string(), "auto".to_string()],
                 None,
+                None,
+                false,
             )
             .unwrap();
 
