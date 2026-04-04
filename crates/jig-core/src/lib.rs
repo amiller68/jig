@@ -24,6 +24,7 @@ pub mod issues;
 pub mod notify;
 pub mod nudge;
 pub mod registry;
+pub mod review;
 pub mod session;
 pub mod spawn;
 pub mod state;
@@ -49,6 +50,7 @@ pub use issues::{
 };
 pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;
+pub use review::ReviewConfig;
 pub use state::OrchestratorState;
 pub use templates::{TemplateContext, TemplateEngine};
 pub use tmux::{TmuxClient, TmuxTarget};

@@ -315,6 +315,8 @@ pub struct JigToml {
     pub health: RepoHealthConfig,
     #[serde(default)]
     pub commits: ConventionalCommitsConfig,
+    #[serde(default)]
+    pub review: crate::review::ReviewConfig,
     /// Whether a jig.local.toml overlay was merged into this config.
     #[serde(skip)]
     pub has_local_overlay: bool,
