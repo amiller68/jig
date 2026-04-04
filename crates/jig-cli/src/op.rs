@@ -80,6 +80,7 @@ impl Display for NoOutput {
 macro_rules! command_enum {
     ($($(#[$attr:meta])* ($variant:ident, $type:ty)),* $(,)?) => {
         #[derive(clap::Subcommand, Debug, Clone)]
+        #[allow(clippy::large_enum_variant)]
         pub enum Command {
             $(
                 $(#[$attr])*
