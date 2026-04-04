@@ -90,6 +90,10 @@ pub enum IssuesCommand {
         /// Issue body/description (use "-" to read from stdin)
         #[arg(short, long)]
         body: Option<String>,
+
+        /// Parent issue ID (e.g. "JIG-19") to create this as a sub-issue
+        #[arg(long)]
+        parent: Option<String>,
     },
 
     /// Update an existing issue's fields
@@ -124,6 +128,14 @@ pub enum IssuesCommand {
         /// Remove blocking dependencies
         #[arg(long, value_delimiter = ',')]
         remove_blocked_by: Vec<String>,
+
+        /// Parent issue ID (e.g. "JIG-19") to set as parent
+        #[arg(long)]
+        parent: Option<String>,
+
+        /// Remove the parent issue relation
+        #[arg(long)]
+        remove_parent: bool,
     },
 
     /// Update issue status
@@ -163,7 +175,7 @@ pub enum IssuesError {
 #[derive(Debug)]
 pub enum IssuesOutput {
     Table(Vec<CoreIssue>, Option<Vec<String>>),
-    Detail(CoreIssue),
+    Detail(Box<CoreIssue>),
     Interactive,
     Ids(Vec<String>),
     Created(String),
@@ -250,7 +262,7 @@ impl Issues {
             let issue = provider
                 .get(id)?
                 .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
-            return Ok(IssuesOutput::Detail(issue));
+            return Ok(IssuesOutput::Detail(Box::new(issue)));
         }
 
         let spawn_labels = repo.jig_toml.issues.auto_spawn_labels.clone();
@@ -276,7 +288,7 @@ impl Issues {
 
             if let Some(ref id) = self.id {
                 if let Some(issue) = provider.get(id)? {
-                    return Ok(IssuesOutput::Detail(issue));
+                    return Ok(IssuesOutput::Detail(Box::new(issue)));
                 }
                 continue;
             }
@@ -302,6 +314,7 @@ impl Issues {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_create(
     ctx: &RepoCtx,
     title: &str,
@@ -310,6 +323,7 @@ fn run_create(
     category: Option<&str>,
     labels: &[String],
     body: Option<&str>,
+    parent: Option<&str>,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
     let pri = priority.and_then(IssuePriority::from_str_loose);
@@ -334,13 +348,15 @@ fn run_create(
                 pri.as_ref(),
                 labels,
                 category,
+                parent,
             )?;
             Ok(IssuesOutput::Created(id))
         }
         _ => {
             let cat = category.unwrap_or("features");
             let file_provider = repo.file_provider();
-            let id = file_provider.create_issue(title, cat, template, pri.as_ref(), labels)?;
+            let id =
+                file_provider.create_issue(title, cat, template, pri.as_ref(), labels, parent)?;
             Ok(IssuesOutput::Created(id))
         }
     }
@@ -357,6 +373,8 @@ fn run_update(
     category: Option<&str>,
     blocked_by: &[String],
     remove_blocked_by: &[String],
+    parent: Option<&str>,
+    remove_parent: bool,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
     let pri = priority.and_then(IssuePriority::from_str_loose);
@@ -380,9 +398,11 @@ fn run_update(
         && category.is_none()
         && blocked_by.is_empty()
         && remove_blocked_by.is_empty()
+        && parent.is_none()
+        && !remove_parent
     {
         return Err(IssuesError::Usage(
-            "at least one field to update is required (--title, --body, --priority, --label, --category, --blocked-by, --remove-blocked-by)".to_string(),
+            "at least one field to update is required (--title, --body, --priority, --label, --category, --blocked-by, --remove-blocked-by, --parent, --remove-parent)".to_string(),
         ));
     }
 
@@ -395,7 +415,7 @@ fn run_update(
     match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
             let linear_provider = repo.linear_provider()?;
-            if has_field_updates {
+            if has_field_updates || parent.is_some() || remove_parent {
                 linear_provider.update_issue(
                     id,
                     title,
@@ -403,6 +423,8 @@ fn run_update(
                     pri.as_ref(),
                     labels,
                     category,
+                    parent,
+                    remove_parent,
                 )?;
             }
             for blocker in blocked_by {
@@ -414,7 +436,7 @@ fn run_update(
         }
         _ => {
             let file_provider = repo.file_provider();
-            if has_field_updates {
+            if has_field_updates || parent.is_some() || remove_parent {
                 file_provider.update_issue(
                     id,
                     title,
@@ -422,6 +444,8 @@ fn run_update(
                     pri.as_ref(),
                     labels,
                     category,
+                    parent,
+                    remove_parent,
                 )?;
             }
             for blocker in blocked_by {
@@ -566,6 +590,7 @@ impl Op for Issues {
                 category,
                 label,
                 body,
+                parent,
             }) => run_create(
                 ctx,
                 title,
@@ -574,6 +599,7 @@ impl Op for Issues {
                 category.as_deref(),
                 label,
                 body.as_deref(),
+                parent.as_deref(),
             ),
             Some(IssuesCommand::Update {
                 id,
@@ -584,6 +610,8 @@ impl Op for Issues {
                 category,
                 blocked_by,
                 remove_blocked_by,
+                parent,
+                remove_parent,
             }) => run_update(
                 ctx,
                 id,
@@ -594,6 +622,8 @@ impl Op for Issues {
                 category.as_deref(),
                 blocked_by,
                 remove_blocked_by,
+                parent.as_deref(),
+                *remove_parent,
             ),
             Some(IssuesCommand::Status { id, status }) => run_status_update(ctx, id, status),
             Some(IssuesCommand::Complete { id, delete }) => run_complete(ctx, id, *delete),
@@ -634,6 +664,10 @@ impl fmt::Display for IssuesOutput {
                 write!(f, "{table}")
             }
             Self::Detail(issue) => {
+                if let Some((parent_id, parent_title)) = &issue.parent {
+                    writeln!(f, "Parent: {} — {}", parent_id, parent_title)?;
+                    writeln!(f)?;
+                }
                 write!(f, "{}", issue.body)?;
                 if !issue.depends_on.is_empty() {
                     write!(f, "\n\nBlocked by: {}", issue.depends_on.join(", "))?;
@@ -846,6 +880,13 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
             issue.status.as_str(),
             issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-"),
         )?;
+        if let Some((parent_id, parent_title)) = &issue.parent {
+            write!(
+                w,
+                "\x1B[2mParent: {} — {}\x1B[0m\r\n",
+                parent_id, parent_title
+            )?;
+        }
 
         for line in lines.iter().skip(scroll).take(visible) {
             write!(w, "{}\r\n", line)?;

@@ -110,6 +110,24 @@ echo "body" | jig issues create -b - "Issue title"
 
 # With project/category
 jig issues create -c Engineering "Issue title"
+
+# As a sub-issue of another issue
+jig issues create "Sub-task title" --parent AUT-19
+```
+
+### Update issue fields
+
+```bash
+# Set parent on existing issue
+jig issues update AUT-21 --parent AUT-19
+
+# Remove parent relation
+jig issues update AUT-21 --remove-parent
+
+# Update title, priority, labels, category, body
+jig issues update AUT-21 --title "New title" --priority high
+jig issues update AUT-21 --label backend --label auto
+jig issues update AUT-21 --body "New description"
 ```
 
 ### Stats
@@ -126,6 +144,29 @@ jig issues stats -g   # across all tracked repos
 jig issues -g
 jig issues -g --status in-progress
 ```
+
+## Parent / sub-issue relations
+
+Issues can be linked as sub-issues of a parent via `--parent`:
+
+```bash
+# Create sub-issue
+jig issues create "Review data model" --parent AUT-19
+
+# Set parent on existing issue
+jig issues update AUT-21 --parent AUT-19
+
+# Remove parent
+jig issues update AUT-21 --remove-parent
+```
+
+When viewing a single issue (`jig issues <id>`), the parent is shown if set:
+
+```
+Parent: AUT-19 — spec: automated review process
+```
+
+For the file provider, parent is stored as a `**Parent:**` frontmatter field. For Linear, it uses the native parent/sub-issue relation.
 
 ## Dependencies
 

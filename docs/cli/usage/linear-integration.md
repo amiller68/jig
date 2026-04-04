@@ -93,6 +93,15 @@ jig issues create "Fix auth crash" \
 
 # Body from stdin
 echo "detailed description" | jig issues create "Fix auth crash" --body -
+
+# Create as a sub-issue of another issue
+jig issues create "Review data model" --parent ENG-19
+
+# Set parent on an existing issue
+jig issues update ENG-21 --parent ENG-19
+
+# Remove parent relation
+jig issues update ENG-21 --remove-parent
 ```
 
 When creating issues, `--category` maps to a Linear project name. If omitted, the first project from your `jig.toml` config (or profile) is used. Labels are resolved by name (case-insensitive) against the team's labels in Linear. The created issue's identifier (e.g. `ENG-456`) is printed to stdout.
@@ -151,6 +160,7 @@ Linear states map to jig statuses:
 | `body` | `# Title` heading + description markdown |
 | `source` | Linear issue URL |
 | `children` | Sub-issue identifiers |
+| `parent` | Parent issue identifier and title |
 | `labels` | Linear label names |
 
 ## Labels and auto-spawn
