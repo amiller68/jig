@@ -304,6 +304,79 @@ impl FileProvider {
         Ok(())
     }
 
+    /// Add a dependency ("blocked by") to an issue.
+    ///
+    /// Appends `blocker_id` to the `**Depends-On:**` field, creating it if absent.
+    pub fn add_blocked_by(&self, id: &str, blocker_id: &str) -> Result<()> {
+        let path = self.resolve_path(id)?;
+        let content = std::fs::read_to_string(&path)?;
+
+        let existing = extract_field(&content, "Depends-On").unwrap_or_default();
+        let deps: Vec<&str> = existing
+            .split(',')
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty())
+            .collect();
+
+        // Don't add duplicate
+        if deps.iter().any(|d| *d == blocker_id) {
+            return Ok(());
+        }
+
+        let mut new_deps = deps.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+        new_deps.push(blocker_id.to_string());
+        let new_value = new_deps.join(", ");
+
+        let content = replace_field(&content, "Depends-On", &new_value);
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
+
+    /// Remove a dependency ("blocked by") from an issue.
+    pub fn remove_blocked_by(&self, id: &str, blocker_id: &str) -> Result<()> {
+        let path = self.resolve_path(id)?;
+        let content = std::fs::read_to_string(&path)?;
+
+        let existing = match extract_field(&content, "Depends-On") {
+            Some(val) => val,
+            None => {
+                return Err(Error::Custom(format!(
+                    "no 'Depends-On' field found on issue {}",
+                    id,
+                )));
+            }
+        };
+
+        let deps: Vec<&str> = existing
+            .split(',')
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty())
+            .collect();
+
+        if !deps.iter().any(|d| *d == blocker_id) {
+            return Err(Error::Custom(format!(
+                "issue {} is not blocked by {}",
+                id, blocker_id,
+            )));
+        }
+
+        let new_deps: Vec<&&str> = deps.iter().filter(|d| **d != blocker_id).collect();
+        if new_deps.is_empty() {
+            // Remove the field entirely
+            let content = remove_field(&content, "Depends-On");
+            std::fs::write(&path, content)?;
+        } else {
+            let new_value = new_deps
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let content = replace_field(&content, "Depends-On", &new_value);
+            std::fs::write(&path, content)?;
+        }
+        Ok(())
+    }
+
     /// Delete an issue file.
     pub fn delete_issue(&self, id: &str) -> Result<()> {
         let path = self.resolve_path(id)?;
@@ -358,6 +431,16 @@ fn replace_field(content: &str, key: &str, new_value: &str) -> String {
         }
     }
 
+    result.join("\n")
+}
+
+/// Remove a `**Key:** Value` field line from markdown content.
+fn remove_field(content: &str, key: &str) -> String {
+    let prefix = format!("**{}:**", key);
+    let result: Vec<&str> = content
+        .lines()
+        .filter(|line| !line.trim().starts_with(&prefix))
+        .collect();
     result.join("\n")
 }
 
