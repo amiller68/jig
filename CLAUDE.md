@@ -13,35 +13,14 @@ cargo fmt                # Fix formatting
 cargo run -- <args>      # Run CLI (e.g., cargo run -- list)
 ```
 
-## Project Structure
-
-```
-crates/
-├── jig-core/      # Core library
-│   ├── events/    # Event log (JSONL per worker, state derivation)
-│   ├── dispatch/  # Action dispatch rules for state transitions
-│   ├── hooks/     # Git + Claude Code hook management
-│   ├── github/    # GitHub integration via gh CLI
-│   ├── notify/    # Notification queue and hook execution
-│   ├── templates/ # Handlebars template engine for nudges
-│   ├── global/    # Global config and state (~/.config/jig/)
-│   ├── daemon/    # Orchestrator (tick, discover, actors, execute)
-│   ├── nudge.rs   # Nudge classification and delivery via tmux
-│   └── tmux.rs    # Type-safe tmux client
-└── jig-cli/       # CLI binary
-
-templates/         # Templates for jig init
-tests/             # Integration tests
-docs/              # Documentation
-issues/            # File-based issue tracking
-```
-
 ## Documentation
 
-- `docs/index.md` — Documentation hub and agent instructions
-- `docs/PATTERNS.md` — Coding conventions
-- `docs/SUCCESS_CRITERIA.md` — CI checks
-- `docs/CONTRIBUTING.md` — Contribution guide
+**Read `docs/index.md` first.** It has a source-file-aware map of all docs — find the right doc by which files you're touching.
+
+Key docs:
+- `docs/PATTERNS.md` — Coding conventions (error handling, Op trait, output, actors)
+- `docs/SUCCESS_CRITERIA.md` — CI gate commands
+- `docs/daemon.md` — Daemon architecture (`crates/jig-core/src/daemon/`)
 
 ## Issues
 

@@ -50,11 +50,21 @@ Review the diff for:
 
 ### 5. Documentation Check
 
-Review documentation for necessary updates:
-- `CLAUDE.md` — Does quick reference or project structure need updating?
+#### 5a. Doc index staleness
+
+Read `docs/index.md` and check the **Documentation Map**. For each file changed in the diff:
+- Does it appear in a doc's **Sources** column?
+- If yes, read that doc and check if the content is still accurate given the changes
+- If a new file was added to a directory that a doc covers (e.g., a new actor in `daemon/`), check if the doc mentions it or needs updating
+- If a new module/command was added with no doc coverage, flag it as a gap
+
+#### 5b. Doc content
+
+- `CLAUDE.md` — Does quick reference need updating?
 - `docs/PATTERNS.md` — Do any documented patterns need revision?
 - `docs/SUCCESS_CRITERIA.md` — Did build/test/lint commands change?
 - `docs/CONTRIBUTING.md` — Did contribution workflow change?
+- `docs/index.md` — Do Sources columns need new entries for added files?
 - README — Does the README need updates for new features?
 
 ### 6. Skills Check
