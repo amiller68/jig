@@ -175,6 +175,25 @@ If the Linear issue belongs to a project, the project name becomes the jig categ
 
 Blocking relations in Linear map to `depends_on` in jig. Sub-issues map to `children`.
 
+You can manage dependencies directly from the CLI:
+
+```bash
+# Add a blocker
+jig issues update ENG-22 --blocked-by ENG-21
+
+# Bulk add
+jig issues update ENG-22 --blocked-by ENG-21,ENG-24
+
+# Remove a blocker
+jig issues update ENG-22 --remove-blocked-by ENG-21
+
+# View blockers
+jig issues ENG-22
+# Blocked by: ENG-21, ENG-24
+```
+
+Under the hood, `--blocked-by` creates `isBlockedBy` relations via `issueRelationCreate`, and `--remove-blocked-by` finds and deletes the matching relation via `issueRelationDelete`.
+
 ## Switching providers
 
 Switching between file and Linear is a one-line change in `jig.toml`:

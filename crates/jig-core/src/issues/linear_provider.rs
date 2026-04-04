@@ -117,6 +117,20 @@ impl LinearProvider {
         )
     }
 
+    /// Add a "blocked by" dependency relation.
+    ///
+    /// `identifier` is blocked by `blocker_identifier`.
+    pub fn add_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<()> {
+        self.client
+            .create_blocked_by_relation(identifier, blocker_identifier)
+    }
+
+    /// Remove a "blocked by" dependency relation.
+    pub fn remove_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<()> {
+        self.client
+            .remove_blocked_by_relation(identifier, blocker_identifier)
+    }
+
     /// Create a new issue in Linear.
     ///
     /// Uses team, project, assignee, and labels from the provider's config,

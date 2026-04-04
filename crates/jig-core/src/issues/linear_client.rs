@@ -19,6 +19,7 @@ const LIST_ISSUES_QUERY: &str = r#"
 query ListIssues($filter: IssueFilter, $first: Int) {
   issues(filter: $filter, first: $first) {
     nodes {
+      id
       identifier
       title
       description
@@ -69,6 +70,7 @@ const GET_ISSUE_QUERY: &str = r#"
 query GetIssue($filter: IssueFilter, $first: Int) {
   issues(filter: $filter, first: $first) {
     nodes {
+      id
       identifier
       title
       description
@@ -82,6 +84,7 @@ query GetIssue($filter: IssueFilter, $first: Int) {
       labels { nodes { name } }
       relations {
         nodes {
+          id
           type
           relatedIssue { identifier }
         }
@@ -139,6 +142,23 @@ query LabelsByTeam($filter: IssueLabelFilter) {
       id
       name
     }
+  }
+}
+"#;
+
+const CREATE_RELATION_MUTATION: &str = r#"
+mutation CreateRelation($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) {
+    success
+    issueRelation { id }
+  }
+}
+"#;
+
+const DELETE_RELATION_MUTATION: &str = r#"
+mutation DeleteRelation($id: String!) {
+  issueRelationDelete(id: $id) {
+    success
   }
 }
 "#;
@@ -282,6 +302,7 @@ struct NodeList<T> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawIssue {
+    id: String,
     identifier: String,
     title: String,
     description: Option<String>,
@@ -325,9 +346,36 @@ struct RawLabel {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawRelation {
+    id: Option<String>,
     #[serde(rename = "type")]
     relation_type: String,
     related_issue: RawChildRef,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateRelationData {
+    #[allow(dead_code)]
+    issue_relation_create: CreateRelationResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateRelationResult {
+    #[allow(dead_code)]
+    success: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteRelationData {
+    #[allow(dead_code)]
+    issue_relation_delete: DeleteRelationResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteRelationResult {
+    #[allow(dead_code)]
+    success: bool,
 }
 
 // -- Request body -------------------------------------------------------------
@@ -805,6 +853,128 @@ impl LinearClient {
 
         let data: CreateIssueData = self.execute(&request)?;
         Ok(data.issue_create.issue.identifier)
+    }
+
+    /// Resolve an issue identifier (e.g. "AUT-123") to its internal UUID.
+    fn resolve_issue_uuid(&self, identifier: &str) -> Result<String> {
+        let (team_key, number) = parse_identifier(identifier)
+            .ok_or_else(|| Error::Linear(format!("invalid issue identifier: {identifier}")))?;
+
+        let filter = serde_json::json!({
+            "team": { "key": { "eq": team_key } },
+            "number": { "eq": number }
+        });
+
+        let variables = serde_json::json!({
+            "filter": filter,
+            "first": 1,
+        });
+
+        let request = GqlRequest {
+            query: GET_ISSUE_QUERY,
+            variables,
+        };
+
+        let data: ListData = self.execute(&request)?;
+        data.issues
+            .nodes
+            .into_iter()
+            .next()
+            .map(|raw| raw.id)
+            .ok_or_else(|| Error::Linear(format!("issue not found: {identifier}")))
+    }
+
+    /// Create a "is blocked by" relation between two issues.
+    ///
+    /// `issue_identifier` is blocked by `blocker_identifier`.
+    pub fn create_blocked_by_relation(
+        &self,
+        issue_identifier: &str,
+        blocker_identifier: &str,
+    ) -> Result<()> {
+        let issue_uuid = self.resolve_issue_uuid(issue_identifier)?;
+        let blocker_uuid = self.resolve_issue_uuid(blocker_identifier)?;
+
+        let input = serde_json::json!({
+            "issueId": issue_uuid,
+            "relatedIssueId": blocker_uuid,
+            "type": "isBlockedBy"
+        });
+
+        let variables = serde_json::json!({ "input": input });
+        let request = GqlRequest {
+            query: CREATE_RELATION_MUTATION,
+            variables,
+        };
+
+        let _data: CreateRelationData = self.execute(&request)?;
+        Ok(())
+    }
+
+    /// Remove a "is blocked by" relation between two issues.
+    ///
+    /// Finds the relation where `issue_identifier` is blocked by
+    /// `blocker_identifier` and deletes it.
+    pub fn remove_blocked_by_relation(
+        &self,
+        issue_identifier: &str,
+        blocker_identifier: &str,
+    ) -> Result<()> {
+        // Fetch the issue with its relations (including relation IDs)
+        let (team_key, number) = parse_identifier(issue_identifier).ok_or_else(|| {
+            Error::Linear(format!("invalid issue identifier: {issue_identifier}"))
+        })?;
+
+        let filter = serde_json::json!({
+            "team": { "key": { "eq": team_key } },
+            "number": { "eq": number }
+        });
+
+        let variables = serde_json::json!({
+            "filter": filter,
+            "first": 1,
+        });
+
+        let request = GqlRequest {
+            query: GET_ISSUE_QUERY,
+            variables,
+        };
+
+        let data: ListData = self.execute(&request)?;
+        let raw_issue = data
+            .issues
+            .nodes
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::Linear(format!("issue not found: {issue_identifier}")))?;
+
+        // Find the matching relation
+        let relation_id = raw_issue
+            .relations
+            .nodes
+            .into_iter()
+            .find(|r| {
+                r.relation_type == "is_blocked_by"
+                    && r.related_issue
+                        .identifier
+                        .eq_ignore_ascii_case(blocker_identifier)
+            })
+            .and_then(|r| r.id)
+            .ok_or_else(|| {
+                Error::Linear(format!(
+                    "no 'blocked by' relation found between {} and {}",
+                    issue_identifier, blocker_identifier,
+                ))
+            })?;
+
+        let variables = serde_json::json!({ "id": relation_id });
+        let request = GqlRequest {
+            query: DELETE_RELATION_MUTATION,
+            variables,
+        };
+
+        let _data: DeleteRelationData = self.execute(&request)?;
+        Ok(())
     }
 
     /// Get a single issue by its identifier (e.g. "AUT-123").

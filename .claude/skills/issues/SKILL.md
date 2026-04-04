@@ -131,6 +131,27 @@ jig issues -g --status in-progress
 
 Issues can depend on other issues via Linear's `is_blocked_by` relations. Dependencies must be `Complete` before the dependent issue is spawnable.
 
+### Manage dependencies
+
+```bash
+# Add a blocking dependency (JIG-22 is blocked by JIG-21)
+jig issues update JIG-22 --blocked-by JIG-21
+
+# Add multiple blockers at once
+jig issues update JIG-22 --blocked-by JIG-21,JIG-24
+
+# Remove a dependency
+jig issues update JIG-22 --remove-blocked-by JIG-21
+```
+
+### View dependencies
+
+```bash
+# Single issue view shows blockers
+jig issues JIG-22
+# Output includes: Blocked by: JIG-21, JIG-24
+```
+
 ## Convention
 
 Typically for straightforward and well-defined tasks, we prefer setting the `auto` label such that said tasks are picked up and spawned by the jig daemon.

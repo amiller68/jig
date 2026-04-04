@@ -420,3 +420,124 @@ fn create_with_labels() {
     assert!(content.contains("backend"));
     assert!(content.contains("auto"));
 }
+
+#[test]
+fn update_blocked_by_adds_dependency() {
+    let repo = TestRepo::new();
+
+    // Create a second issue to use as a blocker
+    repo.jig()
+        .args(["issues", "create", "Blocker issue"])
+        .assert()
+        .success();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--blocked-by",
+            "features/blocker-issue",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("**Depends-On:** features/blocker-issue"));
+}
+
+#[test]
+fn update_blocked_by_bulk() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--blocked-by",
+            "dep-a,dep-b",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("dep-a"));
+    assert!(content.contains("dep-b"));
+}
+
+#[test]
+fn update_remove_blocked_by() {
+    let repo = TestRepo::new();
+
+    // First add a dependency
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--blocked-by",
+            "features/some-dep",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("features/some-dep"));
+
+    // Now remove it
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--remove-blocked-by",
+            "features/some-dep",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(!content.contains("features/some-dep"));
+}
+
+#[test]
+fn detail_shows_dependencies() {
+    let repo = TestRepo::new();
+
+    // Add a dependency
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--blocked-by",
+            "features/other",
+        ])
+        .assert()
+        .success();
+
+    // View the issue
+    repo.jig()
+        .args(["issues", "features/existing"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Blocked by: features/other"));
+}
+
+#[test]
+fn remove_blocked_by_nonexistent_errors() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--remove-blocked-by",
+            "features/nonexistent",
+        ])
+        .assert()
+        .failure();
+}
