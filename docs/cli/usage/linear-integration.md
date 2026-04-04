@@ -97,6 +97,25 @@ echo "detailed description" | jig issues create "Fix auth crash" --body -
 
 When creating issues, `--category` maps to a Linear project name. If omitted, the first project from your `jig.toml` config (or profile) is used. Labels are resolved by name (case-insensitive) against the team's labels in Linear. The created issue's identifier (e.g. `ENG-456`) is printed to stdout.
 
+### Manage dependencies
+
+```bash
+# Add a blocking dependency (ENG-22 is blocked by ENG-21)
+jig issues update ENG-22 --blocked-by ENG-21
+
+# Add multiple blockers at once
+jig issues update ENG-22 --blocked-by ENG-21,ENG-24
+
+# Remove a dependency
+jig issues update ENG-22 --remove-blocked-by ENG-21
+
+# View dependencies (shown in single issue view)
+jig issues ENG-22
+# Output includes: Blocked by: ENG-21, ENG-24
+```
+
+Dependencies use Linear's `issueRelationCreate` / `issueRelationDelete` mutations with the `isBlockedBy` relation type. For the file provider, dependencies are stored in the `**Depends-On:**` field.
+
 ## Status mapping
 
 Linear states map to jig statuses:

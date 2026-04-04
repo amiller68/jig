@@ -80,6 +80,22 @@ jig issues complete <id>
 jig issues complete <id> --delete
 ```
 
+### Manage dependencies
+
+```bash
+# Via jig CLI — add a blocker
+jig issues update <id> --blocked-by <blocker-id>
+
+# Add multiple blockers at once (comma-separated)
+jig issues update <id> --blocked-by dep-a,dep-b
+
+# Remove a blocker
+jig issues update <id> --remove-blocked-by <blocker-id>
+
+# Via file system (fallback)
+# Edit the **Depends-On:** field in the issue file
+```
+
 ### Stats
 
 ```bash
