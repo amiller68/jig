@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::issues::{Issue, ProviderKind};
+use crate::spawn::SpawnKind;
 
 /// Request sent to the sync actor to fetch repos.
 pub struct SyncRequest {
@@ -96,6 +97,8 @@ pub struct SpawnableIssue {
     pub worker_name: String,
     /// Provider kind for completion instructions.
     pub provider_kind: ProviderKind,
+    /// Whether this is a normal or triage spawn.
+    pub kind: SpawnKind,
 }
 
 /// Request sent to the spawn actor to create workers.

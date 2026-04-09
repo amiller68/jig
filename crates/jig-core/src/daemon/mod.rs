@@ -1338,6 +1338,7 @@ impl<'a> Daemon<'a> {
             issue: &issue.issue,
             worker_name: &issue.worker_name,
             provider_kind: issue.provider_kind,
+            kind: issue.kind,
         };
         spawn::spawn_worker_for_issue(&input).map_err(crate::error::Error::Custom)?;
 

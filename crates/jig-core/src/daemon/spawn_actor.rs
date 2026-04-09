@@ -67,6 +67,7 @@ fn spawn_single(issue: &SpawnableIssue) -> std::result::Result<(), String> {
         issue: &issue.issue,
         worker_name: &issue.worker_name,
         provider_kind: issue.provider_kind,
+        kind: issue.kind,
     };
     spawn::spawn_worker_for_issue(&input)
 }

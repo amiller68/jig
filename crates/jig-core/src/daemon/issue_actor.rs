@@ -109,6 +109,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
                 issue,
                 worker_name,
                 provider_kind,
+                kind: Default::default(),
             });
             repo_spawned += 1;
         }
