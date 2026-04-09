@@ -675,7 +675,11 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent,
+        parent_id: parent.as_ref().map(|(id, _)| id.clone()),
+        parent_branch_name: None,
+        parent_status: None,
+        parent_title: parent.map(|(_, title)| title),
+        parent_body: None,
     })
 }
 
@@ -767,7 +771,11 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent,
+        parent_id: parent.as_ref().map(|(id, _)| id.clone()),
+        parent_branch_name: None,
+        parent_status: None,
+        parent_title: parent.map(|(_, title)| title),
+        parent_body: None,
     })
 }
 
@@ -1171,7 +1179,11 @@ mod tests {
                 children: vec![],
                 labels: vec![],
                 branch_name: None,
-                parent: None,
+                parent_id: None,
+                parent_branch_name: None,
+                parent_status: None,
+                parent_title: None,
+                parent_body: None,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -1185,7 +1197,11 @@ mod tests {
                 children: vec![],
                 labels: vec![],
                 branch_name: None,
-                parent: None,
+                parent_id: None,
+                parent_branch_name: None,
+                parent_status: None,
+                parent_title: None,
+                parent_body: None,
             },
         ];
         sort_issues(&mut issues);

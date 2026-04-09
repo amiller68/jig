@@ -29,7 +29,7 @@ query ListIssues($filter: IssueFilter, $first: Int) {
       state { type }
       project { name }
       team { name }
-      parent { identifier title }
+      parent { identifier title description branchName state { type } }
       children { nodes { identifier } }
       labels { nodes { name } }
       relations {
@@ -81,7 +81,7 @@ query GetIssue($filter: IssueFilter, $first: Int) {
       state { type }
       project { name }
       team { name }
-      parent { identifier title }
+      parent { identifier title description branchName state { type } }
       children { nodes { identifier } }
       labels { nodes { name } }
       relations {
@@ -321,9 +321,13 @@ struct RawIssue {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RawParentRef {
     identifier: String,
     title: String,
+    description: Option<String>,
+    branch_name: Option<String>,
+    state: RawState,
 }
 
 #[derive(Debug, Deserialize)]
@@ -450,6 +454,12 @@ impl From<RawIssue> for Issue {
 
         let labels: Vec<String> = raw.labels.nodes.into_iter().map(|l| l.name).collect();
 
+        let parent_id = raw.parent.as_ref().map(|p| p.identifier.clone());
+        let parent_branch_name = raw.parent.as_ref().and_then(|p| p.branch_name.clone());
+        let parent_status = raw.parent.as_ref().map(|p| map_status(&p.state.state_type));
+        let parent_title = raw.parent.as_ref().map(|p| p.title.clone());
+        let parent_body = raw.parent.and_then(|p| p.description);
+
         Issue {
             id: raw.identifier,
             title: raw.title,
@@ -462,7 +472,11 @@ impl From<RawIssue> for Issue {
             children,
             labels,
             branch_name: raw.branch_name,
-            parent: raw.parent.map(|p| (p.identifier, p.title)),
+            parent_id,
+            parent_branch_name,
+            parent_status,
+            parent_title,
+            parent_body,
         }
     }
 }

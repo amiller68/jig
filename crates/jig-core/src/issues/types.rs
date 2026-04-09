@@ -118,8 +118,16 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// Suggested branch name (e.g. from Linear's `branchName` field).
     pub branch_name: Option<String>,
-    /// Parent issue reference: (identifier, title).
-    pub parent: Option<(String, String)>,
+    /// Parent issue identifier (e.g. "ENG-100").
+    pub parent_id: Option<String>,
+    /// Parent issue's branch name, used as base branch for child worktrees.
+    pub parent_branch_name: Option<String>,
+    /// Parent issue's status (transient, for spawn gating without extra API call).
+    pub parent_status: Option<IssueStatus>,
+    /// Parent issue's title (for spawn preamble context).
+    pub parent_title: Option<String>,
+    /// Parent issue's body/description (for spawn preamble context).
+    pub parent_body: Option<String>,
 }
 
 /// Filter criteria for listing issues.
@@ -239,7 +247,11 @@ mod tests {
             children: vec![],
             labels: vec![],
             branch_name: None,
-            parent: None,
+            parent_id: None,
+            parent_branch_name: None,
+            parent_status: None,
+            parent_title: None,
+            parent_body: None,
         };
 
         assert!(issue.matches(&IssueFilter::default()));
@@ -267,7 +279,11 @@ mod tests {
             children: vec![],
             labels: vec!["backend".into(), "Auth".into()],
             branch_name: None,
-            parent: None,
+            parent_id: None,
+            parent_branch_name: None,
+            parent_status: None,
+            parent_title: None,
+            parent_body: None,
         };
 
         // Single label match (case-insensitive)
@@ -312,7 +328,11 @@ mod tests {
             children: vec![],
             labels: vec!["backend".into(), "sprint-1".into()],
             branch_name: None,
-            parent: None,
+            parent_id: None,
+            parent_branch_name: None,
+            parent_status: None,
+            parent_title: None,
+            parent_body: None,
         };
 
         // Empty spawn_labels → auto = true (all issues eligible)
@@ -348,7 +368,11 @@ mod tests {
             children: vec![],
             labels: vec![],
             branch_name: None,
-            parent: None,
+            parent_id: None,
+            parent_branch_name: None,
+            parent_status: None,
+            parent_title: None,
+            parent_body: None,
         };
 
         let context = issue.to_spawn_context(ProviderKind::File);
@@ -372,7 +396,11 @@ mod tests {
             children: vec![],
             labels: vec![],
             branch_name: None,
-            parent: None,
+            parent_id: None,
+            parent_branch_name: None,
+            parent_status: None,
+            parent_title: None,
+            parent_body: None,
         };
 
         let context = issue.to_spawn_context(ProviderKind::Linear);
