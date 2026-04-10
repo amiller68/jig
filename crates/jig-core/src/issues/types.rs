@@ -359,6 +359,100 @@ mod tests {
     }
 
     #[test]
+    fn from_str_loose_triage() {
+        assert_eq!(
+            IssueStatus::from_str_loose("triage"),
+            Some(IssueStatus::Triage)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("Triage"),
+            Some(IssueStatus::Triage)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("TRIAGE"),
+            Some(IssueStatus::Triage)
+        );
+    }
+
+    #[test]
+    fn from_str_loose_backlog() {
+        assert_eq!(
+            IssueStatus::from_str_loose("backlog"),
+            Some(IssueStatus::Backlog)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("Backlog"),
+            Some(IssueStatus::Backlog)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("BACKLOG"),
+            Some(IssueStatus::Backlog)
+        );
+    }
+
+    #[test]
+    fn triage_and_backlog_symbols() {
+        assert_eq!(IssueStatus::Triage.symbol(), "[?]");
+        assert_eq!(IssueStatus::Backlog.symbol(), "[.]");
+    }
+
+    #[test]
+    fn triage_backlog_excluded_from_planned_filter() {
+        let triage_issue = Issue {
+            id: "triage-1".into(),
+            title: "Triage issue".into(),
+            status: IssueStatus::Triage,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        };
+        let backlog_issue = Issue {
+            id: "backlog-1".into(),
+            title: "Backlog issue".into(),
+            status: IssueStatus::Backlog,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        };
+        let planned_issue = Issue {
+            id: "planned-1".into(),
+            title: "Planned issue".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        };
+
+        let planned_filter = IssueFilter {
+            status: Some(IssueStatus::Planned),
+            ..Default::default()
+        };
+
+        // Triage and Backlog should NOT match the Planned filter used by auto-spawn
+        assert!(!triage_issue.matches(&planned_filter));
+        assert!(!backlog_issue.matches(&planned_filter));
+        assert!(planned_issue.matches(&planned_filter));
+    }
+
+    #[test]
     fn to_spawn_context_linear_provider() {
         let issue = Issue {
             id: "ENG-123".into(),
