@@ -160,6 +160,11 @@ impl GlobalConfig {
         Ok(config)
     }
 
+    /// Return the default config file path.
+    pub fn default_path() -> Result<std::path::PathBuf> {
+        Ok(global_config_dir()?.join("config.toml"))
+    }
+
     /// Save to the default path.
     pub fn save(&self) -> Result<()> {
         let path = global_config_dir()?.join("config.toml");

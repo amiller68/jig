@@ -60,6 +60,11 @@ impl NotificationQueue {
         Ok(all.into_iter().skip(skip).collect())
     }
 
+    /// Return the queue file path.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
     /// Check if the queue file exists.
     pub fn exists(&self) -> bool {
         self.path.exists()

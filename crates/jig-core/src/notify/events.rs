@@ -52,6 +52,13 @@ pub struct Notification {
     pub event: NotificationEvent,
 }
 
+impl Notification {
+    /// Serialize to a JSON string.
+    pub fn to_json(&self) -> crate::error::Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
