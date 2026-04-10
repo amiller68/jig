@@ -25,6 +25,8 @@ pub enum NudgeType {
     Review,
     /// Worker's PR has non-conventional commit messages.
     BadCommits,
+    /// Automated review findings from the review agent.
+    AutoReview,
 }
 
 impl NudgeType {
@@ -37,6 +39,7 @@ impl NudgeType {
             NudgeType::Conflict => "nudge-conflict",
             NudgeType::Review => "nudge-review",
             NudgeType::BadCommits => "nudge-bad-commits",
+            NudgeType::AutoReview => "nudge-auto-review",
         }
     }
 
@@ -49,6 +52,7 @@ impl NudgeType {
             NudgeType::Conflict => "conflict",
             NudgeType::Review => "review",
             NudgeType::BadCommits => "bad_commits",
+            NudgeType::AutoReview => "auto_review",
         }
     }
 }
@@ -380,6 +384,12 @@ mod tests {
         assert_eq!(NudgeType::Conflict.template_name(), "nudge-conflict");
         assert_eq!(NudgeType::Review.template_name(), "nudge-review");
         assert_eq!(NudgeType::BadCommits.template_name(), "nudge-bad-commits");
+        assert_eq!(NudgeType::AutoReview.template_name(), "nudge-auto-review");
+    }
+
+    #[test]
+    fn nudge_type_count_keys() {
+        assert_eq!(NudgeType::AutoReview.count_key(), "auto_review");
     }
 
     #[test]
@@ -404,5 +414,41 @@ mod tests {
         let msg = engine.render("nudge-stuck", &ctx).unwrap();
         assert!(msg.contains("STUCK PROMPT"));
         assert!(msg.contains("Auto-approving"));
+    }
+
+    #[test]
+    fn render_auto_review_nudge() {
+        let engine = TemplateEngine::new();
+        let mut ctx = TemplateContext::new();
+        ctx.set_num("review_round", 2);
+        ctx.set("review_file", "002.md");
+        ctx.set_num("review_number", 2);
+        ctx.set_num("max_rounds", 5);
+        ctx.set_bool("is_final_round", false);
+        ctx.set_num("nudge_count", 1);
+        ctx.set_num("max_nudges", 5);
+        ctx.set_bool("is_final_nudge", false);
+        let msg = engine.render("nudge-auto-review", &ctx).unwrap();
+        assert!(msg.contains("AUTOMATED REVIEW"));
+        assert!(msg.contains(".jig/reviews/002.md"));
+        assert!(msg.contains("jig review respond --review 2"));
+        assert!(!msg.contains("WARNING"));
+    }
+
+    #[test]
+    fn render_auto_review_final_round() {
+        let engine = TemplateEngine::new();
+        let mut ctx = TemplateContext::new();
+        ctx.set_num("review_round", 5);
+        ctx.set("review_file", "005.md");
+        ctx.set_num("review_number", 5);
+        ctx.set_num("max_rounds", 5);
+        ctx.set_bool("is_final_round", true);
+        ctx.set_num("nudge_count", 5);
+        ctx.set_num("max_nudges", 5);
+        ctx.set_bool("is_final_nudge", true);
+        let msg = engine.render("nudge-auto-review", &ctx).unwrap();
+        assert!(msg.contains("WARNING"));
+        assert!(msg.contains("round 5 of 5"));
     }
 }

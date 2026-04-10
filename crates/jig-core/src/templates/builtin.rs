@@ -9,6 +9,7 @@ pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("nudge-conflict", NUDGE_CONFLICT),
     ("nudge-review", NUDGE_REVIEW),
     ("nudge-bad-commits", NUDGE_BAD_COMMITS),
+    ("nudge-auto-review", NUDGE_AUTO_REVIEW),
 ];
 
 const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
@@ -82,6 +83,23 @@ Resolve them:
 const NUDGE_REVIEW: &str = r#"Your PR has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
 
 Address all feedback, commit, push, and call /review.
+"#;
+
+const NUDGE_AUTO_REVIEW: &str = r#"AUTOMATED REVIEW: Your code has been reviewed (round {{review_round}}).
+
+Verdict: CHANGES REQUESTED
+
+Read the review at: .jig/reviews/{{review_file}}
+
+Address each finding, then respond:
+1. Read: cat .jig/reviews/{{review_file}}
+2. Fix issues or prepare explanations for disputes
+3. Respond: pipe your response to jig review respond --review {{review_number}}
+4. Commit and push — the next review cycle triggers automatically on push
+
+{{#if is_final_round}}
+WARNING: This is round {{review_round}} of {{max_rounds}}. If not approved after this round, a human will be notified.
+{{/if}}
 "#;
 
 const NUDGE_BAD_COMMITS: &str = r#"Your PR has commits that don't follow conventional commit format (nudge {{nudge_count}}/{{max_nudges}}).

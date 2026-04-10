@@ -18,6 +18,7 @@ pub mod nudge_actor;
 mod pr;
 pub mod prune_actor;
 pub mod recovery;
+pub mod review_actor;
 pub mod runtime;
 pub mod spawn_actor;
 pub mod sync_actor;

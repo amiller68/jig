@@ -155,3 +155,23 @@ pub struct NudgeComplete {
     /// Error message if delivery failed, None on success.
     pub error: Option<String>,
 }
+
+/// Request to run an automated review for a worker.
+pub struct ReviewRequest {
+    /// Worker key ("repo/worker") for correlation.
+    pub worker_key: String,
+    /// Absolute path to the worktree directory.
+    pub worktree_path: PathBuf,
+    /// Base branch for diff comparison (e.g. "origin/main").
+    pub base_branch: String,
+}
+
+/// Result of a review run.
+pub struct ReviewComplete {
+    /// Worker key ("repo/worker") for correlation.
+    pub worker_key: String,
+    /// Error message if the review failed to run. None means the review
+    /// agent ran and wrote a file to .jig/reviews/ (check the filesystem
+    /// for the verdict).
+    pub error: Option<String>,
+}

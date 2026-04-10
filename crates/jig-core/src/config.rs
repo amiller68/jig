@@ -357,6 +357,7 @@ pub struct NudgeTypeConfigs {
     pub review: Option<NudgeTypeConfig>,
     pub conflict: Option<NudgeTypeConfig>,
     pub bad_commits: Option<NudgeTypeConfig>,
+    pub auto_review: Option<NudgeTypeConfig>,
 }
 
 /// Configuration for a single nudge type.
@@ -405,6 +406,7 @@ impl RepoHealthConfig {
             "review" => &self.nudge.review,
             "conflict" => &self.nudge.conflict,
             "bad_commits" => &self.nudge.bad_commits,
+            "auto_review" => &self.nudge.auto_review,
             _ => &None,
         };
 
