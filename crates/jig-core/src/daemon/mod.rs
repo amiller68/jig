@@ -473,6 +473,20 @@ impl<'a> Daemon<'a> {
             .map(|r| r.triageable.clone())
             .unwrap_or_default();
 
+        // Log parent integration branch results from the issue actor.
+        if let Some(ref resp) = issue_response {
+            for pb in &resp.parent_branches {
+                if let Some(ref err) = pb.error {
+                    tracing::warn!(
+                        repo = %pb.repo_name,
+                        issue = %pb.issue_id,
+                        branch = %pb.branch_name,
+                        "parent branch error: {}", err
+                    );
+                }
+            }
+        }
+
         // First-tick inline poll: run issue poll synchronously so that spawn
         // can happen in the same tick instead of waiting 3 ticks.
         //
@@ -500,6 +514,17 @@ impl<'a> Daemon<'a> {
                 let response = issue_actor::process_request(&req);
                 spawnable = response.spawnable;
                 triageable = response.triageable;
+                // Log parent branch results from inline poll
+                for pb in &response.parent_branches {
+                    if let Some(ref err) = pb.error {
+                        tracing::warn!(
+                            repo = %pb.repo_name,
+                            issue = %pb.issue_id,
+                            branch = %pb.branch_name,
+                            "parent branch error: {}", err
+                        );
+                    }
+                }
                 if !spawnable.is_empty() {
                     tracing::info!(
                         count = spawnable.len(),

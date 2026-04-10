@@ -105,12 +105,33 @@ pub struct SpawnableIssue {
     pub kind: SpawnKind,
 }
 
+/// Result of creating (or skipping) a parent integration branch.
+#[derive(Debug, Clone)]
+pub struct ParentBranchResult {
+    /// Repo root path.
+    pub repo_root: PathBuf,
+    /// Repo name (derived from repo root).
+    pub repo_name: String,
+    /// Parent issue ID.
+    pub issue_id: String,
+    /// Branch name created/verified.
+    pub branch_name: String,
+    /// Whether the branch was newly created (vs already existed).
+    pub created: bool,
+    /// Whether the issue status was flipped to InProgress.
+    pub status_updated: bool,
+    /// Error message if something went wrong (branch still may have been created).
+    pub error: Option<String>,
+}
+
 /// Response from the issue actor containing both spawnable and triageable issues.
 pub struct IssueResponse {
     /// Issues eligible for normal auto-spawn (status=Planned).
     pub spawnable: Vec<SpawnableIssue>,
     /// Issues eligible for triage (status=Triage, repo has triage enabled).
     pub triageable: Vec<SpawnableIssue>,
+    /// Parent integration branches created or verified this poll.
+    pub parent_branches: Vec<ParentBranchResult>,
 }
 
 /// Request sent to the spawn actor to create workers.
