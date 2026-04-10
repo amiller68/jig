@@ -35,6 +35,8 @@ const SKILL_DRAFT: &str = include_str!("../../../../templates/skills/draft/SKILL
 const SKILL_ISSUES: &str = include_str!("../../../../templates/skills/issues/SKILL.md");
 const SKILL_REVIEW: &str = include_str!("../../../../templates/skills/review/SKILL.md");
 const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/spawn/SKILL.md");
+const SKILL_REVIEW_RESPOND: &str =
+    include_str!("../../../../templates/skills/review-respond/SKILL.md");
 
 // Agent-specific templates
 const CLAUDE_SETTINGS_JSON: &str =
@@ -158,7 +160,14 @@ impl Op for Init {
         }
 
         // Create adapter-specific skill directories
-        let skill_names = ["check", "draft", "issues", "review", "spawn"];
+        let skill_names = [
+            "check",
+            "draft",
+            "issues",
+            "review",
+            "review-respond",
+            "spawn",
+        ];
         for skill in skill_names {
             let dir = repo_root.join(adapter.skills_dir).join(skill);
             if !dir.exists() {
@@ -284,6 +293,7 @@ type = "{}"
             ("draft", SKILL_DRAFT),
             ("issues", SKILL_ISSUES),
             ("review", SKILL_REVIEW),
+            ("review-respond", SKILL_REVIEW_RESPOND),
             ("spawn", SKILL_SPAWN),
         ];
         for (skill_name, content) in skills {
