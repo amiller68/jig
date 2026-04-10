@@ -92,7 +92,7 @@ pub enum IssuesCommand {
         body: Option<String>,
 
         /// Parent issue ID (e.g. "JIG-19") to create this as a sub-issue
-        #[arg(long)]
+        #[arg(short = 'P', long)]
         parent: Option<String>,
     },
 
@@ -134,7 +134,7 @@ pub enum IssuesCommand {
         remove_blocked_by: Vec<String>,
 
         /// Parent issue ID (e.g. "JIG-19") to set as parent
-        #[arg(long)]
+        #[arg(short = 'P', long)]
         parent: Option<String>,
 
         /// Remove the parent issue relation
