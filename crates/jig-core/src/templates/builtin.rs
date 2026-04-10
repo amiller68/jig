@@ -3,6 +3,7 @@
 /// Template names and their built-in content.
 pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("spawn-preamble", SPAWN_PREAMBLE),
+    ("spawn-preamble-wrapup", SPAWN_PREAMBLE_WRAPUP),
     ("triage-prompt", TRIAGE_PROMPT),
     ("nudge-idle", NUDGE_IDLE),
     ("nudge-stuck", NUDGE_STUCK),
@@ -49,6 +50,37 @@ Response format (pipe to jig review respond --review N):
 
 ## Notes
 Any additional context.
+
+TASK:
+{{task_context}}
+"#;
+
+const SPAWN_PREAMBLE_WRAPUP: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a WRAP-UP worker for an epic. Work independently without human interaction.
+
+YOUR ROLE: All child tasks for this epic are complete and merged into this branch. You are the integration verifier — your job is to confirm the combined work is correct and submit the final PR to main.
+
+This branch already contains all child work. You are integrating, not starting from scratch.
+
+## Completed children
+{{#each children}}
+- {{this}}
+{{/each}}
+
+## Your checklist
+
+1. **Verify integration** — run the full test suite (`cargo test`, `cargo clippy`, `cargo fmt --check` or project equivalents). Skim the diff against main to confirm nothing is missing or conflicting.
+2. **Last-mile code** — if (and only if) something is broken or incomplete, write the minimal fix. Do NOT redo child work or add features beyond what the epic specifies.
+3. **Draft PR description** — summarize what the epic accomplished (reference child PRs/issues). Use conventional commits for any new commits.
+4. **Submit** — create the PR via `jig pr` (NOT `gh pr create`), targeting main. Call /review when ready.
+
+HOW MONITORING WORKS: A daemon watches your activity via tool-use events. If you go idle or get stuck for ~5 minutes, you'll receive automated nudge messages (up to {{max_nudges}}). After that, a human is notified. Do not wait for input.
+
+IF YOU GET STUCK:
+- Do NOT enter plan mode or ask for confirmation — just proceed
+- If a command fails, try to fix it yourself
+- If tests fail, debug and fix them
+- If unsure about an approach, pick the simplest one and go
+- If truly blocked, explain what's blocking you so the nudge system can relay it
 
 TASK:
 {{task_context}}

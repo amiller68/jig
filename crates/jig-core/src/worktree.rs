@@ -206,6 +206,34 @@ impl Worktree {
         Ok(())
     }
 
+    /// Launch a tmux window for this worktree using the wrap-up preamble.
+    ///
+    /// Used for parent epic workers spawned after all children are complete and merged.
+    pub fn launch_wrapup(&self, context: Option<&str>, children: &[String]) -> Result<()> {
+        let engine = TemplateEngine::new().with_repo(&self.repo_root);
+        let global_config = GlobalConfig::load()?;
+        let mut tpl_ctx = TemplateContext::new();
+        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
+        tpl_ctx.set(
+            "task_context",
+            context.unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ),
+        );
+        tpl_ctx.set_list("children", children.to_vec());
+        let effective_context = engine.render("spawn-preamble-wrapup", &tpl_ctx)?;
+
+        let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
+        let agent_adapter =
+            adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+
+        session::create_window(&self.session_name, &self.name, &self.path)?;
+        let cmd = adapter::build_spawn_command(agent_adapter, Some(&effective_context));
+        session::send_keys(&self.session_name, &self.name, &cmd)?;
+
+        Ok(())
+    }
+
     /// Resume this worktree by continuing the agent's prior session.
     ///
     /// For adapters that support session continuation (e.g. Claude Code's `-c` flag),

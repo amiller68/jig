@@ -111,6 +111,8 @@ pub struct IssueResponse {
     pub spawnable: Vec<SpawnableIssue>,
     /// Issues eligible for triage (status=Triage, repo has triage enabled).
     pub triageable: Vec<SpawnableIssue>,
+    /// Parent issues ready for wrap-up (all children Complete + merged).
+    pub wrapup: Vec<SpawnableIssue>,
 }
 
 /// Request sent to the spawn actor to create workers.

@@ -472,6 +472,10 @@ impl<'a> Daemon<'a> {
             .as_ref()
             .map(|r| r.triageable.clone())
             .unwrap_or_default();
+        let mut wrapup = issue_response
+            .as_ref()
+            .map(|r| r.wrapup.clone())
+            .unwrap_or_default();
 
         // First-tick inline poll: run issue poll synchronously so that spawn
         // can happen in the same tick instead of waiting 3 ticks.
@@ -500,6 +504,7 @@ impl<'a> Daemon<'a> {
                 let response = issue_actor::process_request(&req);
                 spawnable = response.spawnable;
                 triageable = response.triageable;
+                wrapup = response.wrapup;
                 if !spawnable.is_empty() {
                     tracing::info!(
                         count = spawnable.len(),
@@ -510,6 +515,12 @@ impl<'a> Daemon<'a> {
                     tracing::info!(
                         count = triageable.len(),
                         "first-tick inline issue poll found triageable issues"
+                    );
+                }
+                if !wrapup.is_empty() {
+                    tracing::info!(
+                        count = wrapup.len(),
+                        "first-tick inline issue poll found wrapup parents"
                     );
                 }
             }
@@ -992,6 +1003,10 @@ impl<'a> Daemon<'a> {
         );
 
         // 5. Send spawnable issues to background spawn actor (non-blocking)
+        //    Wrap-up parents are also spawned via the same actor.
+        if !wrapup.is_empty() {
+            spawnable.extend(wrapup);
+        }
         if !spawnable.is_empty() {
             runtime.send_spawn(spawnable);
         }
@@ -1115,6 +1130,24 @@ impl<'a> Daemon<'a> {
                             result
                                 .errors
                                 .push(format!("auto-spawn {}: {}", issue.issue.id, e));
+                        }
+                    }
+                }
+                // Spawn wrap-up parents
+                for issue in response.wrapup {
+                    match self.auto_spawn_worker(&issue) {
+                        Ok(()) => {
+                            tracing::info!(
+                                worker = %issue.worker_name,
+                                issue = %issue.issue.id,
+                                "spawned wrap-up worker for parent"
+                            );
+                            result.auto_spawned.push(issue.worker_name.clone());
+                        }
+                        Err(e) => {
+                            result
+                                .errors
+                                .push(format!("wrapup-spawn {}: {}", issue.issue.id, e));
                         }
                     }
                 }
