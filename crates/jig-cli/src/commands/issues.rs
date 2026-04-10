@@ -699,9 +699,8 @@ impl fmt::Display for IssuesOutput {
                 write!(f, "{table}")
             }
             Self::Detail(issue) => {
-                if let Some(parent_id) = &issue.parent_id {
-                    let parent_title = issue.parent_title.as_deref().unwrap_or("");
-                    writeln!(f, "Parent: {} — {}", parent_id, parent_title)?;
+                if let Some(parent) = &issue.parent {
+                    writeln!(f, "Parent: {} — {}", parent.id, parent.title)?;
                     writeln!(f)?;
                 }
                 write!(f, "{}", issue.body)?;
@@ -920,12 +919,11 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
             issue.status.as_str(),
             issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-"),
         )?;
-        if let Some(parent_id) = &issue.parent_id {
-            let parent_title = issue.parent_title.as_deref().unwrap_or("");
+        if let Some(parent) = &issue.parent {
             write!(
                 w,
                 "\x1B[2mParent: {} — {}\x1B[0m\r\n",
-                parent_id, parent_title
+                parent.id, parent.title
             )?;
         }
 

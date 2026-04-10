@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use crate::error::{Error, Result};
 
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus};
+use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
 
 /// File-based issue provider that reads from an `issues/` directory.
 pub struct FileProvider {
@@ -675,11 +675,13 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent_id: parent.as_ref().map(|(id, _)| id.clone()),
-        parent_branch_name: None,
-        parent_status: None,
-        parent_title: parent.map(|(_, title)| title),
-        parent_body: None,
+        parent: parent.map(|(id, title)| ParentIssue {
+            id,
+            title,
+            branch_name: None,
+            status: None,
+            body: None,
+        }),
     })
 }
 
@@ -771,11 +773,13 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent_id: parent.as_ref().map(|(id, _)| id.clone()),
-        parent_branch_name: None,
-        parent_status: None,
-        parent_title: parent.map(|(_, title)| title),
-        parent_body: None,
+        parent: parent.map(|(id, title)| ParentIssue {
+            id,
+            title,
+            branch_name: None,
+            status: None,
+            body: None,
+        }),
     })
 }
 
@@ -1179,11 +1183,7 @@ mod tests {
                 children: vec![],
                 labels: vec![],
                 branch_name: None,
-                parent_id: None,
-                parent_branch_name: None,
-                parent_status: None,
-                parent_title: None,
-                parent_body: None,
+                parent: None,
             },
             Issue {
                 id: "a-urgent".into(),
@@ -1197,11 +1197,7 @@ mod tests {
                 children: vec![],
                 labels: vec![],
                 branch_name: None,
-                parent_id: None,
-                parent_branch_name: None,
-                parent_status: None,
-                parent_title: None,
-                parent_body: None,
+                parent: None,
             },
         ];
         sort_issues(&mut issues);
