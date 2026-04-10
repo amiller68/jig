@@ -32,6 +32,10 @@ pub struct Worktree {
     pub session_name: String,
     /// Whether this worktree was daemon-created vs manual
     pub auto_spawned: bool,
+    /// Parent issue ID if this worktree is a child of another issue.
+    pub parent_issue: Option<String>,
+    /// Parent issue's branch name (the base branch this child was forked from).
+    pub parent_branch: Option<String>,
 }
 
 impl Worktree {
@@ -89,6 +93,8 @@ impl Worktree {
             repo_root: repo_root.to_path_buf(),
             session_name,
             auto_spawned: auto,
+            parent_issue: None,
+            parent_branch: None,
         })
     }
 
@@ -109,6 +115,8 @@ impl Worktree {
                     repo_root: repo_root.to_path_buf(),
                     session_name: session_name.clone(),
                     auto_spawned: false,
+                    parent_issue: None,
+                    parent_branch: None,
                 })
             })
             .collect()
@@ -132,6 +140,8 @@ impl Worktree {
             repo_root: repo_root.to_path_buf(),
             session_name,
             auto_spawned: false,
+            parent_issue: None,
+            parent_branch: None,
         })
     }
 
@@ -300,6 +310,12 @@ impl Worktree {
             }
             if let Some(title) = issue_title {
                 event = event.with_field("issue_title", title);
+            }
+            if let Some(ref pi) = self.parent_issue {
+                event = event.with_field("parent_issue", pi.as_str());
+            }
+            if let Some(ref pb) = self.parent_branch {
+                event = event.with_field("parent_branch", pb.as_str());
             }
             let _ = event_log.append(&event);
         }

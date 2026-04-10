@@ -98,7 +98,7 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         .common_dir();
 
     // Create worktree WITHOUT running on-create hook — we handle it after registration
-    let wt = Worktree::create(
+    let mut wt = Worktree::create(
         repo_root,
         &worktrees_dir,
         &git_common_dir,
@@ -110,6 +110,15 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         true, // auto_spawned
     )
     .map_err(|e| e.to_string())?;
+
+    // Set parent info on the worktree so it's included in event data.
+    // This allows the daemon to identify parent-child relationships at tick time.
+    if let Some(ref parent) = input.issue.parent {
+        wt.parent_issue = Some(parent.id.clone());
+        if let Some(ref branch) = parent.branch_name {
+            wt.parent_branch = Some(branch.clone());
+        }
+    }
 
     let context = input.issue.to_spawn_context(input.provider_kind);
 

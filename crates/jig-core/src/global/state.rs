@@ -28,6 +28,10 @@ pub struct WorkerEntry {
     /// When new feedback arrives (count increases), the review nudge count resets.
     #[serde(default)]
     pub review_feedback_count: Option<u32>,
+    /// Parent issue's branch name, if this worker is a child of another issue.
+    /// Used by the daemon to identify parent worktrees for auto-update.
+    #[serde(default)]
+    pub parent_branch: Option<String>,
 }
 
 /// Aggregated worker state across all repos.
@@ -118,6 +122,7 @@ mod tests {
             last_event_at: 2000,
             nudge_counts: HashMap::new(),
             review_feedback_count: None,
+            parent_branch: None,
         }
     }
 

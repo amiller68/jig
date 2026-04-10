@@ -9,6 +9,10 @@ use crate::spawn::SpawnKind;
 pub struct SyncRequest {
     /// (repo_name, repo_path, base_branch)
     pub repos: Vec<(String, PathBuf, String)>,
+    /// Parent branches that child workers depend on: (repo_name, repo_path, branch).
+    /// These are fetched in addition to base branches so remote refs stay current
+    /// for parent worktree auto-update.
+    pub parent_branches: Vec<(String, PathBuf, String)>,
 }
 
 /// Response from the sync actor after completing git fetches.
