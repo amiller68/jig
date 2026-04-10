@@ -66,7 +66,6 @@ pub fn progress(msg: &str) {
 }
 
 /// Print a failure line to stderr: `✗ message`
-#[allow(dead_code)]
 pub fn failure(msg: &str) {
     if is_plain() {
         eprintln!("{}", msg);
