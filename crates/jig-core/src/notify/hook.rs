@@ -19,7 +19,18 @@ impl Notifier {
         Self { config, queue }
     }
 
+    /// Access the underlying config.
+    pub fn config(&self) -> &NotifyConfig {
+        &self.config
+    }
+
+    /// Access the underlying queue.
+    pub fn queue(&self) -> &NotificationQueue {
+        &self.queue
+    }
+
     /// Emit a notification: write to queue, then trigger hooks.
+    /// Hook failures are logged but swallowed (best-effort, for daemon use).
     pub fn emit(&self, event: NotificationEvent) -> Result<()> {
         // Always write to queue
         self.queue.emit(event.clone())?;
@@ -38,6 +49,27 @@ impl Notifier {
             } else {
                 tracing::debug!(event_type = event.type_name(), "notification hook executed");
             }
+        }
+
+        Ok(())
+    }
+
+    /// Emit a notification strictly: write to queue, then trigger hooks.
+    /// Hook failures are returned as errors (for CLI use).
+    pub fn emit_strict(&self, event: NotificationEvent) -> Result<()> {
+        // Always write to queue
+        self.queue.emit(event.clone())?;
+
+        // Check if this event type should trigger hooks
+        if !self.should_trigger(&event) {
+            return Ok(());
+        }
+
+        let json = serde_json::to_string(&event)?;
+
+        // Execute script hook — propagate errors to caller
+        if let Some(exec) = &self.config.exec {
+            self.exec_hook_strict(exec, &json)?;
         }
 
         Ok(())
@@ -71,6 +103,40 @@ impl Notifier {
         let status = child.wait()?;
         if !status.success() {
             tracing::warn!("notification hook exited with: {}", status);
+        }
+
+        Ok(())
+    }
+
+    /// Like `exec_hook` but captures stderr and returns errors on non-zero exit.
+    fn exec_hook_strict(&self, exec: &str, json: &str) -> Result<()> {
+        let expanded = expand_tilde(exec);
+
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(&expanded)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(json.as_bytes());
+        }
+
+        let output = child.wait_with_output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let msg = if stderr.trim().is_empty() {
+                format!("notification hook exited with: {}", output.status)
+            } else {
+                format!(
+                    "notification hook exited with {}: {}",
+                    output.status,
+                    stderr.trim()
+                )
+            };
+            return Err(crate::error::Error::Custom(msg));
         }
 
         Ok(())
@@ -189,6 +255,52 @@ mod tests {
         let read_queue = NotificationQueue::new(queue_path);
         let notifications = read_queue.tail(10).unwrap();
         assert_eq!(notifications.len(), 1);
+    }
+
+    #[test]
+    fn emit_strict_returns_err_on_hook_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let queue = NotificationQueue::new(tmp.path().join("n.jsonl"));
+        let config = NotifyConfig {
+            exec: Some("exit 1".to_string()),
+            ..Default::default()
+        };
+        let notifier = Notifier::new(config, queue);
+
+        let err = notifier.emit_strict(make_event()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("notification hook exited with"), "got: {msg}");
+    }
+
+    #[test]
+    fn emit_strict_captures_stderr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let queue = NotificationQueue::new(tmp.path().join("n.jsonl"));
+        let config = NotifyConfig {
+            exec: Some("echo 'bad config' >&2; exit 1".to_string()),
+            ..Default::default()
+        };
+        let notifier = Notifier::new(config, queue);
+
+        let err = notifier.emit_strict(make_event()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("bad config"), "got: {msg}");
+    }
+
+    #[test]
+    fn emit_strict_succeeds_on_hook_success() {
+        let tmp = tempfile::tempdir().unwrap();
+        let queue = NotificationQueue::new(tmp.path().join("n.jsonl"));
+        let config = NotifyConfig {
+            exec: Some("cat > /dev/null".to_string()),
+            ..Default::default()
+        };
+        let notifier = Notifier::new(config, queue);
+
+        notifier.emit_strict(make_event()).unwrap();
+        // Also verify the event was queued
+        let read_queue = NotificationQueue::new(tmp.path().join("n.jsonl"));
+        assert_eq!(read_queue.tail(10).unwrap().len(), 1);
     }
 
     #[test]
