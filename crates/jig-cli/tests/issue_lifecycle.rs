@@ -527,6 +527,102 @@ fn detail_shows_dependencies() {
 }
 
 #[test]
+fn create_with_parent() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "create",
+            "Child issue",
+            "--parent",
+            "features/existing",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created issue: features/child-issue",
+        ));
+
+    let content =
+        fs::read_to_string(repo.dir.path().join("issues/features/child-issue.md")).unwrap();
+    assert!(content.contains("**Parent:** features/existing"));
+}
+
+#[test]
+fn update_set_parent() {
+    let repo = TestRepo::new();
+
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--parent",
+            "bugs/old-bug",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated issue: features/existing"));
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("**Parent:** bugs/old-bug"));
+}
+
+#[test]
+fn update_remove_parent() {
+    let repo = TestRepo::new();
+
+    // First set a parent
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--parent",
+            "bugs/old-bug",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(content.contains("**Parent:** bugs/old-bug"));
+
+    // Now remove it
+    repo.jig()
+        .args(["issues", "update", "features/existing", "--remove-parent"])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(repo.dir.path().join("issues/features/existing.md")).unwrap();
+    assert!(!content.contains("**Parent:**"));
+}
+
+#[test]
+fn detail_shows_parent() {
+    let repo = TestRepo::new();
+
+    // Set a parent on the existing issue
+    repo.jig()
+        .args([
+            "issues",
+            "update",
+            "features/existing",
+            "--parent",
+            "bugs/old-bug",
+        ])
+        .assert()
+        .success();
+
+    // View the issue detail
+    repo.jig()
+        .args(["issues", "features/existing"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Parent:"));
+}
+
+#[test]
 fn remove_blocked_by_nonexistent_errors() {
     let repo = TestRepo::new();
 
