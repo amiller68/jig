@@ -178,6 +178,9 @@ pub const NAME_MAX: usize = 36;
 
 /// Truncate a string to `max` characters, appending ellipsis if needed (UTF-8 safe).
 pub fn truncate(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
     if s.chars().count() <= max {
         s.to_string()
     } else {
@@ -544,5 +547,34 @@ mod tests {
         assert_eq!(format_duration_short(3660), "1h1m");
         assert_eq!(format_duration_short(7260), "2h1m");
         assert_eq!(format_duration_short(7200), "2h");
+    }
+
+    #[test]
+    fn truncate_short_string_unchanged() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string_adds_ellipsis() {
+        assert_eq!(truncate("hello world", 5), "hell…");
+        assert_eq!(truncate("abcdef", 3), "ab…");
+    }
+
+    #[test]
+    fn truncate_empty_string() {
+        assert_eq!(truncate("", 5), "");
+        assert_eq!(truncate("", 0), "");
+    }
+
+    #[test]
+    fn truncate_zero_max() {
+        assert_eq!(truncate("hello", 0), "");
+    }
+
+    #[test]
+    fn truncate_unicode_safe() {
+        assert_eq!(truncate("héllo", 3), "hé…");
+        assert_eq!(truncate("日本語テスト", 4), "日本語…");
     }
 }
