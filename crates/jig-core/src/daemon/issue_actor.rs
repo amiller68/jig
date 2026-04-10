@@ -3,8 +3,10 @@
 use std::path::Path;
 
 use crate::context::RepoContext;
+use crate::git::Repo;
 use crate::issues::naming::derive_worker_name;
 use crate::issues::provider::IssueProvider;
+use crate::issues::types::{Issue, IssueStatus};
 use crate::issues::ProviderKind;
 use crate::spawn::SpawnKind;
 
@@ -45,6 +47,12 @@ fn collect_spawnable(
             return vec![];
         }
     };
+
+    // Filter out child issues whose parent isn't ready
+    let issues: Vec<_> = issues
+        .into_iter()
+        .filter(|issue| is_child_spawnable(issue, repo_root))
+        .collect();
 
     let provider_kind = provider.kind();
     let mut result = Vec::new();
@@ -203,4 +211,58 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         spawnable: all_spawnable,
         triageable: all_triageable,
     }
+}
+
+/// Returns `true` if the issue is spawnable with respect to its parent.
+///
+/// Non-child issues always pass. Child issues require their parent to be
+/// `InProgress` and to have pushed a branch to the remote.
+fn is_child_spawnable(issue: &Issue, repo_root: &Path) -> bool {
+    let Some(parent) = &issue.parent else {
+        return true;
+    };
+
+    // Parent must be InProgress
+    if parent.status.as_ref() != Some(&IssueStatus::InProgress) {
+        tracing::debug!(
+            issue = %issue.id,
+            parent = %parent.id,
+            parent_status = ?parent.status,
+            "child not spawnable: parent not InProgress"
+        );
+        return false;
+    }
+
+    // Parent must have a branch that exists on the remote
+    let Some(branch) = &parent.branch_name else {
+        tracing::debug!(
+            issue = %issue.id,
+            parent = %parent.id,
+            "child not spawnable: parent has no branch name"
+        );
+        return false;
+    };
+
+    if !remote_branch_exists(repo_root, branch) {
+        tracing::debug!(
+            issue = %issue.id,
+            parent = %parent.id,
+            branch = %branch,
+            "child not spawnable: parent branch not on remote"
+        );
+        return false;
+    }
+
+    true
+}
+
+/// Checks whether a branch exists on the `origin` remote using git2.
+fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
+    let Ok(repo) = Repo::open(repo_root) else {
+        return false;
+    };
+    let result = repo
+        .inner()
+        .find_branch(&format!("origin/{branch}"), git2::BranchType::Remote);
+    result.is_ok()
 }
