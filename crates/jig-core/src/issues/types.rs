@@ -172,7 +172,20 @@ impl Issue {
                  Status sync is handled automatically — no manual status update is needed."
                 .to_string(),
         };
-        format!("{}\n\n{}{}", self.title, self.body, completion_instructions)
+        let parent_section = match &self.parent {
+            Some(parent) => {
+                let body = parent.body.as_deref().unwrap_or("");
+                format!(
+                    "PARENT ISSUE ({}): {}\n{}\n\n---\n\nSUB-TASK:\n",
+                    parent.id, parent.title, body
+                )
+            }
+            None => String::new(),
+        };
+        format!(
+            "{}{}\n\n{}{}",
+            parent_section, self.title, self.body, completion_instructions
+        )
     }
 
     /// Whether this issue is eligible for auto-spawn given the repo's
@@ -465,6 +478,70 @@ mod tests {
         assert!(!triage_issue.matches(&planned_filter));
         assert!(!backlog_issue.matches(&planned_filter));
         assert!(planned_issue.matches(&planned_filter));
+    }
+
+    #[test]
+    fn to_spawn_context_with_parent() {
+        let issue = Issue {
+            id: "ENG-124".into(),
+            title: "Implement subtask".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: "Subtask details".into(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: Some(ParentIssue {
+                id: "ENG-100".into(),
+                title: "Epic feature".into(),
+                branch_name: None,
+                status: None,
+                body: Some("Epic description".into()),
+            }),
+        };
+
+        let context = issue.to_spawn_context(ProviderKind::Linear);
+        assert!(context.contains("PARENT ISSUE (ENG-100): Epic feature"));
+        assert!(context.contains("Epic description"));
+        assert!(context.contains("SUB-TASK:"));
+        assert!(context.contains("Implement subtask"));
+        assert!(context.contains("Subtask details"));
+        // Parent section should come before the sub-task title
+        let parent_pos = context.find("PARENT ISSUE").unwrap();
+        let title_pos = context.find("Implement subtask").unwrap();
+        assert!(parent_pos < title_pos);
+    }
+
+    #[test]
+    fn to_spawn_context_with_parent_no_body() {
+        let issue = Issue {
+            id: "ENG-125".into(),
+            title: "Another subtask".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: "Details".into(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: Some(ParentIssue {
+                id: "ENG-100".into(),
+                title: "Epic feature".into(),
+                branch_name: None,
+                status: None,
+                body: None,
+            }),
+        };
+
+        let context = issue.to_spawn_context(ProviderKind::File);
+        assert!(context.contains("PARENT ISSUE (ENG-100): Epic feature"));
+        assert!(context.contains("SUB-TASK:"));
+        assert!(context.contains("Another subtask"));
     }
 
     #[test]
