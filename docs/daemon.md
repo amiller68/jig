@@ -273,15 +273,16 @@ No auto-retry on failure. Failed triage requires human attention.
 
 The tracker is in-memory only. On daemon restart, it rebuilds from active workers whose names start with `triage-`.
 
-## Parent worktree auto-update
+## Parent branch auto-update
 
-When a child worker's PR is merged into its parent branch, the parent worktree needs to pick up those changes. The daemon handles this automatically.
+When a child worker's PR is merged into its parent branch, the parent branch needs to pick up those changes. The daemon handles this automatically, whether or not a parent worktree exists.
 
 ### How it works
 
 1. **Sync**: The sync actor fetches parent branches alongside repo base branches. Parent branch fetch failures are non-fatal (logged but skipped).
-2. **Pull**: After sync completes, the tick loop identifies parent worktrees by matching branch names from active workers. For each parent worktree with child workers, it runs `git pull --ff-only` (with a 30-second timeout).
-3. **Nudge**: If new commits were pulled, the parent worker receives a `parent_update` nudge via tmux, informing it that child work has been merged.
+2. **Fast-forward**: After sync completes, the tick loop identifies parent branches by matching branch names from active workers. Two paths:
+   - **Worktree exists**: Fast-forward the worktree via git2 checkout (original behavior). The parent worker receives a `parent_update` nudge via tmux.
+   - **No worktree** (integration branch): Fast-forward the local branch ref directly using git2's reference API (`Repo::fast_forward_branch_ref`), then push to origin so other daemons/repos stay in sync. No nudge is sent (no worker to nudge).
 
 ### Data flow
 
@@ -289,8 +290,8 @@ When a child worker is spawned from a parent issue, the `parent_issue` and `pare
 
 ### Safety
 
-- `git pull --ff-only` never creates merge commits — if the pull can't fast-forward (conflict), the daemon logs a warning and skips the update
-- The pull runs with a 30-second timeout to avoid blocking the tick thread
+- Fast-forward only — if the update can't fast-forward (conflict/divergence), the daemon logs a warning and skips the update
+- Bare ref updates verify ancestry via `graph_descendant_of` before advancing the ref
 - Parent branch fetch failures in the sync actor are non-fatal
 
 ## Auto-pruning
