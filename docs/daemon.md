@@ -157,7 +157,7 @@ max = 2
 cooldown_seconds = 180
 ```
 
-Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits`) can set `max` and `cooldown_seconds` independently. Resolution order: per-type repo config → repo defaults → global config → hardcoded defaults.
+Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits`, `auto_review`) can set `max` and `cooldown_seconds` independently. Resolution order: per-type repo config → repo defaults → global config → hardcoded defaults.
 
 ## PR nudges
 
