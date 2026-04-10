@@ -309,74 +309,23 @@ impl<'a> Daemon<'a> {
                 continue;
             }
 
-            // Run git pull --ff-only in the parent worktree with a 30-second
-            // timeout to avoid blocking the tick thread indefinitely.
-            let mut child = match std::process::Command::new("git")
-                .args(["pull", "--ff-only"])
-                .current_dir(&worktree_path)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-            {
-                Ok(c) => c,
+            // Fast-forward the parent worktree to its remote tracking branch
+            // using git2 (no subprocess needed — sync actor already fetched).
+            let repo = match crate::git::Repo::open(&worktree_path) {
+                Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
                         worker = %worker_name,
                         repo = %repo_name,
-                        "failed to spawn git pull in parent worktree: {}",
+                        "failed to open parent worktree repo: {}",
                         e
                     );
                     continue;
                 }
             };
 
-            // Poll with timeout, matching the pattern from tmux.rs run_tmux().
-            const PULL_TIMEOUT: Duration = Duration::from_secs(30);
-            let start = std::time::Instant::now();
-            let poll_interval = Duration::from_millis(100);
-
-            let output = loop {
-                match child.try_wait() {
-                    Ok(Some(_status)) => {
-                        break child.wait_with_output();
-                    }
-                    Ok(None) => {
-                        if start.elapsed() >= PULL_TIMEOUT {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            tracing::warn!(
-                                worker = %worker_name,
-                                repo = %repo_name,
-                                "git pull timed out in parent worktree ({}s limit)",
-                                PULL_TIMEOUT.as_secs()
-                            );
-                            break Err(std::io::Error::new(
-                                std::io::ErrorKind::TimedOut,
-                                "git pull timed out",
-                            ));
-                        }
-                        std::thread::sleep(poll_interval);
-                    }
-                    Err(e) => {
-                        break Err(e);
-                    }
-                }
-            };
-
-            match output {
-                Ok(output) if output.status.success() => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    // "Already up to date." means no new commits
-                    if stdout.contains("Already up to date") {
-                        tracing::debug!(
-                            worker = %worker_name,
-                            repo = %repo_name,
-                            "parent worktree already up to date"
-                        );
-                        continue;
-                    }
-
+            match repo.fast_forward_to_remote(parent_branch) {
+                Ok(true) => {
                     tracing::info!(
                         worker = %worker_name,
                         repo = %repo_name,
@@ -407,23 +356,18 @@ impl<'a> Daemon<'a> {
                         });
                     }
                 }
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::warn!(
+                Ok(false) => {
+                    tracing::debug!(
                         worker = %worker_name,
                         repo = %repo_name,
-                        "git pull --ff-only failed in parent worktree: {}",
-                        stderr.trim()
+                        "parent worktree already up to date"
                     );
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                    // Already logged above when killing the process
                 }
                 Err(e) => {
                     tracing::warn!(
                         worker = %worker_name,
                         repo = %repo_name,
-                        "git pull failed in parent worktree: {}",
+                        "fast-forward failed in parent worktree: {}",
                         e
                     );
                 }
