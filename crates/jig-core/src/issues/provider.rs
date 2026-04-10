@@ -61,6 +61,17 @@ pub trait IssueProvider {
             .collect())
     }
 
+    /// List issues eligible for triage (status=Triage).
+    ///
+    /// Returns all issues with Triage status. Unlike spawnable issues, triage
+    /// issues don't need label filtering or dependency checks.
+    fn list_triageable(&self) -> Result<Vec<Issue>> {
+        self.list(&IssueFilter {
+            status: Some(IssueStatus::Triage),
+            ..Default::default()
+        })
+    }
+
     /// Check whether all dependencies of an issue are satisfied (Complete).
     ///
     /// Returns `true` if the issue has no dependencies or all dependencies
