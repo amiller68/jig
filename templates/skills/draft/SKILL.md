@@ -4,6 +4,7 @@ allowed-tools:
   - Bash(git:*)
   - Bash(gh pr:*)
   - Bash(gh repo:*)
+  - Bash(jig:*)
   - Read
   - Glob
   - Grep
@@ -28,31 +29,13 @@ Create a draft pull request for the current branch.
    c. Create a commit with a descriptive message based on the changes
    d. Use conventional commit format (feat:, fix:, docs:, refactor:, test:, chore:)
 
-3. Check if the branch has an upstream:
+3. Create the draft PR:
    ```
-   git status -sb
+   jig pr
    ```
-   - If no upstream: `git push -u origin <branch>`
-   - If upstream exists: `git push`
+   This automatically pushes the branch and creates a draft PR with the correct base branch.
 
-4. Determine the base branch. Check in order:
-   - `main` branch exists? Use `main`
-   - `master` branch exists? Use `master`
-   - Fall back to the repo's default branch: `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`
-
-5. Gather context — commits unique to this branch:
-   ```
-   git log <base>..HEAD --oneline
-   ```
-
-6. Create a draft PR:
-   ```
-   gh pr create --draft --base <base>
-   ```
-   - Title: descriptive of what the branch accomplishes
-   - Body: summarize ALL changes based on the commits
-
-7. Return the PR URL to the user.
+4. Return the PR URL to the user.
 
 ## Important
 
