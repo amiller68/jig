@@ -54,10 +54,13 @@ fn collect_spawnable(
         }
     };
 
-    // Filter out child issues whose parent isn't ready
+    // Filter out child issues whose parent isn't ready, and parent issues
+    // that still have active children (Backlog/InProgress). Parents are
+    // excluded from normal auto-spawn — they run only at wrap-up (T5).
     let issues: Vec<_> = issues
         .into_iter()
         .filter(|issue| is_child_spawnable(issue, repo_root))
+        .filter(|issue| !issue.has_active_children())
         .collect();
 
     let provider_kind = provider.kind();

@@ -95,6 +95,17 @@ impl fmt::Display for IssuePriority {
     }
 }
 
+/// Child issue metadata, fetched eagerly to support parent-filter logic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildIssue {
+    /// Child issue identifier (e.g. "ENG-124").
+    pub id: String,
+    /// Child issue's status (for determining if parent is still integrating).
+    pub status: Option<IssueStatus>,
+    /// Child issue's branch name (for git ancestry checks during wrap-up readiness).
+    pub branch_name: Option<String>,
+}
+
 /// Parent issue metadata, fetched eagerly to avoid extra API calls.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParentIssue {
@@ -127,8 +138,8 @@ pub struct Issue {
     pub body: String,
     /// Source file path.
     pub source: String,
-    /// Child ticket IDs (for epic indices with a `## Tickets` table).
-    pub children: Vec<String>,
+    /// Child issues (for epics with sub-tasks).
+    pub children: Vec<ChildIssue>,
     /// Labels/tags attached to this issue.
     pub labels: Vec<String>,
     /// Suggested branch name (e.g. from Linear's `branchName` field).
@@ -186,6 +197,18 @@ impl Issue {
             "{}{}\n\n{}{}",
             parent_section, self.title, self.body, completion_instructions
         )
+    }
+
+    /// Whether this issue is a parent with at least one child still in
+    /// Backlog or InProgress — meaning it should be excluded from normal
+    /// auto-spawn (the parent worker runs only at wrap-up).
+    pub fn has_active_children(&self) -> bool {
+        self.children.iter().any(|c| {
+            matches!(
+                c.status,
+                Some(IssueStatus::Backlog) | Some(IssueStatus::InProgress)
+            )
+        })
     }
 
     /// Whether this issue is eligible for auto-spawn given the repo's
@@ -566,5 +589,94 @@ mod tests {
         assert!(context.contains("Bug details"));
         assert!(context.contains("Linear"));
         assert!(!context.contains("file provider"));
+    }
+
+    fn make_issue(children: Vec<ChildIssue>) -> Issue {
+        Issue {
+            id: "EPIC-1".into(),
+            title: "Epic".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children,
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        }
+    }
+
+    #[test]
+    fn has_active_children_no_children() {
+        let issue = make_issue(vec![]);
+        assert!(!issue.has_active_children());
+    }
+
+    #[test]
+    fn has_active_children_backlog_child() {
+        let issue = make_issue(vec![ChildIssue {
+            id: "T-1".into(),
+            status: Some(IssueStatus::Backlog),
+            branch_name: None,
+        }]);
+        assert!(issue.has_active_children());
+    }
+
+    #[test]
+    fn has_active_children_in_progress_child() {
+        let issue = make_issue(vec![ChildIssue {
+            id: "T-1".into(),
+            status: Some(IssueStatus::InProgress),
+            branch_name: None,
+        }]);
+        assert!(issue.has_active_children());
+    }
+
+    #[test]
+    fn has_active_children_all_complete() {
+        let issue = make_issue(vec![
+            ChildIssue {
+                id: "T-1".into(),
+                status: Some(IssueStatus::Complete),
+                branch_name: None,
+            },
+            ChildIssue {
+                id: "T-2".into(),
+                status: Some(IssueStatus::Complete),
+                branch_name: None,
+            },
+        ]);
+        assert!(!issue.has_active_children());
+    }
+
+    #[test]
+    fn has_active_children_mixed_statuses() {
+        let issue = make_issue(vec![
+            ChildIssue {
+                id: "T-1".into(),
+                status: Some(IssueStatus::Complete),
+                branch_name: None,
+            },
+            ChildIssue {
+                id: "T-2".into(),
+                status: Some(IssueStatus::Backlog),
+                branch_name: None,
+            },
+        ]);
+        assert!(issue.has_active_children());
+    }
+
+    #[test]
+    fn has_active_children_planned_child_not_excluded() {
+        // Planned children don't count as "active" for this filter —
+        // only Backlog and InProgress trigger exclusion.
+        let issue = make_issue(vec![ChildIssue {
+            id: "T-1".into(),
+            status: Some(IssueStatus::Planned),
+            branch_name: None,
+        }]);
+        assert!(!issue.has_active_children());
     }
 }
