@@ -140,6 +140,7 @@ impl FileProvider {
     ///
     /// `template` is one of "standalone", "ticket", "epic-index" (or a custom name).
     /// Returns the ID of the newly created issue.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_issue(
         &self,
         title: &str,
@@ -148,6 +149,7 @@ impl FileProvider {
         priority: Option<&IssuePriority>,
         labels: &[String],
         parent: Option<&str>,
+        initial_status: Option<&IssueStatus>,
     ) -> Result<String> {
         // Load template content
         let template_path = self
@@ -235,6 +237,15 @@ impl FileProvider {
             } else {
                 replace_field(&content, "Parent", parent_id)
             }
+        } else {
+            content
+        };
+
+        // Override status if an explicit initial status was provided.
+        // Templates default to "Planned" — this lets callers land in any
+        // state (backlog, triage, etc.) without a follow-up update.
+        let content = if let Some(status) = initial_status {
+            replace_field(&content, "Status", status.as_str())
         } else {
             content
         };
@@ -1225,6 +1236,7 @@ mod tests {
                 None,
                 &[],
                 None,
+                None,
             )
             .unwrap();
 
@@ -1256,6 +1268,7 @@ mod tests {
                 Some(&IssuePriority::High),
                 &["auto".to_string(), "backend".to_string()],
                 None,
+                None,
             )
             .unwrap();
 
@@ -1270,10 +1283,26 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let provider = FileProvider::new(tmp.path());
         provider
-            .create_issue("My Feature", "features", "standalone", None, &[], None)
+            .create_issue(
+                "My Feature",
+                "features",
+                "standalone",
+                None,
+                &[],
+                None,
+                None,
+            )
             .unwrap();
 
-        let result = provider.create_issue("My Feature", "features", "standalone", None, &[], None);
+        let result = provider.create_issue(
+            "My Feature",
+            "features",
+            "standalone",
+            None,
+            &[],
+            None,
+            None,
+        );
         assert!(result.is_err());
     }
 

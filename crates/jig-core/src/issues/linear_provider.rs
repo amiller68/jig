@@ -146,6 +146,7 @@ impl LinearProvider {
     ///
     /// Uses team, project, assignee, and labels from the provider's config,
     /// with explicit arguments taking precedence.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_issue(
         &self,
         title: &str,
@@ -154,6 +155,7 @@ impl LinearProvider {
         labels: &[String],
         category: Option<&str>,
         parent: Option<&str>,
+        initial_status: Option<&IssueStatus>,
     ) -> Result<String> {
         // Merge labels: explicit labels take precedence, fall back to config
         let effective_labels = if labels.is_empty() {
@@ -174,6 +176,7 @@ impl LinearProvider {
             project,
             self.assignee.as_deref(),
             parent,
+            initial_status,
         )
     }
 }

@@ -615,14 +615,10 @@ impl LinearClient {
         Ok(data.issues.nodes.into_iter().map(Issue::from).collect())
     }
 
-    /// Update an issue's workflow state by transitioning to a state of the
-    /// given type. `team_key` is needed to look up workflow states.
-    pub fn update_issue_status(
-        &self,
-        identifier: &str,
-        team_key: &str,
-        new_status: &IssueStatus,
-    ) -> Result<()> {
+    /// Resolve a workflow state UUID for the given `team_key` and target
+    /// `IssueStatus`. Tries an exact type+name match first, then falls back
+    /// to a type-only match so renamed states still work.
+    fn resolve_state_id(&self, team_key: &str, new_status: &IssueStatus) -> Result<String> {
         // Map IssueStatus to Linear state type and preferred name
         let (target_state_type, target_state_name) = match new_status {
             IssueStatus::Triage => ("triage", "Triage"),
@@ -681,14 +677,26 @@ impl LinearClient {
                 })?
         };
 
+        Ok(state.id)
+    }
+
+    /// Update an issue's workflow state by transitioning to a state of the
+    /// given type. `team_key` is needed to look up workflow states.
+    pub fn update_issue_status(
+        &self,
+        identifier: &str,
+        team_key: &str,
+        new_status: &IssueStatus,
+    ) -> Result<()> {
+        let state_id = self.resolve_state_id(team_key, new_status)?;
+
         // Get issue's internal ID (we need to fetch it first)
         let issue = self
             .get_issue(identifier)?
             .ok_or_else(|| Error::Linear(format!("issue not found: {}", identifier)))?;
-        // Use identifier as the ID for the mutation
         let variables = serde_json::json!({
             "issueId": issue.id,
-            "stateId": state.id,
+            "stateId": state_id,
         });
         let request = GqlRequest {
             query: UPDATE_ISSUE_STATUS_MUTATION,
@@ -836,6 +844,9 @@ impl LinearClient {
     /// Create a new issue in Linear.
     ///
     /// Returns the created issue's identifier (e.g. "AUT-1234").
+    /// If `initial_status` is provided, the issue is created directly in that
+    /// workflow state (atomic — no window where a daemon could observe the
+    /// default state and react to it).
     #[allow(clippy::too_many_arguments)]
     pub fn create_issue(
         &self,
@@ -847,6 +858,7 @@ impl LinearClient {
         project: Option<&str>,
         assignee: Option<&str>,
         parent: Option<&str>,
+        initial_status: Option<&IssueStatus>,
     ) -> Result<String> {
         let team_id = self.team_id(team_key)?;
 
@@ -890,6 +902,11 @@ impl LinearClient {
                 .get_issue(parent_id)?
                 .ok_or_else(|| Error::Linear(format!("parent issue not found: {}", parent_id)))?;
             input.insert("parentId".into(), serde_json::json!(parent_issue.id));
+        }
+
+        if let Some(status) = initial_status {
+            let state_id = self.resolve_state_id(team_key, status)?;
+            input.insert("stateId".into(), serde_json::json!(state_id));
         }
 
         let variables = serde_json::json!({ "input": input });

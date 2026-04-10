@@ -94,6 +94,10 @@ pub enum IssuesCommand {
         /// Parent issue ID (e.g. "JIG-19") to create this as a sub-issue
         #[arg(short = 'P', long)]
         parent: Option<String>,
+
+        /// Initial status to set after creation (triage, backlog, planned, in-progress, complete, blocked)
+        #[arg(short = 's', long)]
+        status: Option<String>,
     },
 
     /// Update an existing issue's fields
@@ -328,9 +332,20 @@ fn run_create(
     labels: &[String],
     body: Option<&str>,
     parent: Option<&str>,
+    status: Option<&str>,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
     let pri = priority.and_then(IssuePriority::from_str_loose);
+
+    // Parse the initial status up front so we fail before creating the issue
+    // if the caller passed something invalid.
+    let initial_status = match status {
+        Some(s) => Some(
+            IssueStatus::from_str_loose(s)
+                .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", s)))?,
+        ),
+        None => None,
+    };
 
     // Read body from stdin if "-" was passed
     let body_text = match body {
@@ -343,27 +358,35 @@ fn run_create(
         None => None,
     };
 
-    match repo.jig_toml.issues.provider.as_str() {
+    let id = match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
             let linear_provider = repo.linear_provider()?;
-            let id = linear_provider.create_issue(
+            linear_provider.create_issue(
                 title,
                 body_text.as_deref(),
                 pri.as_ref(),
                 labels,
                 category,
                 parent,
-            )?;
-            Ok(IssuesOutput::Created(id))
+                initial_status.as_ref(),
+            )?
         }
         _ => {
             let cat = category.unwrap_or("features");
             let file_provider = repo.file_provider();
-            let id =
-                file_provider.create_issue(title, cat, template, pri.as_ref(), labels, parent)?;
-            Ok(IssuesOutput::Created(id))
+            file_provider.create_issue(
+                title,
+                cat,
+                template,
+                pri.as_ref(),
+                labels,
+                parent,
+                initial_status.as_ref(),
+            )?
         }
-    }
+    };
+
+    Ok(IssuesOutput::Created(id))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -624,6 +647,7 @@ impl Op for Issues {
                 label,
                 body,
                 parent,
+                status,
             }) => run_create(
                 ctx,
                 title,
@@ -633,6 +657,7 @@ impl Op for Issues {
                 label,
                 body.as_deref(),
                 parent.as_deref(),
+                status.as_deref(),
             ),
             Some(IssuesCommand::Update {
                 id,
