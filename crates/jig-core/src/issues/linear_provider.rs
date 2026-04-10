@@ -103,6 +103,8 @@ impl LinearProvider {
     /// Update an existing issue's fields in Linear.
     ///
     /// Only fields that are `Some` / non-empty are updated.
+    /// `assignee` accepts "me" (resolved to the authenticated user's ID) or a
+    /// raw Linear user ID.
     #[allow(clippy::too_many_arguments)]
     pub fn update_issue(
         &self,
@@ -112,9 +114,15 @@ impl LinearProvider {
         priority: Option<&super::types::IssuePriority>,
         labels: &[String],
         category: Option<&str>,
+        assignee: Option<&str>,
         parent: Option<&str>,
         remove_parent: bool,
     ) -> Result<()> {
+        let resolved_assignee = match assignee {
+            Some("me") => Some(self.client.viewer_id()?),
+            other => other.map(|s| s.to_string()),
+        };
+
         self.client.update_issue(
             identifier,
             &self.team,
@@ -123,6 +131,7 @@ impl LinearProvider {
             priority,
             labels,
             category,
+            resolved_assignee.as_deref(),
             parent,
             remove_parent,
         )

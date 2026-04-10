@@ -142,10 +142,11 @@ query TeamByKey($filter: TeamFilter) {
 
 const LABELS_QUERY: &str = r#"
 query LabelsByTeam($filter: IssueLabelFilter) {
-  issueLabels(filter: $filter, first: 100) {
+  issueLabels(filter: $filter, first: 250) {
     nodes {
       id
       name
+      team { key }
     }
   }
 }
@@ -287,6 +288,12 @@ struct LabelsData {
 struct RawLabelWithId {
     id: String,
     name: String,
+    team: Option<RawLabelTeam>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLabelTeam {
+    key: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -734,6 +741,7 @@ impl LinearClient {
         priority: Option<&IssuePriority>,
         labels: &[String],
         project: Option<&str>,
+        assignee: Option<&str>,
         parent: Option<&str>,
         remove_parent: bool,
     ) -> Result<()> {
@@ -772,6 +780,10 @@ impl LinearClient {
             if let Some(proj_id) = self.project_id(proj_name)? {
                 input.insert("projectId".into(), serde_json::json!(proj_id));
             }
+        }
+
+        if let Some(assignee_val) = assignee {
+            input.insert("assigneeId".into(), serde_json::json!(assignee_val));
         }
 
         if remove_parent {
@@ -817,13 +829,20 @@ impl LinearClient {
             .ok_or_else(|| Error::Linear(format!("team not found: {}", team_key)))
     }
 
-    /// Resolve label names to their IDs for a given team.
+    /// Resolve label names to their IDs.
+    ///
+    /// Linear labels live in two scopes: team-scoped (label.team set) and
+    /// workspace-scoped (label.team null). We query by name (not by team) so
+    /// workspace labels are discoverable, then prefer the team-scoped match
+    /// if one exists and fall back to a workspace match. Labels scoped to
+    /// *other* teams are ignored.
     pub fn label_ids(&self, team_key: &str, names: &[String]) -> Result<Vec<String>> {
         if names.is_empty() {
             return Ok(vec![]);
         }
+        let name_list: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         let filter = serde_json::json!({
-            "team": { "key": { "eq": team_key } }
+            "name": { "in": name_list }
         });
         let variables = serde_json::json!({ "filter": filter });
         let request = GqlRequest {
@@ -831,13 +850,28 @@ impl LinearClient {
             variables,
         };
         let data: LabelsData = self.execute(&request)?;
-        let ids: Vec<String> = data
-            .issue_labels
-            .nodes
-            .into_iter()
-            .filter(|l| names.iter().any(|n| n.eq_ignore_ascii_case(&l.name)))
-            .map(|l| l.id)
-            .collect();
+
+        let mut ids: Vec<String> = Vec::with_capacity(names.len());
+        for wanted in names {
+            // Candidates matching the requested name (case-insensitive).
+            let candidates: Vec<&RawLabelWithId> = data
+                .issue_labels
+                .nodes
+                .iter()
+                .filter(|l| l.name.eq_ignore_ascii_case(wanted))
+                .collect();
+
+            // Prefer a label scoped to the target team; else a workspace-level
+            // label (team is None); else skip (another team's label).
+            let chosen = candidates
+                .iter()
+                .find(|l| l.team.as_ref().map(|t| t.key.as_str()) == Some(team_key))
+                .or_else(|| candidates.iter().find(|l| l.team.is_none()));
+
+            if let Some(label) = chosen {
+                ids.push(label.id.clone());
+            }
+        }
         Ok(ids)
     }
 
