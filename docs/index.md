@@ -29,7 +29,7 @@ Find the right doc by what you're working on. The **Sources** column tells you w
 | Document | Summary | Sources |
 |----------|---------|---------|
 | [daemon.md](./daemon.md) | Tick loop, actor threads, nudging, auto-spawn, auto-prune, PR monitoring | `crates/jig-core/src/daemon/*.rs` |
-| [Automated Review](../design/review/index.md) | Review agent, data model, trigger flow, comment routing | `crates/jig-core/src/review.rs`, `crates/jig-core/src/daemon/review_actor.rs`, `crates/jig-cli/src/commands/review/*.rs` |
+| [Automated Review](./review/index.md) | Review agent, data model, trigger flow, comment routing | `crates/jig-core/src/review.rs`, `crates/jig-core/src/daemon/review_actor.rs`, `crates/jig-cli/src/commands/review/*.rs` |
 | [CLI Output Formatting](./cli/ui/STDOUT-FORMATTING.md) | Op trait pattern, Display impls, comfy-table usage, color conventions | `crates/jig-cli/src/op.rs`, `crates/jig-cli/src/ui.rs`, `crates/jig-cli/src/commands/*.rs` |
 
 ### CLI Usage
