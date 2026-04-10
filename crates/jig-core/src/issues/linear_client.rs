@@ -213,8 +213,6 @@ struct ViewerData {
 #[derive(Debug, Deserialize)]
 struct RawViewer {
     id: String,
-    #[allow(dead_code)]
-    email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,25 +224,10 @@ struct WorkflowStatesData {
 #[derive(Debug, Deserialize)]
 struct RawWorkflowState {
     id: String,
-    #[allow(dead_code)]
-    name: String,
-    #[allow(dead_code)]
-    #[serde(rename = "type")]
-    state_type: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateIssueData {
-    #[allow(dead_code)]
-    issue_update: UpdateIssueResult,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateIssueResult {
-    #[allow(dead_code)]
-    success: bool,
-}
+struct UpdateIssueData {}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -254,8 +237,6 @@ struct CreateIssueData {
 
 #[derive(Debug, Deserialize)]
 struct CreateIssueResult {
-    #[allow(dead_code)]
-    success: bool,
     issue: RawCreatedIssue,
 }
 
@@ -366,30 +347,10 @@ struct RawRelation {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateRelationData {
-    #[allow(dead_code)]
-    issue_relation_create: CreateRelationResult,
-}
+struct CreateRelationData {}
 
 #[derive(Debug, Deserialize)]
-struct CreateRelationResult {
-    #[allow(dead_code)]
-    success: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DeleteRelationData {
-    #[allow(dead_code)]
-    issue_relation_delete: DeleteRelationResult,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeleteRelationResult {
-    #[allow(dead_code)]
-    success: bool,
-}
+struct DeleteRelationData {}
 
 // -- Request body -------------------------------------------------------------
 
