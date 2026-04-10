@@ -21,6 +21,7 @@ pub mod recovery;
 pub mod runtime;
 pub mod spawn_actor;
 pub mod sync_actor;
+pub mod triage_tracker;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -298,7 +299,15 @@ impl<'a> Daemon<'a> {
         // 1. Drain all pending actor responses (non-blocking)
         runtime.drain_sync();
         runtime.drain_github();
-        let mut spawnable = runtime.drain_issues();
+        let issue_response = runtime.drain_issues();
+        let mut spawnable = issue_response
+            .as_ref()
+            .map(|r| r.spawnable.clone())
+            .unwrap_or_default();
+        let mut triageable = issue_response
+            .as_ref()
+            .map(|r| r.triageable.clone())
+            .unwrap_or_default();
 
         // First-tick inline poll: run issue poll synchronously so that spawn
         // can happen in the same tick instead of waiting 3 ticks.
@@ -324,12 +333,101 @@ impl<'a> Daemon<'a> {
                     repos,
                     existing_workers: worker_list.clone(),
                 };
-                spawnable = issue_actor::process_request(&req);
+                let response = issue_actor::process_request(&req);
+                spawnable = response.spawnable;
+                triageable = response.triageable;
                 if !spawnable.is_empty() {
                     tracing::info!(
                         count = spawnable.len(),
                         "first-tick inline issue poll found spawnable issues"
                     );
+                }
+                if !triageable.is_empty() {
+                    tracing::info!(
+                        count = triageable.len(),
+                        "first-tick inline issue poll found triageable issues"
+                    );
+                }
+            }
+        }
+
+        // Triage: filter out issues already tracked, register new ones, detect stuck
+        {
+            let now = chrono::Utc::now().timestamp();
+
+            // Filter triageable issues to those not already being triaged
+            triageable.retain(|issue| !runtime.triage_tracker().is_active(&issue.issue.id));
+
+            // Stuck triage detection: find triages that have exceeded timeout
+            // We need to collect stuck issue IDs first to avoid borrow issues
+            let stuck_ids: Vec<(String, String, String)> = {
+                // Load a representative triage timeout from any repo config, default 600s
+                let timeout = 600i64;
+                runtime
+                    .triage_tracker()
+                    .stuck_triages(timeout, now)
+                    .iter()
+                    .map(|e| {
+                        (
+                            e.issue_id.clone(),
+                            e.worker_name.clone(),
+                            e.repo_name.clone(),
+                        )
+                    })
+                    .collect()
+            };
+
+            for (issue_id, worker_name, repo_name) in &stuck_ids {
+                tracing::warn!(
+                    issue = %issue_id,
+                    worker = %worker_name,
+                    "triage timed out, emitting NeedsIntervention"
+                );
+                let event = NotificationEvent::NeedsIntervention {
+                    repo: repo_name.clone(),
+                    worker: worker_name.clone(),
+                    reason: format!(
+                        "Triage timed out for {} (worker: {})",
+                        issue_id, worker_name
+                    ),
+                };
+                if let Err(e) = self.notifier.emit(event) {
+                    tracing::warn!(
+                        issue = %issue_id,
+                        "NeedsIntervention notification failed: {}", e
+                    );
+                }
+
+                // Kill the worker's tmux window
+                let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                let target = TmuxTarget::new(&session, worker_name);
+                let _ = self.tmux.kill_window(&target);
+
+                runtime.triage_tracker_mut().remove(issue_id);
+            }
+
+            // Triage worker completion: check workers that start with "triage-"
+            // and have reached a terminal state — remove from tracker
+            for (repo_name, worker_name) in &worker_list {
+                if worker_name.starts_with("triage-") {
+                    let tmux_status = self.get_tmux_status(repo_name, worker_name);
+                    if matches!(
+                        tmux_status,
+                        TaskStatus::Exited | TaskStatus::NoWindow | TaskStatus::NoSession
+                    ) {
+                        // Extract issue_id from worker name (e.g. "triage-jig-38" -> "JIG-38")
+                        if let Some(suffix) = worker_name.strip_prefix("triage-") {
+                            let issue_id = suffix.to_uppercase();
+                            if runtime.triage_tracker().is_active(&issue_id) {
+                                tracing::info!(
+                                    worker = %worker_name,
+                                    issue = %issue_id,
+                                    "triage worker exited, removing from tracker"
+                                );
+                                runtime.triage_tracker_mut().remove(&issue_id);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -486,8 +584,31 @@ impl<'a> Daemon<'a> {
         );
 
         // 5. Send spawnable issues to background spawn actor (non-blocking)
-        if !spawnable.is_empty() {
-            runtime.send_spawn(spawnable);
+        // Combine spawnable and triageable into a single spawn batch
+        let mut all_to_spawn = spawnable;
+        all_to_spawn.extend(triageable);
+        if !all_to_spawn.is_empty() {
+            // Register triage issues in the tracker before spawning
+            let now = chrono::Utc::now().timestamp();
+            for issue in &all_to_spawn {
+                if issue.worker_name.starts_with("triage-") {
+                    let repo_name = issue
+                        .repo_root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    runtime.triage_tracker_mut().register(
+                        issue.issue.id.clone(),
+                        triage_tracker::TriageEntry {
+                            worker_name: issue.worker_name.clone(),
+                            spawned_at: now,
+                            issue_id: issue.issue.id.clone(),
+                            repo_name,
+                        },
+                    );
+                }
+            }
+            runtime.send_spawn(all_to_spawn);
         }
 
         result.spawning = runtime.spawning_workers().to_vec();
@@ -562,7 +683,9 @@ impl<'a> Daemon<'a> {
                     existing_workers: worker_list.clone(),
                 };
 
-                for issue in issue_actor::process_request(&req) {
+                let response = issue_actor::process_request(&req);
+                // Spawn normal issues
+                for issue in response.spawnable {
                     match self.auto_spawn_worker(&issue) {
                         Ok(()) => {
                             tracing::info!(
@@ -576,6 +699,24 @@ impl<'a> Daemon<'a> {
                             result
                                 .errors
                                 .push(format!("auto-spawn {}: {}", issue.issue.id, e));
+                        }
+                    }
+                }
+                // Spawn triage issues
+                for issue in response.triageable {
+                    match self.auto_spawn_worker(&issue) {
+                        Ok(()) => {
+                            tracing::info!(
+                                worker = %issue.worker_name,
+                                issue = %issue.issue.id,
+                                "auto-spawned triage worker"
+                            );
+                            result.auto_spawned.push(issue.worker_name.clone());
+                        }
+                        Err(e) => {
+                            result
+                                .errors
+                                .push(format!("auto-spawn triage {}: {}", issue.issue.id, e));
                         }
                     }
                 }

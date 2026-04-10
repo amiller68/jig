@@ -319,6 +319,8 @@ pub struct JigToml {
     pub commits: ConventionalCommitsConfig,
     #[serde(default)]
     pub review: ReviewConfig,
+    #[serde(default)]
+    pub triage: TriageConfig,
     /// Whether a jig.local.toml overlay was merged into this config.
     #[serde(skip)]
     pub has_local_overlay: bool,
@@ -567,6 +569,30 @@ impl Default for ReviewConfig {
             enabled: false,
             model: None,
             max_rounds: default_max_rounds(),
+        }
+    }
+}
+
+/// Per-repo triage configuration in jig.toml `[triage]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriageConfig {
+    /// Whether triage auto-spawn is enabled for this repo.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Max time in seconds for a triage worker before it's considered stuck.
+    #[serde(default = "default_triage_timeout")]
+    pub timeout_seconds: i64,
+}
+
+fn default_triage_timeout() -> i64 {
+    600
+}
+
+impl Default for TriageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timeout_seconds: default_triage_timeout(),
         }
     }
 }
