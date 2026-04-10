@@ -13,7 +13,7 @@ pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("nudge-auto-review", NUDGE_AUTO_REVIEW),
 ];
 
-const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
+const SPAWN_PREAMBLE: &str = r"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
 
 YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), draft PR created via `jig pr` or /draft, and issue marked complete (see completion instructions in the task). Call /review when ready.
 
@@ -28,7 +28,7 @@ IF YOU GET STUCK:
 
 TASK:
 {{task_context}}
-"#;
+";
 
 const TRIAGE_PROMPT: &str = r#"You are triaging issue {{issue_id}}: {{issue_title}}
 
@@ -75,7 +75,7 @@ Structure your findings as:
 - [Any risks or concerns]
 "#;
 
-const NUDGE_IDLE: &str = r#"STATUS CHECK: You've been idle for a while (nudge {{nudge_count}}/{{max_nudges}}).
+const NUDGE_IDLE: &str = r"STATUS CHECK: You've been idle for a while (nudge {{nudge_count}}/{{max_nudges}}).
 
 {{#if has_changes}}
 You have uncommitted changes but no PR yet. What's blocking you?
@@ -94,13 +94,13 @@ No recent commits. What's the current state?
 {{#if is_final_nudge}}
 This is your final nudge. If you need human help, say so now.
 {{/if}}
-"#;
+";
 
-const NUDGE_STUCK: &str = r#"STUCK PROMPT DETECTED: You appear to be waiting at an interactive prompt.
+const NUDGE_STUCK: &str = r"STUCK PROMPT DETECTED: You appear to be waiting at an interactive prompt.
 Auto-approving... (nudge {{nudge_count}}/{{max_nudges}})
-"#;
+";
 
-const NUDGE_CI: &str = r#"CI is failing on your PR (nudge {{nudge_count}}/{{max_nudges}}).
+const NUDGE_CI: &str = r"CI is failing on your PR (nudge {{nudge_count}}/{{max_nudges}}).
 
 Fix these issues:
 {{#each ci_failures}}
@@ -113,9 +113,9 @@ STEPS:
 3. Push to your branch: git push
 4. Verify CI passes
 5. Call /review when green
-"#;
+";
 
-const NUDGE_CONFLICT: &str = r#"Your PR has merge conflicts with {{base_branch}} (nudge {{nudge_count}}/{{max_nudges}}).
+const NUDGE_CONFLICT: &str = r"Your PR has merge conflicts with {{base_branch}} (nudge {{nudge_count}}/{{max_nudges}}).
 
 Resolve them:
 
@@ -124,14 +124,14 @@ Resolve them:
 3. Resolve conflicts, stage files, git rebase --continue
 4. git push --force-with-lease
 5. Call /review when conflicts are resolved
-"#;
+";
 
-const NUDGE_REVIEW: &str = r#"Your PR has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
+const NUDGE_REVIEW: &str = r"Your PR has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
 
 Address all feedback, commit, push, and call /review.
-"#;
+";
 
-const NUDGE_AUTO_REVIEW: &str = r#"AUTOMATED REVIEW: Your code has been reviewed (round {{review_round}}).
+const NUDGE_AUTO_REVIEW: &str = r"AUTOMATED REVIEW: Your code has been reviewed (round {{review_round}}).
 
 Verdict: CHANGES REQUESTED
 
@@ -146,9 +146,9 @@ Address each finding, then respond:
 {{#if is_final_round}}
 WARNING: This is round {{review_round}} of {{max_rounds}}. If not approved after this round, a human will be notified.
 {{/if}}
-"#;
+";
 
-const NUDGE_BAD_COMMITS: &str = r#"Your PR has commits that don't follow conventional commit format (nudge {{nudge_count}}/{{max_nudges}}).
+const NUDGE_BAD_COMMITS: &str = r"Your PR has commits that don't follow conventional commit format (nudge {{nudge_count}}/{{max_nudges}}).
 
 Bad commits:
 {{#each bad_commits}}
@@ -163,4 +163,4 @@ Fix with interactive rebase:
    Types: feat|fix|docs|style|refactor|perf|test|chore|ci
 4. git push --force-with-lease
 5. Call /review
-"#;
+";

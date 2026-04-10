@@ -56,9 +56,8 @@ pub fn should_install_hook(
     if is_jig_managed(&content) {
         if registry.is_installed(hook_name) {
             return Ok(InstallDecision::Skip);
-        } else {
-            return Ok(InstallDecision::UpdateRegistry);
         }
+        return Ok(InstallDecision::UpdateRegistry);
     }
     Ok(InstallDecision::BackupAndInstall)
 }
@@ -80,7 +79,6 @@ pub fn init_hooks(repo_path: &Path, force: bool) -> Result<InitResult> {
         match decision {
             InstallDecision::Skip => {
                 results.push(HookResult::AlreadyInstalled(hook_name.to_string()));
-                continue;
             }
             InstallDecision::BackupAndInstall => {
                 let date = chrono::Utc::now().format("%Y-%m-%d").to_string();

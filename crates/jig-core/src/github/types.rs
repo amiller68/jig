@@ -55,7 +55,7 @@ impl CheckRun {
         self.status == CheckStatus::Completed
             && matches!(
                 self.conclusion.as_deref(),
-                Some("failure") | Some("timed_out") | Some("cancelled")
+                Some("failure" | "timed_out" | "cancelled")
             )
     }
 }

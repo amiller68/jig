@@ -15,7 +15,7 @@ pub struct LinearClient {
 
 // -- GraphQL query constants --------------------------------------------------
 
-const LIST_ISSUES_QUERY: &str = r#"
+const LIST_ISSUES_QUERY: &str = r"
 query ListIssues($filter: IssueFilter, $first: Int) {
   issues(filter: $filter, first: $first) {
     nodes {
@@ -41,9 +41,9 @@ query ListIssues($filter: IssueFilter, $first: Int) {
     }
   }
 }
-"#;
+";
 
-const UPDATE_ISSUE_STATUS_MUTATION: &str = r#"
+const UPDATE_ISSUE_STATUS_MUTATION: &str = r"
 mutation UpdateIssueStatus($issueId: String!, $stateId: String!) {
   issueUpdate(id: $issueId, input: { stateId: $stateId }) {
     success
@@ -53,9 +53,9 @@ mutation UpdateIssueStatus($issueId: String!, $stateId: String!) {
     }
   }
 }
-"#;
+";
 
-const LIST_WORKFLOW_STATES_QUERY: &str = r#"
+const LIST_WORKFLOW_STATES_QUERY: &str = r"
 query ListWorkflowStates($filter: WorkflowStateFilter) {
   workflowStates(filter: $filter) {
     nodes {
@@ -65,9 +65,9 @@ query ListWorkflowStates($filter: WorkflowStateFilter) {
     }
   }
 }
-"#;
+";
 
-const GET_ISSUE_QUERY: &str = r#"
+const GET_ISSUE_QUERY: &str = r"
 query GetIssue($filter: IssueFilter, $first: Int) {
   issues(filter: $filter, first: $first) {
     nodes {
@@ -94,18 +94,18 @@ query GetIssue($filter: IssueFilter, $first: Int) {
     }
   }
 }
-"#;
+";
 
-const VIEWER_QUERY: &str = r#"
+const VIEWER_QUERY: &str = r"
 query Viewer {
   viewer {
     id
     email
   }
 }
-"#;
+";
 
-const UPDATE_ISSUE_MUTATION: &str = r#"
+const UPDATE_ISSUE_MUTATION: &str = r"
 mutation UpdateIssue($issueId: String!, $input: IssueUpdateInput!) {
   issueUpdate(id: $issueId, input: $input) {
     success
@@ -114,9 +114,9 @@ mutation UpdateIssue($issueId: String!, $input: IssueUpdateInput!) {
     }
   }
 }
-"#;
+";
 
-const CREATE_ISSUE_MUTATION: &str = r#"
+const CREATE_ISSUE_MUTATION: &str = r"
 mutation CreateIssue($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     success
@@ -125,9 +125,9 @@ mutation CreateIssue($input: IssueCreateInput!) {
     }
   }
 }
-"#;
+";
 
-const TEAM_ID_QUERY: &str = r#"
+const TEAM_ID_QUERY: &str = r"
 query TeamByKey($filter: TeamFilter) {
   teams(filter: $filter, first: 1) {
     nodes {
@@ -135,9 +135,9 @@ query TeamByKey($filter: TeamFilter) {
     }
   }
 }
-"#;
+";
 
-const LABELS_QUERY: &str = r#"
+const LABELS_QUERY: &str = r"
 query LabelsByTeam($filter: IssueLabelFilter) {
   issueLabels(filter: $filter, first: 100) {
     nodes {
@@ -146,26 +146,26 @@ query LabelsByTeam($filter: IssueLabelFilter) {
     }
   }
 }
-"#;
+";
 
-const CREATE_RELATION_MUTATION: &str = r#"
+const CREATE_RELATION_MUTATION: &str = r"
 mutation CreateRelation($input: IssueRelationCreateInput!) {
   issueRelationCreate(input: $input) {
     success
     issueRelation { id }
   }
 }
-"#;
+";
 
-const DELETE_RELATION_MUTATION: &str = r#"
+const DELETE_RELATION_MUTATION: &str = r"
 mutation DeleteRelation($id: String!) {
   issueRelationDelete(id: $id) {
     success
   }
 }
-"#;
+";
 
-const PROJECTS_QUERY: &str = r#"
+const PROJECTS_QUERY: &str = r"
 query ProjectsByName($filter: ProjectFilter) {
   projects(filter: $filter, first: 1) {
     nodes {
@@ -173,7 +173,7 @@ query ProjectsByName($filter: ProjectFilter) {
     }
   }
 }
-"#;
+";
 
 /// Parse an identifier like "AUT-62" into (team_key, number).
 ///
