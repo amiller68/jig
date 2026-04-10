@@ -11,6 +11,7 @@ use super::messages::*;
 use super::triage_tracker::TriageTracker;
 use super::{
     github_actor, issue_actor, nudge_actor, prune_actor, review_actor, spawn_actor, sync_actor,
+    triage_actor,
 };
 
 /// Timer info for display in the ps watch footer.
@@ -85,6 +86,11 @@ pub struct DaemonRuntime {
     review_rx: flume::Receiver<ReviewComplete>,
     review_pending: HashMap<String, bool>,
 
+    // Triage actor
+    triage_tx: flume::Sender<TriageRequest>,
+    triage_rx: flume::Receiver<TriageComplete>,
+    triage_pending: bool,
+
     config: RuntimeConfig,
 
     /// Tracks in-flight triage workers to prevent duplicate spawns.
@@ -128,6 +134,10 @@ impl DaemonRuntime {
         let (review_resp_tx, review_resp_rx) = flume::bounded(4);
         let review_handle = review_actor::spawn(review_req_rx, review_resp_tx);
 
+        let (triage_req_tx, triage_req_rx) = flume::bounded(1);
+        let (triage_resp_tx, triage_resp_rx) = flume::bounded(1);
+        let triage_handle = triage_actor::spawn(triage_req_rx, triage_resp_tx);
+
         // Start with past timestamps so first tick triggers sync/poll immediately
         let past = Instant::now();
 
@@ -163,6 +173,10 @@ impl DaemonRuntime {
             review_rx: review_resp_rx,
             review_pending: HashMap::new(),
 
+            triage_tx: triage_req_tx,
+            triage_rx: triage_resp_rx,
+            triage_pending: false,
+
             config,
             triage_tracker: TriageTracker::new(),
             first_poll_done: false,
@@ -174,6 +188,7 @@ impl DaemonRuntime {
                 spawn_handle,
                 nudge_handle,
                 review_handle,
+                triage_handle,
             ],
         }
     }
@@ -470,6 +485,33 @@ impl DaemonRuntime {
     /// Whether a review is pending for a given worker.
     pub fn review_pending(&self, worker_key: &str) -> bool {
         self.review_pending.contains_key(worker_key)
+    }
+
+    /// Send triage issues to the triage actor (non-blocking).
+    pub fn send_triage(&mut self, issues: Vec<TriageIssue>) {
+        if self.triage_pending || issues.is_empty() {
+            return;
+        }
+        if self.triage_tx.try_send(TriageRequest { issues }).is_ok() {
+            self.triage_pending = true;
+            tracing::debug!("triggered triage");
+        }
+    }
+
+    /// Drain any completed triage response (non-blocking).
+    pub fn drain_triage(&mut self) -> Option<TriageComplete> {
+        match self.triage_rx.try_recv() {
+            Ok(result) => {
+                self.triage_pending = false;
+                Some(result)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Whether a triage request is currently in flight.
+    pub fn triage_pending(&self) -> bool {
+        self.triage_pending
     }
 
     /// Get runtime config reference.

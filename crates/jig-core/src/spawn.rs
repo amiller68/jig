@@ -150,7 +150,12 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
             update_issue_status(repo_root, &input.issue.id);
         }
         SpawnKind::Triage => {
-            launch_triage_worker(&wt, input).map_err(|e| e.to_string())?;
+            // Triage is now handled by the triage_actor as a direct subprocess.
+            // If this codepath is reached, it means triage was routed through
+            // spawn incorrectly.
+            return Err(
+                "triage should be handled by triage_actor, not spawn_worker_for_issue".to_string(),
+            );
         }
     }
 
@@ -190,47 +195,75 @@ pub fn update_issue_status(repo_root: &Path, issue_id: &str) {
 }
 
 /// Allowed tools for triage workers — read-only access plus jig CLI and Linear MCP.
-const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"];
+pub const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"];
 
-/// Launch a triage worker: render triage prompt, write it to the worktree,
-/// and execute Claude Code in ephemeral (one-shot) mode via tmux.
-fn launch_triage_worker(wt: &Worktree, input: &SpawnIssueInput<'_>) -> Result<()> {
-    let engine = TemplateEngine::new().with_repo(&wt.repo_root);
+/// Render the triage prompt for an issue.
+///
+/// Returns the rendered prompt text. Used by both the `triage_actor` (subprocess)
+/// and any inline triage path.
+pub fn render_triage_prompt(repo_root: &Path, issue: &Issue) -> Result<String> {
+    let engine = TemplateEngine::new().with_repo(repo_root);
     let mut tpl_ctx = TemplateContext::new();
-    tpl_ctx.set("issue_id", &input.issue.id);
-    tpl_ctx.set("issue_title", &input.issue.title);
-    tpl_ctx.set("issue_body", &input.issue.body);
-    tpl_ctx.set_list("issue_labels", input.issue.labels.clone());
+    tpl_ctx.set("issue_id", &issue.id);
+    tpl_ctx.set("issue_title", &issue.title);
+    tpl_ctx.set("issue_body", &issue.body);
+    tpl_ctx.set_list("issue_labels", issue.labels.clone());
 
-    let repo_name = wt
-        .repo_root
+    let repo_name = repo_root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
     tpl_ctx.set("repo_name", &repo_name);
 
-    let prompt = engine.render("triage-prompt", &tpl_ctx)?;
+    engine.render("triage-prompt", &tpl_ctx)
+}
 
-    // Write rendered prompt to the worktree
-    let prompt_path = wt.path.join(".jig").join("triage-prompt.md");
-    std::fs::create_dir_all(prompt_path.parent().unwrap())?;
-    std::fs::write(&prompt_path, &prompt)?;
+/// Run a triage worker as a direct subprocess (blocking).
+///
+/// Renders the triage prompt, builds the argv, and executes Claude Code
+/// with stdin piped from the prompt. Returns `Ok(())` on success or an
+/// error message on failure.
+pub fn run_triage_subprocess(repo_root: &Path, issue: &Issue) -> std::result::Result<(), String> {
+    let prompt = render_triage_prompt(repo_root, issue).map_err(|e| e.to_string())?;
 
-    // Resolve triage model from config
-    let jig_toml = config::JigToml::load(&wt.repo_root)?.unwrap_or_default();
+    let jig_toml = config::JigToml::load(repo_root)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
     let model = &jig_toml.triage.model;
-
-    // Get adapter
     let agent_adapter =
         adapter::get_adapter(&jig_toml.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
 
-    // Build ephemeral command with prompt-file, model, and tool restrictions
-    let cmd =
-        adapter::build_triage_command(agent_adapter, &prompt_path, model, TRIAGE_ALLOWED_TOOLS);
+    let argv = adapter::build_triage_argv(agent_adapter, model, TRIAGE_ALLOWED_TOOLS);
 
-    // Launch in tmux (same window lifecycle as normal workers)
-    session::create_window(&wt.session_name, &wt.name, &wt.path)?;
-    session::send_keys(&wt.session_name, &wt.name, &cmd)?;
+    // argv[0] is the command, rest are args
+    let (cmd, args) = argv.split_first().ok_or("empty triage argv")?;
+
+    let output = std::process::Command::new(cmd)
+        .args(args)
+        .current_dir(repo_root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(prompt.as_bytes());
+            }
+            // Drop stdin to signal EOF
+            drop(child.stdin.take());
+            child.wait_with_output()
+        })
+        .map_err(|e| format!("failed to execute triage agent: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "triage agent exited with {}: {}",
+            output.status,
+            stderr.chars().take(500).collect::<String>()
+        ));
+    }
 
     Ok(())
 }

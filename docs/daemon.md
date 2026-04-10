@@ -12,7 +12,7 @@ The jig daemon monitors spawned workers and takes action when they need attentio
 
 Every tick (default 30s), the daemon:
 
-1. **Drains actor responses** — Collects results from background actors (GitHub, nudge, prune, spawn, sync, review)
+1. **Drains actor responses** — Collects results from background actors (GitHub, nudge, prune, spawn, sync, review, triage)
 2. **Syncs repos** — Background `git fetch` via the sync actor (includes parent branches)
 3. **Updates parent worktrees** — Pulls merged child work into parent worktrees (see [Parent worktree auto-update](#parent-worktree-auto-update))
 4. **Discovers workers** — Scans event logs for active workers
@@ -39,6 +39,7 @@ The daemon offloads blocking I/O to background threads (actors) so the tick loop
 | **prune** | `jig-prune` | Remove worktrees for merged/closed PRs |
 | **nudge** | `jig-nudge` | Deliver nudge messages via tmux |
 | **review** | `jig-review` | Run ephemeral AI review sessions |
+| **triage** | `jig-triage` | Run triage agents as direct subprocesses |
 
 Each actor uses `flume` channels for non-blocking communication with the tick thread. The nudge actor is particularly important — it prevents `tmux send-keys` from blocking the tick thread when a pane can't accept input.
 

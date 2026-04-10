@@ -133,6 +133,41 @@ pub struct SpawnComplete {
     pub results: Vec<SpawnResult>,
 }
 
+/// A triage issue to run as a direct subprocess.
+#[derive(Debug, Clone)]
+pub struct TriageIssue {
+    /// Repo root path.
+    pub repo_root: PathBuf,
+    /// The parsed issue.
+    pub issue: Issue,
+    /// Derived worker name (e.g., "triage-jig-38").
+    pub worker_name: String,
+    /// Provider kind for status updates.
+    pub provider_kind: ProviderKind,
+}
+
+/// Request sent to the triage actor to run triage subprocesses.
+pub struct TriageRequest {
+    pub issues: Vec<TriageIssue>,
+}
+
+/// Result of a single triage subprocess.
+pub struct TriageResult {
+    /// Worker name (e.g., "triage-jig-38").
+    pub worker_name: String,
+    /// Repo name for notifications.
+    pub repo_name: String,
+    /// Issue ID for tracker cleanup.
+    pub issue_id: String,
+    /// Error message if the triage failed, None on success.
+    pub error: Option<String>,
+}
+
+/// Response from the triage actor.
+pub struct TriageComplete {
+    pub results: Vec<TriageResult>,
+}
+
 /// Request sent to the nudge actor to deliver a nudge via tmux.
 pub struct NudgeRequest {
     /// Tmux session name.
