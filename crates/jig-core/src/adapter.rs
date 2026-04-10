@@ -96,8 +96,11 @@ pub fn supported_agents() -> &'static [&'static str] {
     &["claude"]
 }
 
-/// Build a triage command for ephemeral execution with `--prompt-file`, `--model`,
-/// and `--allowedTools` restrictions.
+/// Build a triage command for ephemeral execution with `--model` and
+/// `--allowed-tools` restrictions. The prompt is supplied on stdin by
+/// redirecting from `prompt_file` — Claude Code has no file-based prompt
+/// flag, and stdin redirection avoids any shell-escaping pitfalls with
+/// long markdown prompts.
 pub fn build_triage_command(
     adapter: &AgentAdapter,
     prompt_file: &std::path::Path,
@@ -108,9 +111,9 @@ pub fn build_triage_command(
     cmd = format!("{} --model {}", cmd, model);
     if !allowed_tools.is_empty() {
         let tools = allowed_tools.join(",");
-        cmd = format!("{} --allowedTools \"{}\"", cmd, tools);
+        cmd = format!("{} --allowed-tools \"{}\"", cmd, tools);
     }
-    cmd = format!("{} --prompt-file {}", cmd, prompt_file.display());
+    cmd = format!("{} < {}", cmd, prompt_file.display());
     cmd
 }
 
@@ -239,8 +242,8 @@ mod tests {
             cmd,
             "claude --print --no-session-persistence --dangerously-skip-permissions \
              --model sonnet \
-             --allowedTools \"Read,Glob,Grep,Bash(jig *),mcp__linear*\" \
-             --prompt-file /tmp/worktree/.jig/triage-prompt.md"
+             --allowed-tools \"Read,Glob,Grep,Bash(jig *),mcp__linear*\" \
+             < /tmp/worktree/.jig/triage-prompt.md"
         );
     }
 
@@ -252,7 +255,7 @@ mod tests {
             cmd,
             "claude --print --no-session-persistence --dangerously-skip-permissions \
              --model opus \
-             --prompt-file /tmp/triage.md"
+             < /tmp/triage.md"
         );
     }
 }
