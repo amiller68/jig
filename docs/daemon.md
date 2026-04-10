@@ -12,7 +12,7 @@ The jig daemon monitors spawned workers and takes action when they need attentio
 
 Every tick (default 30s), the daemon:
 
-1. **Drains actor responses** — Collects results from background actors (GitHub, nudge, prune, spawn, sync)
+1. **Drains actor responses** — Collects results from background actors (GitHub, nudge, prune, spawn, sync, review)
 2. **Syncs repos** — Background `git fetch` via the sync actor (includes parent branches)
 3. **Updates parent worktrees** — Pulls merged child work into parent worktrees (see [Parent worktree auto-update](#parent-worktree-auto-update))
 4. **Discovers workers** — Scans event logs for active workers
@@ -172,6 +172,40 @@ When a worker has an open **draft** PR, the daemon monitors it for problems:
 **Draft PRs** receive nudges — the agent is still actively working and can act on them. The STATE column shows `draft` (blue).
 
 **Non-draft PRs** do not receive nudges — they're in human review. The STATE column shows `review` (cyan). Health problems still appear in the HEALTH column for visibility.
+
+## Automated review
+
+When enabled, the daemon triggers an AI review agent on draft PRs whenever new commits are pushed. This automates the review-revise cycle before human review.
+
+### Configuration
+
+```toml
+# jig.toml
+[review]
+enabled = true
+max_rounds = 3          # max review cycles before human escalation
+# model = "opus"        # optional model override for review agent
+```
+
+### How it works
+
+1. **Trigger**: On each tick, if a worker has a draft PR and `review.enabled = true`, the daemon compares the worktree's HEAD SHA against `last_reviewed_sha` in `workers.json`. If HEAD has moved (or no review has been done yet), a review is dispatched to the review actor.
+
+2. **Review**: The review actor runs an ephemeral AI agent that diffs the branch against the base, evaluates correctness and conventions, and writes a verdict file to `.jig/reviews/`.
+
+3. **Drain**: On the next tick, the daemon reads the verdict:
+   - **Approve** — The PR is marked ready for review (`gh pr ready`), the linked issue (if any) is transitioned to "In Review", and a `ReviewApproved` notification is emitted.
+   - **ChangesRequested** — An `AutoReview` nudge is sent to the worker's tmux session, pointing it at the review findings. The worker can then address them and push new commits, triggering another review cycle.
+
+4. **Max rounds**: If the review cycle reaches `max_rounds` without approval, the daemon emits a `NeedsIntervention` notification and stops triggering reviews.
+
+### Comment routing
+
+When automated review is active on a draft PR, human review comment nudges (`NudgeType::Review`) are suppressed. The review agent is the gatekeeper — human feedback comes after the PR exits draft. When review is disabled or the PR is non-draft, comment nudges behave normally.
+
+### State tracking
+
+The `last_reviewed_sha` field in `workers.json` persists across daemon restarts, preventing duplicate reviews on the same commit.
 
 ## Auto-spawn
 
