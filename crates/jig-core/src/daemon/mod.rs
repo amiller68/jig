@@ -50,11 +50,11 @@ use pr::{make_github_client, PrMonitor};
 pub use messages::SpawnableIssue;
 pub use runtime::{DaemonRuntime, RuntimeConfig, TimerInfo};
 
-/// Get the HEAD SHA for a worktree path using git2.
+/// Get the HEAD SHA for a worktree path via the project's git module.
 fn head_sha_for(worktree_path: &std::path::Path) -> Option<String> {
-    let repo = git2::Repository::open(worktree_path).ok()?;
-    let head = repo.head().ok()?;
-    head.target().map(|oid| oid.to_string())
+    crate::git::Repo::open(worktree_path)
+        .and_then(|r| r.head_sha())
+        .ok()
 }
 
 /// Extract the branch name from a worker's event log (looks for Spawn event),
