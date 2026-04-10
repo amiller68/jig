@@ -55,9 +55,9 @@ impl TriageTracker {
             .collect()
     }
 
-    /// Get all active issue IDs (for cleanup during stuck detection).
-    pub fn active_issue_ids(&self) -> Vec<String> {
-        self.active.keys().cloned().collect()
+    /// Get all active entries (for per-repo timeout checking).
+    pub fn stuck_entries(&self) -> Vec<&TriageEntry> {
+        self.active.values().collect()
     }
 
     /// Rebuild tracker from active workers whose names start with "triage-"

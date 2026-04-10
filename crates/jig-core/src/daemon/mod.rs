@@ -358,23 +358,25 @@ impl<'a> Daemon<'a> {
             // Filter triageable issues to those not already being triaged
             triageable.retain(|issue| !runtime.triage_tracker().is_active(&issue.issue.id));
 
-            // Stuck triage detection: find triages that have exceeded timeout
-            // We need to collect stuck issue IDs first to avoid borrow issues
+            // Stuck triage detection: check each active triage against its
+            // repo's configured timeout (from [triage] timeout_seconds).
             let stuck_ids: Vec<(String, String, String)> = {
-                // Load a representative triage timeout from any repo config, default 600s
-                let timeout = 600i64;
-                runtime
-                    .triage_tracker()
-                    .stuck_triages(timeout, now)
-                    .iter()
-                    .map(|e| {
-                        (
-                            e.issue_id.clone(),
-                            e.worker_name.clone(),
-                            e.repo_name.clone(),
-                        )
-                    })
-                    .collect()
+                let mut stuck = Vec::new();
+                for entry in runtime.triage_tracker().stuck_entries() {
+                    // Load per-repo triage timeout
+                    let timeout = Self::find_repo_path(&registry, &entry.repo_name)
+                        .and_then(|re| JigToml::load(&re.path).ok().flatten())
+                        .map(|toml| toml.triage.timeout_seconds)
+                        .unwrap_or(600);
+                    if now - entry.spawned_at > timeout {
+                        stuck.push((
+                            entry.issue_id.clone(),
+                            entry.worker_name.clone(),
+                            entry.repo_name.clone(),
+                        ));
+                    }
+                }
+                stuck
             };
 
             for (issue_id, worker_name, repo_name) in &stuck_ids {
