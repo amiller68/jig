@@ -15,7 +15,15 @@ pub mod submit;
 #[derive(Args, Debug, Clone)]
 pub struct Review {
     #[command(subcommand)]
-    pub command: ReviewCommand,
+    pub command: Option<ReviewCommand>,
+
+    /// Worktree name (shorthand for `jig review show <name>`)
+    #[arg(value_name = "NAME")]
+    pub name: Option<String>,
+
+    /// Show full diff instead of summary
+    #[arg(long)]
+    pub full: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -70,9 +78,23 @@ impl Op for Review {
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         match &self.command {
-            ReviewCommand::Show(show) => run_show(ctx, show),
-            ReviewCommand::Submit(sub) => sub.run_inner(ctx),
-            ReviewCommand::Respond(resp) => resp.run_inner(ctx),
+            Some(ReviewCommand::Show(show)) => run_show(ctx, show),
+            Some(ReviewCommand::Submit(sub)) => sub.run_inner(ctx),
+            Some(ReviewCommand::Respond(resp)) => resp.run_inner(ctx),
+            None => {
+                // Backward compat: `jig review <name>` == `jig review show <name>`
+                if let Some(name) = &self.name {
+                    let show = ReviewShow {
+                        name: name.clone(),
+                        full: self.full,
+                    };
+                    run_show(ctx, &show)
+                } else {
+                    Err(ReviewError::Core(Error::Custom(
+                        "Usage: jig review <name> or jig review submit/respond".into(),
+                    )))
+                }
+            }
         }
     }
 }

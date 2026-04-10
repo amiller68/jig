@@ -320,4 +320,11 @@ fn submit_and_show_no_conflict() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("does not exist"));
+
+    // Backward compat: `jig review <name>` should work the same as `jig review show <name>`
+    repo.jig()
+        .args(["review", "my-worktree"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist"));
 }
