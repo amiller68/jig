@@ -23,6 +23,16 @@ use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker, WorkerStatus};
 use crate::worktree::Worktree;
 
+/// Distinguishes normal (interactive) worker spawns from lightweight triage spawns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpawnKind {
+    /// Interactive worker in a tmux session — full tool access, persistent session.
+    #[default]
+    Normal,
+    /// Read-only triage agent — one-shot `--print` mode with restricted tools.
+    Triage,
+}
+
 /// Task status for ps command
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
@@ -52,6 +62,7 @@ pub struct SpawnIssueInput<'a> {
     pub issue: &'a Issue,
     pub worker_name: &'a str,
     pub provider_kind: ProviderKind,
+    pub kind: SpawnKind,
 }
 
 /// Spawn a single worker for an issue: create worktree, register, run on-create
@@ -123,10 +134,16 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
     // Transition from Initializing → Spawned
     wt.emit_spawn_event();
 
-    wt.launch(Some(&context)).map_err(|e| e.to_string())?;
-
-    // Update issue status to InProgress to prevent duplicate spawning
-    update_issue_status(repo_root, &input.issue.id);
+    match input.kind {
+        SpawnKind::Normal => {
+            wt.launch(Some(&context)).map_err(|e| e.to_string())?;
+            // Update issue status to InProgress to prevent duplicate spawning
+            update_issue_status(repo_root, &input.issue.id);
+        }
+        SpawnKind::Triage => {
+            launch_triage_worker(&wt, input).map_err(|e| e.to_string())?;
+        }
+    }
 
     Ok(())
 }
@@ -161,6 +178,52 @@ pub fn update_issue_status(repo_root: &Path, issue_id: &str) {
             );
         }
     }
+}
+
+/// Allowed tools for triage workers — read-only access plus jig CLI and Linear MCP.
+const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"];
+
+/// Launch a triage worker: render triage prompt, write it to the worktree,
+/// and execute Claude Code in ephemeral (one-shot) mode via tmux.
+fn launch_triage_worker(wt: &Worktree, input: &SpawnIssueInput<'_>) -> Result<()> {
+    let engine = TemplateEngine::new().with_repo(&wt.repo_root);
+    let mut tpl_ctx = TemplateContext::new();
+    tpl_ctx.set("issue_id", &input.issue.id);
+    tpl_ctx.set("issue_title", &input.issue.title);
+    tpl_ctx.set("issue_body", &input.issue.body);
+    tpl_ctx.set_list("issue_labels", input.issue.labels.clone());
+
+    let repo_name = wt
+        .repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    tpl_ctx.set("repo_name", &repo_name);
+
+    let prompt = engine.render("triage-prompt", &tpl_ctx)?;
+
+    // Write rendered prompt to the worktree
+    let prompt_path = wt.path.join(".jig").join("triage-prompt.md");
+    std::fs::create_dir_all(prompt_path.parent().unwrap())?;
+    std::fs::write(&prompt_path, &prompt)?;
+
+    // Resolve triage model from config
+    let jig_toml = config::JigToml::load(&wt.repo_root)?.unwrap_or_default();
+    let model = &jig_toml.triage.model;
+
+    // Get adapter
+    let agent_adapter =
+        adapter::get_adapter(&jig_toml.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+
+    // Build ephemeral command with prompt-file, model, and tool restrictions
+    let cmd =
+        adapter::build_triage_command(agent_adapter, &prompt_path, model, TRIAGE_ALLOWED_TOOLS);
+
+    // Launch in tmux (same window lifecycle as normal workers)
+    session::create_window(&wt.session_name, &wt.name, &wt.path)?;
+    session::send_keys(&wt.session_name, &wt.name, &cmd)?;
+
+    Ok(())
 }
 
 /// Task info for ps command
@@ -506,4 +569,22 @@ fn cleanup_stale_workers(
     }
 
     Ok(Some(state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_kind_default_is_normal() {
+        let kind: SpawnKind = Default::default();
+        assert_eq!(kind, SpawnKind::Normal);
+    }
+
+    #[test]
+    fn spawn_kind_equality() {
+        assert_eq!(SpawnKind::Normal, SpawnKind::Normal);
+        assert_eq!(SpawnKind::Triage, SpawnKind::Triage);
+        assert_ne!(SpawnKind::Normal, SpawnKind::Triage);
+    }
 }

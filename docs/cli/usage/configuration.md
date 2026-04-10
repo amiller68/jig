@@ -23,6 +23,11 @@ auto_spawn_labels = ["jig-auto"] # Only auto-spawn issues with all these labels
 profile = "work"               # References ~/.config/jig/config.toml profile
 team = "ENG"                   # Linear team key
 projects = ["Backend"]         # Optional project filter
+
+[triage]
+enabled = true                 # Enable triage auto-spawn (default: false)
+model = "sonnet"               # Model for triage agents (default: "sonnet")
+timeout_seconds = 600          # Max triage duration before stuck detection
 ```
 
 **Priority:** jig.toml settings override global config.
@@ -204,7 +209,10 @@ The daemon can automatically spawn lightweight triage workers for issues in **Tr
 ```toml
 [triage]
 enabled = true
+model = "sonnet"         # Model for triage agents (default: "sonnet")
 timeout_seconds = 600    # max time for a triage worker before it's considered stuck (default 600)
 ```
 
-When enabled, the issue actor discovers issues with Triage status and spawns triage workers (named `triage-{issue_id}`). Triage workers share the same worker budget as normal auto-spawn. The daemon tracks in-flight triages to prevent duplicates and emits `NeedsIntervention` notifications if a triage worker exceeds the timeout.
+When enabled, the issue actor discovers issues with Triage status and spawns triage workers (named `triage-{issue_id}`). Triage workers run in ephemeral (one-shot) mode with restricted tool access: `Read`, `Glob`, `Grep`, `Bash(jig *)`, and `mcp__linear*`. They investigate the issue, append findings to the issue description, transition it to Backlog, then exit.
+
+Triage workers share the same worker budget as normal auto-spawn. The daemon tracks in-flight triages to prevent duplicates and emits `NeedsIntervention` notifications if a triage worker exceeds the timeout. See [daemon docs](../../daemon.md#triage-verification) for the post-spawn lifecycle.

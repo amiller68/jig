@@ -6,6 +6,7 @@ use crate::context::RepoContext;
 use crate::issues::naming::derive_worker_name;
 use crate::issues::provider::IssueProvider;
 use crate::issues::ProviderKind;
+use crate::spawn::SpawnKind;
 
 use super::messages::{IssueRequest, IssueResponse, SpawnableIssue};
 
@@ -62,6 +63,7 @@ fn collect_spawnable(
             issue,
             worker_name,
             provider_kind,
+            kind: SpawnKind::Normal,
         });
         repo_spawned += 1;
     }
@@ -102,6 +104,7 @@ fn collect_triageable(
             issue,
             worker_name,
             provider_kind,
+            kind: SpawnKind::Triage,
         });
         count += 1;
     }

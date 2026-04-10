@@ -96,6 +96,24 @@ pub fn supported_agents() -> &'static [&'static str] {
     &["claude"]
 }
 
+/// Build a triage command for ephemeral execution with `--prompt-file`, `--model`,
+/// and `--allowedTools` restrictions.
+pub fn build_triage_command(
+    adapter: &AgentAdapter,
+    prompt_file: &std::path::Path,
+    model: &str,
+    allowed_tools: &[&str],
+) -> String {
+    let mut cmd = format!("{} {}", adapter.command, adapter.ephemeral_flags);
+    cmd = format!("{} --model {}", cmd, model);
+    if !allowed_tools.is_empty() {
+        let tools = allowed_tools.join(",");
+        cmd = format!("{} --allowedTools \"{}\"", cmd, tools);
+    }
+    cmd = format!("{} --prompt-file {}", cmd, prompt_file.display());
+    cmd
+}
+
 /// Build the spawn command for an agent (always appends auto_flag)
 pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>) -> String {
     let mut cmd = adapter.command.to_string();
@@ -205,6 +223,36 @@ mod tests {
         assert_eq!(
             cmd,
             "claude --print --no-session-persistence --dangerously-skip-permissions 'hello'"
+        );
+    }
+
+    #[test]
+    fn test_build_triage_command() {
+        let prompt_file = std::path::Path::new("/tmp/worktree/.jig/triage-prompt.md");
+        let cmd = build_triage_command(
+            &CLAUDE_CODE,
+            prompt_file,
+            "sonnet",
+            &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"],
+        );
+        assert_eq!(
+            cmd,
+            "claude --print --no-session-persistence --dangerously-skip-permissions \
+             --model sonnet \
+             --allowedTools \"Read,Glob,Grep,Bash(jig *),mcp__linear*\" \
+             --prompt-file /tmp/worktree/.jig/triage-prompt.md"
+        );
+    }
+
+    #[test]
+    fn test_build_triage_command_custom_model() {
+        let prompt_file = std::path::Path::new("/tmp/triage.md");
+        let cmd = build_triage_command(&CLAUDE_CODE, prompt_file, "opus", &[]);
+        assert_eq!(
+            cmd,
+            "claude --print --no-session-persistence --dangerously-skip-permissions \
+             --model opus \
+             --prompt-file /tmp/triage.md"
         );
     }
 }

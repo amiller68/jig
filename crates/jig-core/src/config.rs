@@ -579,9 +579,16 @@ pub struct TriageConfig {
     /// Whether triage auto-spawn is enabled for this repo.
     #[serde(default)]
     pub enabled: bool,
+    /// Model for triage agents (default "sonnet").
+    #[serde(default = "default_triage_model")]
+    pub model: String,
     /// Max time in seconds for a triage worker before it's considered stuck.
     #[serde(default = "default_triage_timeout")]
     pub timeout_seconds: i64,
+}
+
+fn default_triage_model() -> String {
+    "sonnet".to_string()
 }
 
 fn default_triage_timeout() -> i64 {
@@ -592,6 +599,7 @@ impl Default for TriageConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            model: default_triage_model(),
             timeout_seconds: default_triage_timeout(),
         }
     }
@@ -1344,5 +1352,42 @@ auto_spawn_labels = []
         .unwrap();
         let result = JigToml::load(dir.path()).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_triage_config_defaults() {
+        let config = TriageConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.model, "sonnet");
+        assert_eq!(config.timeout_seconds, 600);
+    }
+
+    #[test]
+    fn test_triage_config_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(JIG_TOML),
+            r#"
+[triage]
+enabled = false
+model = "opus"
+timeout_seconds = 300
+"#,
+        )
+        .unwrap();
+        let toml = JigToml::load(dir.path()).unwrap().unwrap();
+        assert!(!toml.triage.enabled);
+        assert_eq!(toml.triage.model, "opus");
+        assert_eq!(toml.triage.timeout_seconds, 300);
+    }
+
+    #[test]
+    fn test_triage_config_absent_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(JIG_TOML), "[worktree]\n").unwrap();
+        let toml = JigToml::load(dir.path()).unwrap().unwrap();
+        assert!(!toml.triage.enabled);
+        assert_eq!(toml.triage.model, "sonnet");
+        assert_eq!(toml.triage.timeout_seconds, 600);
     }
 }

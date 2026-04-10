@@ -272,4 +272,29 @@ mod tests {
         assert!(result.contains("lint failed"));
         assert!(result.contains("test failed"));
     }
+
+    #[test]
+    fn render_triage_prompt_with_all_fields() {
+        let engine = TemplateEngine::new();
+        let mut ctx = TemplateContext::new();
+        ctx.set("issue_id", "ENG-42");
+        ctx.set("issue_title", "Fix auth middleware");
+        ctx.set(
+            "issue_body",
+            "The auth middleware drops tokens on redirect.",
+        );
+        ctx.set_list(
+            "issue_labels",
+            vec!["bug".to_string(), "security".to_string()],
+        );
+        ctx.set("repo_name", "my-app");
+
+        let result = engine.render("triage-prompt", &ctx).unwrap();
+        assert!(result.contains("ENG-42"));
+        assert!(result.contains("Fix auth middleware"));
+        assert!(result.contains("The auth middleware drops tokens on redirect."));
+        assert!(result.contains("jig issues update ENG-42"));
+        assert!(result.contains("jig issues status ENG-42 backlog"));
+        assert!(result.contains("Do NOT implement any changes"));
+    }
 }
