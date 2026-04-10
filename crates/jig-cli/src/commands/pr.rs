@@ -158,8 +158,8 @@ fn resolve_base(
     };
 
     // If the issue has a parent, fetch the parent to get its branch name
-    if let Some((parent_id, _parent_title)) = &issue.parent {
-        if let Ok(Some(parent_issue)) = provider.get(parent_id) {
+    if let Some(parent) = &issue.parent {
+        if let Ok(Some(parent_issue)) = provider.get(&parent.id) {
             if let Some(parent_branch) = &parent_issue.branch_name {
                 return Ok(parent_branch.clone());
             }
