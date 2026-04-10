@@ -24,7 +24,7 @@ pub mod spawn_actor;
 pub mod sync_actor;
 pub mod triage_tracker;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -268,17 +268,13 @@ impl<'a> Daemon<'a> {
         runtime: &DaemonRuntime,
     ) {
         // Build a set of parent branches that child workers depend on.
-        // Map: (repo_name, parent_branch) -> list of child worker keys
-        let mut parent_branches: HashMap<(String, String), Vec<String>> = HashMap::new();
+        let mut parent_branches: HashSet<(String, String)> = HashSet::new();
         for entry in workers_state.workers.values() {
             if entry.status == "merged" || entry.status == "archived" || entry.status == "failed" {
                 continue;
             }
             if let Some(ref pb) = entry.parent_branch {
-                parent_branches
-                    .entry((entry.repo.clone(), pb.clone()))
-                    .or_default()
-                    .push(format!("{}/{}", entry.repo, entry.branch));
+                parent_branches.insert((entry.repo.clone(), pb.clone()));
             }
         }
 
@@ -288,21 +284,25 @@ impl<'a> Daemon<'a> {
 
         // Find parent workers: workers whose branch matches a parent_branch
         // and whose worktree exists on disk.
-        for (repo_name, parent_branch) in parent_branches.keys() {
-            // Find the parent worker in worker_list by matching branch name
-            let parent_worker = worker_list.iter().find(|(rn, wn)| {
+        for (repo_name, parent_branch) in &parent_branches {
+            // Find the parent worker in worker_list by matching branch name.
+            // Read events once and reuse the branch name for the nudge target.
+            let parent_worker = worker_list.iter().find_map(|(rn, wn)| {
                 if rn != repo_name {
-                    return false;
+                    return None;
                 }
-                // Read events to get the branch name for this worker
                 let events = EventLog::for_worker(rn, wn)
                     .and_then(|log| log.read_all())
                     .unwrap_or_default();
                 let branch = extract_branch_name(&events, wn);
-                branch == *parent_branch
+                if branch == *parent_branch {
+                    Some((rn, wn, branch))
+                } else {
+                    None
+                }
             });
 
-            let (repo_name, worker_name) = match parent_worker {
+            let (repo_name, worker_name, branch_name) = match parent_worker {
                 Some(pw) => pw,
                 None => continue,
             };
@@ -317,16 +317,37 @@ impl<'a> Daemon<'a> {
                 continue;
             }
 
-            // Run git pull --ff-only in the parent worktree
-            match std::process::Command::new("git")
+            // Run git pull --ff-only in the parent worktree with a 30-second
+            // timeout to avoid blocking the tick thread indefinitely.
+            let child = match std::process::Command::new("git")
                 .args(["pull", "--ff-only"])
                 .current_dir(&worktree_path)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .output()
+                .spawn()
             {
-                Ok(output) if output.status.success() => {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        worker = %worker_name,
+                        repo = %repo_name,
+                        "failed to spawn git pull in parent worktree: {}",
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // Use a channel to wait for the child with a timeout.
+            const PULL_TIMEOUT: Duration = Duration::from_secs(30);
+            let (tx, rx) = flume::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send(child.wait_with_output());
+            });
+
+            match rx.recv_timeout(PULL_TIMEOUT) {
+                Ok(Ok(output)) if output.status.success() => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     // "Already up to date." means no new commits
                     if stdout.contains("Already up to date") {
@@ -345,12 +366,6 @@ impl<'a> Daemon<'a> {
                         "pulled new commits into parent worktree"
                     );
 
-                    // Read events to get the branch name for nudge target
-                    let events = EventLog::for_worker(repo_name, worker_name)
-                        .and_then(|log| log.read_all())
-                        .unwrap_or_default();
-                    let branch_name = extract_branch_name(&events, worker_name);
-
                     // Nudge the parent worker to let it know about new commits
                     let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
                     let target = TmuxTarget::new(&session, worker_name);
@@ -364,7 +379,7 @@ impl<'a> Daemon<'a> {
 
                         runtime.send_nudge(messages::NudgeRequest {
                             session,
-                            window: branch_name,
+                            window: branch_name.clone(),
                             message,
                             nudge_type_key: "parent_update".to_string(),
                             is_stuck: false,
@@ -374,7 +389,7 @@ impl<'a> Daemon<'a> {
                         });
                     }
                 }
-                Ok(output) => {
+                Ok(Ok(output)) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     tracing::warn!(
                         worker = %worker_name,
@@ -383,12 +398,20 @@ impl<'a> Daemon<'a> {
                         stderr.trim()
                     );
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!(
                         worker = %worker_name,
                         repo = %repo_name,
-                        "failed to run git pull in parent worktree: {}",
+                        "git pull failed in parent worktree: {}",
                         e
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        worker = %worker_name,
+                        repo = %repo_name,
+                        "git pull timed out in parent worktree ({}s limit)",
+                        PULL_TIMEOUT.as_secs()
                     );
                 }
             }
