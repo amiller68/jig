@@ -37,6 +37,7 @@ The daemon offloads blocking I/O to background threads (actors) so the tick loop
 | **spawn** | `jig-spawn` | Create worktrees and launch agents |
 | **prune** | `jig-prune` | Remove worktrees for merged/closed PRs |
 | **nudge** | `jig-nudge` | Deliver nudge messages via tmux |
+| **review** | `jig-review` | Run ephemeral AI review sessions |
 
 Each actor uses `flume` channels for non-blocking communication with the tick thread. The nudge actor is particularly important — it prevents `tmux send-keys` from blocking the tick thread when a pane can't accept input.
 
