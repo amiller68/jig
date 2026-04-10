@@ -1,9 +1,9 @@
 //! Issue actor — polls for auto-spawnable issues in a background thread.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::context::RepoContext;
+use crate::git::Repo;
 use crate::issues::naming::derive_worker_name;
 use crate::issues::types::{Issue, IssueStatus};
 
@@ -169,18 +169,13 @@ fn is_child_spawnable(issue: &Issue, repo_root: &Path) -> bool {
     true
 }
 
-/// Checks whether a branch exists on the `origin` remote by verifying the ref.
+/// Checks whether a branch exists on the `origin` remote using git2.
 fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
-    Command::new("git")
-        .args([
-            "rev-parse",
-            "--verify",
-            &format!("refs/remotes/origin/{branch}"),
-        ])
-        .current_dir(repo_root)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let Ok(repo) = Repo::open(repo_root) else {
+        return false;
+    };
+    let result = repo
+        .inner()
+        .find_branch(&format!("origin/{branch}"), git2::BranchType::Remote);
+    result.is_ok()
 }
