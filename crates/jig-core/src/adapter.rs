@@ -117,6 +117,34 @@ pub fn build_triage_command(
     cmd
 }
 
+/// Build a triage command as an argv vector for direct subprocess execution.
+///
+/// Unlike [`build_triage_command`] which returns a shell string for tmux,
+/// this returns a `Vec<String>` suitable for `std::process::Command`. The
+/// prompt is read from `prompt_file` and piped to stdin by the caller.
+pub fn build_triage_argv(
+    adapter: &AgentAdapter,
+    model: &str,
+    allowed_tools: &[&str],
+) -> Vec<String> {
+    let mut argv: Vec<String> = vec![adapter.command.to_string()];
+
+    // Add ephemeral flags as individual arguments
+    for flag in adapter.ephemeral_flags.split_whitespace() {
+        argv.push(flag.to_string());
+    }
+
+    argv.push("--model".to_string());
+    argv.push(model.to_string());
+
+    if !allowed_tools.is_empty() {
+        argv.push("--allowed-tools".to_string());
+        argv.push(allowed_tools.join(","));
+    }
+
+    argv
+}
+
 /// Build the spawn command for an agent (always appends auto_flag)
 pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>) -> String {
     let mut cmd = adapter.command.to_string();
@@ -244,6 +272,44 @@ mod tests {
              --model sonnet \
              --allowed-tools \"Read,Glob,Grep,Bash(jig *),mcp__linear*\" \
              < /tmp/worktree/.jig/triage-prompt.md"
+        );
+    }
+
+    #[test]
+    fn test_build_triage_argv() {
+        let argv = build_triage_argv(
+            &CLAUDE_CODE,
+            "sonnet",
+            &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"],
+        );
+        assert_eq!(
+            argv,
+            vec![
+                "claude",
+                "--print",
+                "--no-session-persistence",
+                "--dangerously-skip-permissions",
+                "--model",
+                "sonnet",
+                "--allowed-tools",
+                "Read,Glob,Grep,Bash(jig *),mcp__linear*",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_triage_argv_no_tools() {
+        let argv = build_triage_argv(&CLAUDE_CODE, "opus", &[]);
+        assert_eq!(
+            argv,
+            vec![
+                "claude",
+                "--print",
+                "--no-session-persistence",
+                "--dangerously-skip-permissions",
+                "--model",
+                "opus",
+            ]
         );
     }
 

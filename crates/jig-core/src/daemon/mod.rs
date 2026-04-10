@@ -22,6 +22,7 @@ pub mod review_actor;
 pub mod runtime;
 pub mod spawn_actor;
 pub mod sync_actor;
+pub mod triage_actor;
 pub mod triage_tracker;
 
 use std::collections::{HashMap, HashSet};
@@ -571,30 +572,8 @@ impl<'a> Daemon<'a> {
                 runtime.triage_tracker_mut().remove(issue_id);
             }
 
-            // Triage worker completion: check workers that start with "triage-"
-            // and have reached a terminal state — remove from tracker
-            for (repo_name, worker_name) in &worker_list {
-                if worker_name.starts_with("triage-") {
-                    let tmux_status = self.get_tmux_status(repo_name, worker_name);
-                    if matches!(
-                        tmux_status,
-                        TaskStatus::Exited | TaskStatus::NoWindow | TaskStatus::NoSession
-                    ) {
-                        // Extract issue_id from worker name (e.g. "triage-jig-38" -> "JIG-38")
-                        if let Some(suffix) = worker_name.strip_prefix("triage-") {
-                            let issue_id = suffix.to_uppercase();
-                            if runtime.triage_tracker().is_active(&issue_id) {
-                                tracing::info!(
-                                    worker = %worker_name,
-                                    issue = %issue_id,
-                                    "triage worker exited, removing from tracker"
-                                );
-                                runtime.triage_tracker_mut().remove(&issue_id);
-                            }
-                        }
-                    }
-                }
-            }
+            // Triage worker completion is now handled by drain_triage() above —
+            // the triage_actor reports results directly when subprocesses finish.
         }
 
         // Drain nudge completions from previous tick
@@ -864,6 +843,46 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        // Drain triage results from previous tick
+        if let Some(triage_complete) = runtime.drain_triage() {
+            for tr in triage_complete.results {
+                // Remove from tracker regardless of success/failure
+                runtime.triage_tracker_mut().remove(&tr.issue_id);
+
+                if let Some(err) = tr.error {
+                    tracing::warn!(
+                        worker = %tr.worker_name,
+                        issue = %tr.issue_id,
+                        "triage failed: {}", err
+                    );
+                    // Emit NeedsIntervention for failed triages
+                    let event = NotificationEvent::NeedsIntervention {
+                        repo: tr.repo_name.clone(),
+                        worker: tr.worker_name.clone(),
+                        reason: format!(
+                            "Triage failed for {} (worker: {}): {}",
+                            tr.issue_id, tr.worker_name, err
+                        ),
+                    };
+                    if let Err(e) = self.notifier.emit(event) {
+                        tracing::warn!(
+                            worker = %tr.worker_name,
+                            "NeedsIntervention notification failed: {}", e
+                        );
+                    }
+                    result
+                        .errors
+                        .push(format!("triage {}: {}", tr.issue_id, err));
+                } else {
+                    tracing::info!(
+                        worker = %tr.worker_name,
+                        issue = %tr.issue_id,
+                        "triage completed successfully"
+                    );
+                }
+            }
+        }
+
         // 2. Trigger background sync if interval elapsed
         if !self.daemon_config.skip_sync {
             let parent_branches = self.collect_parent_branches(&workers_state, &registry);
@@ -973,31 +992,39 @@ impl<'a> Daemon<'a> {
         );
 
         // 5. Send spawnable issues to background spawn actor (non-blocking)
-        // Combine spawnable and triageable into a single spawn batch
-        let mut all_to_spawn = spawnable;
-        all_to_spawn.extend(triageable);
-        if !all_to_spawn.is_empty() {
-            // Register triage issues in the tracker before spawning
+        if !spawnable.is_empty() {
+            runtime.send_spawn(spawnable);
+        }
+
+        // 6. Send triageable issues to background triage actor (subprocess, non-blocking)
+        if !triageable.is_empty() {
             let now = chrono::Utc::now().timestamp();
-            for issue in &all_to_spawn {
-                if issue.worker_name.starts_with("triage-") {
-                    let repo_name = issue
+            let triage_issues: Vec<messages::TriageIssue> = triageable
+                .into_iter()
+                .map(|si| {
+                    let repo_name = si
                         .repo_root
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
                     runtime.triage_tracker_mut().register(
-                        issue.issue.id.clone(),
+                        si.issue.id.clone(),
                         triage_tracker::TriageEntry {
-                            worker_name: issue.worker_name.clone(),
+                            worker_name: si.worker_name.clone(),
                             spawned_at: now,
-                            issue_id: issue.issue.id.clone(),
+                            issue_id: si.issue.id.clone(),
                             repo_name,
                         },
                     );
-                }
-            }
-            runtime.send_spawn(all_to_spawn);
+                    messages::TriageIssue {
+                        repo_root: si.repo_root,
+                        issue: si.issue,
+                        worker_name: si.worker_name,
+                        provider_kind: si.provider_kind,
+                    }
+                })
+                .collect();
+            runtime.send_triage(triage_issues);
         }
 
         result.spawning = runtime.spawning_workers().to_vec();
@@ -1091,21 +1118,25 @@ impl<'a> Daemon<'a> {
                         }
                     }
                 }
-                // Spawn triage issues
+                // Run triage issues as direct subprocesses (blocking)
                 for issue in response.triageable {
-                    match self.auto_spawn_worker(&issue) {
+                    tracing::info!(
+                        worker = %issue.worker_name,
+                        issue = %issue.issue.id,
+                        "running inline triage subprocess"
+                    );
+                    match crate::spawn::run_triage_subprocess(&issue.repo_root, &issue.issue) {
                         Ok(()) => {
                             tracing::info!(
                                 worker = %issue.worker_name,
                                 issue = %issue.issue.id,
-                                "auto-spawned triage worker"
+                                "triage completed successfully"
                             );
-                            result.auto_spawned.push(issue.worker_name.clone());
                         }
                         Err(e) => {
                             result
                                 .errors
-                                .push(format!("auto-spawn triage {}: {}", issue.issue.id, e));
+                                .push(format!("triage {}: {}", issue.issue.id, e));
                         }
                     }
                 }
