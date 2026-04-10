@@ -250,6 +250,8 @@ mod tests {
     #[test]
     fn builtin_names_lists_all() {
         let names = TemplateEngine::builtin_names();
+        assert!(names.contains(&"spawn-preamble"));
+        assert!(names.contains(&"spawn-preamble-wrapup"));
         assert!(names.contains(&"nudge-idle"));
         assert!(names.contains(&"nudge-stuck"));
         assert!(names.contains(&"nudge-ci"));
@@ -284,6 +286,57 @@ mod tests {
         assert!(result.contains("AUTONOMOUS MODE"));
         assert!(result.contains("nudge messages (up to 3)"));
         assert!(result.contains("Implement feature X"));
+        assert!(result.contains("AUTOMATED REVIEW"));
+        assert!(result.contains("jig review respond --review"));
+    }
+
+    #[test]
+    fn render_spawn_preamble_wrapup() {
+        let engine = TemplateEngine::new();
+        let mut ctx = TemplateContext::new();
+        ctx.set_num("max_nudges", 3);
+        ctx.set("parent_title", "JIG-60: Parent-as-integrator orchestration");
+        ctx.set_list(
+            "children",
+            vec![
+                "JIG-61: T1 — Daemon creates parent branch".to_string(),
+                "JIG-62: T2 — Child spawning off parent branch".to_string(),
+                "JIG-63: T3 — Fast-forward on child merge".to_string(),
+            ],
+        );
+        ctx.set("task_context", "Verify integration and submit final PR");
+
+        let result = engine.render("spawn-preamble-wrapup", &ctx).unwrap();
+
+        // Core identity: wrap-up integrator, not greenfield worker
+        assert!(result.contains("wrap-up integrator"));
+        assert!(result.contains("JIG-60: Parent-as-integrator orchestration"));
+
+        // Children are listed
+        assert!(result.contains("JIG-61"));
+        assert!(result.contains("JIG-62"));
+        assert!(result.contains("JIG-63"));
+
+        // Job steps present
+        assert!(result.contains("Verify the integration"));
+        assert!(result.contains("last-mile code"));
+        assert!(result.contains("Draft the final PR description"));
+        assert!(result.contains("jig pr"));
+
+        // Must NOT contain greenfield language
+        assert!(!result.contains("greenfield"));
+
+        // Constraints: explicitly tells the worker this is integration, not greenfield
+        assert!(result.contains("Do NOT use `gh pr create`"));
+        assert!(result.contains("not starting from scratch"));
+
+        // Monitoring
+        assert!(result.contains("nudge messages (up to 3)"));
+
+        // Task context rendered
+        assert!(result.contains("Verify integration and submit final PR"));
+
+        // Automated review section present
         assert!(result.contains("AUTOMATED REVIEW"));
         assert!(result.contains("jig review respond --review"));
     }

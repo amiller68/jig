@@ -3,6 +3,7 @@
 /// Template names and their built-in content.
 pub const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("spawn-preamble", SPAWN_PREAMBLE),
+    ("spawn-preamble-wrapup", SPAWN_PREAMBLE_WRAPUP),
     ("triage-prompt", TRIAGE_PROMPT),
     ("nudge-idle", NUDGE_IDLE),
     ("nudge-stuck", NUDGE_STUCK),
@@ -27,6 +28,64 @@ IF YOU GET STUCK:
 - If truly blocked, explain what's blocking you so the nudge system can relay it
 
 AUTOMATED REVIEW: After you create a draft PR, an automated review agent may review your code. If it requests changes, you'll receive a nudge with the path to a review file (e.g. .jig/reviews/001.md). When that happens:
+
+1. Read the review file to see the findings
+2. Address each finding — fix issues or prepare explanations
+3. Submit your response: jig review respond --review <N> (pipe your response markdown to stdin)
+4. Commit and push your changes
+5. The next review cycle triggers automatically on push
+
+Response format (pipe to jig review respond --review N):
+
+# Response to Review NNN
+
+## Addressed
+- `file:line` — finding description: what you did to fix it
+
+## Disputed
+- `file:line` — finding description: why you disagree
+
+## Deferred
+- `file:line` — finding description: why this is out of scope
+
+## Notes
+Any additional context.
+
+TASK:
+{{task_context}}
+"#;
+
+const SPAWN_PREAMBLE_WRAPUP: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as the wrap-up integrator for this epic. You are running in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
+
+EPIC: {{parent_title}}
+
+All child tasks have been completed and merged into your branch. The children that were merged:
+{{#each children}}
+- {{this}}
+{{/each}}
+
+YOUR JOB:
+
+1. **Verify the integration** — run the full test suite (`cargo test`, `cargo clippy`, `cargo fmt --check`) and skim the diff against main to confirm everything works together.
+2. **Write last-mile code ONLY if needed** — tie loose ends between children (e.g. re-exports, shared docs, integration glue). Do NOT redo work the children already completed.
+3. **Draft the final PR description** — summarize what the epic accomplished, listing the children and their contributions.
+4. **Submit the PR** — run `jig pr` to open the PR targeting main. Do NOT use `gh pr create` directly. Do NOT use `/draft` unless it wraps `jig pr`.
+
+IMPORTANT CONSTRAINTS:
+- This branch already contains all child work. You are integrating, not starting from scratch.
+- Use conventional commits for any changes you make.
+- Do NOT use `gh pr create` — always use `jig pr`.
+
+HOW MONITORING WORKS: A daemon watches your activity via tool-use events. If you go idle or get stuck for ~5 minutes, you'll receive automated nudge messages (up to {{max_nudges}}). After that, a human is notified. Do not wait for input.
+
+IF YOU GET STUCK:
+- Do NOT enter plan mode or ask for confirmation — just proceed
+- If a command fails, try to fix it yourself
+- If tests fail, debug and fix them
+- If unsure about an approach, pick the simplest one and go
+- If truly blocked, explain what's blocking you so the nudge system can relay it
+
+AUTOMATED REVIEW: After you create a PR, an automated review agent may review your code. If it requests changes, you'll receive a nudge with the path to a review file (e.g. .jig/reviews/001.md). When that happens:
 
 1. Read the review file to see the findings
 2. Address each finding — fix issues or prepare explanations
