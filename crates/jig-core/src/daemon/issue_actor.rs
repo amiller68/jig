@@ -1,8 +1,11 @@
 //! Issue actor — polls for auto-spawnable issues in a background thread.
 
-use crate::context::RepoContext;
+use std::path::Path;
+use std::process::Command;
 
+use crate::context::RepoContext;
 use crate::issues::naming::derive_worker_name;
+use crate::issues::types::{Issue, IssueStatus};
 
 use super::messages::{IssueRequest, SpawnableIssue};
 
@@ -88,6 +91,12 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
             }
         };
 
+        // Filter out child issues whose parent isn't ready
+        let issues: Vec<_> = issues
+            .into_iter()
+            .filter(|issue| is_child_spawnable(issue, repo_root))
+            .collect();
+
         let provider_kind = provider.kind();
 
         let mut repo_spawned = 0;
@@ -115,4 +124,63 @@ pub(crate) fn process_request(req: &IssueRequest) -> Vec<SpawnableIssue> {
     }
 
     all_spawnable
+}
+
+/// Returns `true` if the issue is spawnable with respect to its parent.
+///
+/// Non-child issues always pass. Child issues require their parent to be
+/// `InProgress` and to have pushed a branch to the remote.
+fn is_child_spawnable(issue: &Issue, repo_root: &Path) -> bool {
+    let Some(parent) = &issue.parent else {
+        return true;
+    };
+
+    // Parent must be InProgress
+    if parent.status.as_ref() != Some(&IssueStatus::InProgress) {
+        tracing::debug!(
+            issue = %issue.id,
+            parent = %parent.id,
+            parent_status = ?parent.status,
+            "child not spawnable: parent not InProgress"
+        );
+        return false;
+    }
+
+    // Parent must have a branch that exists on the remote
+    let Some(branch) = &parent.branch_name else {
+        tracing::debug!(
+            issue = %issue.id,
+            parent = %parent.id,
+            "child not spawnable: parent has no branch name"
+        );
+        return false;
+    };
+
+    if !remote_branch_exists(repo_root, branch) {
+        tracing::debug!(
+            issue = %issue.id,
+            parent = %parent.id,
+            branch = %branch,
+            "child not spawnable: parent branch not on remote"
+        );
+        return false;
+    }
+
+    true
+}
+
+/// Checks whether a branch exists on the `origin` remote by verifying the ref.
+fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
+    Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            &format!("refs/remotes/origin/{branch}"),
+        ])
+        .current_dir(repo_root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
