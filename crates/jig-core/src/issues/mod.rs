@@ -14,7 +14,7 @@ pub mod types;
 pub use file_provider::FileProvider;
 pub use linear_provider::LinearProvider;
 pub use provider::{IssueProvider, ProviderKind};
-pub use types::{Issue, IssueFilter, IssuePriority, IssueStatus};
+pub use types::{Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
 
 use std::path::Path;
 

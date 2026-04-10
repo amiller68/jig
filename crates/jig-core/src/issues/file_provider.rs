@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use crate::error::{Error, Result};
 
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus};
+use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
 
 /// File-based issue provider that reads from an `issues/` directory.
 pub struct FileProvider {
@@ -675,7 +675,13 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent,
+        parent: parent.map(|(id, title)| ParentIssue {
+            id,
+            title,
+            branch_name: None,
+            status: None,
+            body: None,
+        }),
     })
 }
 
@@ -767,7 +773,13 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent,
+        parent: parent.map(|(id, title)| ParentIssue {
+            id,
+            title,
+            branch_name: None,
+            status: None,
+            body: None,
+        }),
     })
 }
 

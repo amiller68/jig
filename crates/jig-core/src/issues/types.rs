@@ -95,6 +95,21 @@ impl fmt::Display for IssuePriority {
     }
 }
 
+/// Parent issue metadata, fetched eagerly to avoid extra API calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParentIssue {
+    /// Parent issue identifier (e.g. "ENG-100").
+    pub id: String,
+    /// Parent issue's title (for spawn preamble context).
+    pub title: String,
+    /// Parent issue's branch name, used as base branch for child worktrees.
+    pub branch_name: Option<String>,
+    /// Parent issue's status (transient, for spawn gating without extra API call).
+    pub status: Option<IssueStatus>,
+    /// Parent issue's body/description (for spawn preamble context).
+    pub body: Option<String>,
+}
+
 /// A parsed issue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Issue {
@@ -118,8 +133,8 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// Suggested branch name (e.g. from Linear's `branchName` field).
     pub branch_name: Option<String>,
-    /// Parent issue reference: (identifier, title).
-    pub parent: Option<(String, String)>,
+    /// Parent issue reference with eagerly-fetched metadata.
+    pub parent: Option<ParentIssue>,
 }
 
 /// Filter criteria for listing issues.
