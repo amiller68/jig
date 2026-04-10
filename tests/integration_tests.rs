@@ -939,4 +939,3 @@ fn test_home_outside_git_repo() {
         .failure()
         .stderr(predicate::str::contains("Not in a git repo"));
 }
-
