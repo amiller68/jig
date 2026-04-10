@@ -95,9 +95,9 @@ pub enum IssuesCommand {
         #[arg(short = 'P', long)]
         parent: Option<String>,
 
-        /// Initial status to set after creation (triage, backlog, planned, in-progress, complete, blocked)
-        #[arg(short = 's', long)]
-        status: Option<String>,
+        /// Initial status (triage, backlog, planned, in-progress, complete, blocked)
+        #[arg(short = 's', long, default_value = "backlog")]
+        status: String,
     },
 
     /// Update an existing issue's fields
@@ -332,20 +332,15 @@ fn run_create(
     labels: &[String],
     body: Option<&str>,
     parent: Option<&str>,
-    status: Option<&str>,
+    status: &str,
 ) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
     let pri = priority.and_then(IssuePriority::from_str_loose);
 
     // Parse the initial status up front so we fail before creating the issue
     // if the caller passed something invalid.
-    let initial_status = match status {
-        Some(s) => Some(
-            IssueStatus::from_str_loose(s)
-                .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", s)))?,
-        ),
-        None => None,
-    };
+    let initial_status = IssueStatus::from_str_loose(status)
+        .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", status)))?;
 
     // Read body from stdin if "-" was passed
     let body_text = match body {
@@ -368,7 +363,7 @@ fn run_create(
                 labels,
                 category,
                 parent,
-                initial_status.as_ref(),
+                Some(&initial_status),
             )?
         }
         _ => {
@@ -381,7 +376,7 @@ fn run_create(
                 pri.as_ref(),
                 labels,
                 parent,
-                initial_status.as_ref(),
+                Some(&initial_status),
             )?
         }
     };
@@ -657,7 +652,7 @@ impl Op for Issues {
                 label,
                 body.as_deref(),
                 parent.as_deref(),
-                status.as_deref(),
+                status,
             ),
             Some(IssuesCommand::Update {
                 id,
