@@ -160,7 +160,7 @@ Key conventions:
 - Drop requests on backpressure when appropriate (nudges are best-effort)
 - Bounded channels prevent unbounded memory growth
 
-Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `prune_actor`, `nudge_actor`.
+Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `prune_actor`, `nudge_actor`, `review_actor`, `triage_actor`.
 
 ## Common Idioms
 
