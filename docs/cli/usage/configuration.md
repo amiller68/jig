@@ -25,7 +25,7 @@ team = "ENG"                   # Linear team key
 projects = ["Backend"]         # Optional project filter
 
 [triage]
-enabled = true                 # Enable triage auto-spawn (default: true)
+enabled = true                 # Enable triage auto-spawn (default: false)
 model = "sonnet"               # Model for triage agents (default: "sonnet")
 timeout_seconds = 600          # Max triage duration before stuck detection
 ```
@@ -202,15 +202,17 @@ auto_spawn_labels = []                      # spawn ALL planned issues
 
 When `auto_spawn_labels` is absent (the default), auto-spawn is disabled. When set to `[]`, all planned issues with satisfied dependencies are eligible. The AUTO column in `jig issues` shows `✓` for issues matching the configured labels.
 
-## Triage Configuration
+### Triage auto-spawn
 
-The `[triage]` section controls triage worker behavior — lightweight, read-only agents that investigate new issues before they're queued for implementation:
+The daemon can automatically spawn lightweight triage workers for issues in **Triage** status:
 
 ```toml
 [triage]
-enabled = true           # Enable triage auto-spawn (default: true)
+enabled = true
 model = "sonnet"         # Model for triage agents (default: "sonnet")
-timeout_seconds = 600    # Max duration before stuck detection (default: 600)
+timeout_seconds = 600    # max time for a triage worker before it's considered stuck (default 600)
 ```
 
-Triage workers run in ephemeral (one-shot) mode with restricted tool access: `Read`, `Glob`, `Grep`, `Bash(jig *)`, and `mcp__linear*`. They investigate the issue, append findings to the issue description, transition it to Backlog, then exit. See [daemon docs](../../daemon.md#triage-verification) for the post-spawn lifecycle.
+When enabled, the issue actor discovers issues with Triage status and spawns triage workers (named `triage-{issue_id}`). Triage workers run in ephemeral (one-shot) mode with restricted tool access: `Read`, `Glob`, `Grep`, `Bash(jig *)`, and `mcp__linear*`. They investigate the issue, append findings to the issue description, transition it to Backlog, then exit.
+
+Triage workers share the same worker budget as normal auto-spawn. The daemon tracks in-flight triages to prevent duplicates and emits `NeedsIntervention` notifications if a triage worker exceeds the timeout. See [daemon docs](../../daemon.md#triage-verification) for the post-spawn lifecycle.

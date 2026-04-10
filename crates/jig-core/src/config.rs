@@ -573,32 +573,32 @@ impl Default for ReviewConfig {
     }
 }
 
-/// Triage agent configuration in jig.toml `[triage]`.
+/// Per-repo triage configuration in jig.toml `[triage]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct TriageConfig {
-    /// Whether triage auto-spawn is enabled.
+    /// Whether triage auto-spawn is enabled for this repo.
+    #[serde(default)]
     pub enabled: bool,
     /// Model for triage agents (default "sonnet").
     #[serde(default = "default_triage_model")]
     pub model: String,
-    /// Max triage duration (seconds) before stuck detection (default 600).
+    /// Max time in seconds for a triage worker before it's considered stuck.
     #[serde(default = "default_triage_timeout")]
-    pub timeout_seconds: u64,
+    pub timeout_seconds: i64,
 }
 
 fn default_triage_model() -> String {
     "sonnet".to_string()
 }
 
-fn default_triage_timeout() -> u64 {
+fn default_triage_timeout() -> i64 {
     600
 }
 
 impl Default for TriageConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             model: default_triage_model(),
             timeout_seconds: default_triage_timeout(),
         }
@@ -1357,7 +1357,7 @@ auto_spawn_labels = []
     #[test]
     fn test_triage_config_defaults() {
         let config = TriageConfig::default();
-        assert!(config.enabled);
+        assert!(!config.enabled);
         assert_eq!(config.model, "sonnet");
         assert_eq!(config.timeout_seconds, 600);
     }
@@ -1386,7 +1386,7 @@ timeout_seconds = 300
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join(JIG_TOML), "[worktree]\n").unwrap();
         let toml = JigToml::load(dir.path()).unwrap().unwrap();
-        assert!(toml.triage.enabled);
+        assert!(!toml.triage.enabled);
         assert_eq!(toml.triage.model, "sonnet");
         assert_eq!(toml.triage.timeout_seconds, 600);
     }

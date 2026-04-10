@@ -8,6 +8,7 @@ use crate::context::RepoContext;
 use crate::registry::RepoRegistry;
 
 use super::messages::*;
+use super::triage_tracker::TriageTracker;
 use super::{github_actor, issue_actor, nudge_actor, prune_actor, spawn_actor, sync_actor};
 
 /// Timer info for display in the ps watch footer.
@@ -57,7 +58,7 @@ pub struct DaemonRuntime {
 
     // Issue actor
     issue_tx: flume::Sender<IssueRequest>,
-    issue_rx: flume::Receiver<Vec<SpawnableIssue>>,
+    issue_rx: flume::Receiver<IssueResponse>,
     issue_pending: bool,
     last_issue_poll: Instant,
 
@@ -78,6 +79,9 @@ pub struct DaemonRuntime {
     nudge_rx: flume::Receiver<NudgeComplete>,
 
     config: RuntimeConfig,
+
+    /// Tracks in-flight triage workers to prevent duplicate spawns.
+    triage_tracker: TriageTracker,
 
     /// Whether the first inline issue poll has been performed.
     first_poll_done: bool,
@@ -145,6 +149,7 @@ impl DaemonRuntime {
             nudge_rx: nudge_resp_rx,
 
             config,
+            triage_tracker: TriageTracker::new(),
             first_poll_done: false,
             _handles: vec![
                 sync_handle,
@@ -300,18 +305,31 @@ impl DaemonRuntime {
     }
 
     /// Drain any completed issue poll response (non-blocking).
-    pub fn drain_issues(&mut self) -> Vec<SpawnableIssue> {
+    pub fn drain_issues(&mut self) -> Option<IssueResponse> {
         match self.issue_rx.try_recv() {
-            Ok(issues) => {
+            Ok(response) => {
                 self.issue_pending = false;
                 self.last_issue_poll = Instant::now();
-                if !issues.is_empty() {
-                    tracing::info!(count = issues.len(), "found spawnable issues");
+                if !response.spawnable.is_empty() {
+                    tracing::info!(count = response.spawnable.len(), "found spawnable issues");
                 }
-                issues
+                if !response.triageable.is_empty() {
+                    tracing::info!(count = response.triageable.len(), "found triageable issues");
+                }
+                Some(response)
             }
-            Err(_) => vec![],
+            Err(_) => None,
         }
+    }
+
+    /// Get a mutable reference to the triage tracker.
+    pub fn triage_tracker_mut(&mut self) -> &mut TriageTracker {
+        &mut self.triage_tracker
+    }
+
+    /// Get a reference to the triage tracker.
+    pub fn triage_tracker(&self) -> &TriageTracker {
+        &self.triage_tracker
     }
 
     /// Send prune targets to the prune actor (non-blocking).

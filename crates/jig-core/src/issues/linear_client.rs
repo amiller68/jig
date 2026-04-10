@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
-use super::types::{Issue, IssuePriority, IssueStatus};
+use super::types::{Issue, IssuePriority, IssueStatus, ParentIssue};
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 
@@ -29,7 +29,7 @@ query ListIssues($filter: IssueFilter, $first: Int) {
       state { type }
       project { name }
       team { name }
-      parent { identifier title }
+      parent { identifier title description branchName state { type } }
       children { nodes { identifier } }
       labels { nodes { name } }
       relations {
@@ -81,7 +81,7 @@ query GetIssue($filter: IssueFilter, $first: Int) {
       state { type }
       project { name }
       team { name }
-      parent { identifier title }
+      parent { identifier title description branchName state { type } }
       children { nodes { identifier } }
       labels { nodes { name } }
       relations {
@@ -321,9 +321,13 @@ struct RawIssue {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RawParentRef {
     identifier: String,
     title: String,
+    description: Option<String>,
+    branch_name: Option<String>,
+    state: RawState,
 }
 
 #[derive(Debug, Deserialize)]
@@ -450,6 +454,14 @@ impl From<RawIssue> for Issue {
 
         let labels: Vec<String> = raw.labels.nodes.into_iter().map(|l| l.name).collect();
 
+        let parent = raw.parent.map(|p| ParentIssue {
+            id: p.identifier,
+            title: p.title,
+            branch_name: p.branch_name,
+            status: Some(map_status(&p.state.state_type)),
+            body: p.description,
+        });
+
         Issue {
             id: raw.identifier,
             title: raw.title,
@@ -462,7 +474,7 @@ impl From<RawIssue> for Issue {
             children,
             labels,
             branch_name: raw.branch_name,
-            parent: raw.parent.map(|p| (p.identifier, p.title)),
+            parent,
         }
     }
 }

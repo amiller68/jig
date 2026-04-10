@@ -77,7 +77,7 @@ issues/epics/plan-and-execute/
 ```markdown
 # [Title]
 
-**Status:** Planned | In Progress | Complete | Blocked
+**Status:** Triage | Backlog | Planned | In Progress | Complete | Blocked
 **Parent:** JIG-19 *(optional — links this as a sub-issue)*
 
 ## Objective
@@ -142,6 +142,8 @@ Unresolved decisions or unknowns.
 
 | Status | Meaning |
 |--------|---------|
+| `Triage` | Needs investigation by a triage agent |
+| `Backlog` | Investigated, awaiting human decision |
 | `Planned` | Ready to work on |
 | `In Progress` | Currently being implemented |
 | `Complete` | Done and verified |

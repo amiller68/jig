@@ -95,6 +95,21 @@ impl fmt::Display for IssuePriority {
     }
 }
 
+/// Parent issue metadata, fetched eagerly to avoid extra API calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParentIssue {
+    /// Parent issue identifier (e.g. "ENG-100").
+    pub id: String,
+    /// Parent issue's title (for spawn preamble context).
+    pub title: String,
+    /// Parent issue's branch name, used as base branch for child worktrees.
+    pub branch_name: Option<String>,
+    /// Parent issue's status (transient, for spawn gating without extra API call).
+    pub status: Option<IssueStatus>,
+    /// Parent issue's body/description (for spawn preamble context).
+    pub body: Option<String>,
+}
+
 /// A parsed issue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Issue {
@@ -118,8 +133,8 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// Suggested branch name (e.g. from Linear's `branchName` field).
     pub branch_name: Option<String>,
-    /// Parent issue reference: (identifier, title).
-    pub parent: Option<(String, String)>,
+    /// Parent issue reference with eagerly-fetched metadata.
+    pub parent: Option<ParentIssue>,
 }
 
 /// Filter criteria for listing issues.
@@ -356,6 +371,100 @@ mod tests {
         assert!(context.contains("Some body text"));
         assert!(context.contains("issues/features/my-feature.md"));
         assert!(context.contains("file provider"));
+    }
+
+    #[test]
+    fn from_str_loose_triage() {
+        assert_eq!(
+            IssueStatus::from_str_loose("triage"),
+            Some(IssueStatus::Triage)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("Triage"),
+            Some(IssueStatus::Triage)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("TRIAGE"),
+            Some(IssueStatus::Triage)
+        );
+    }
+
+    #[test]
+    fn from_str_loose_backlog() {
+        assert_eq!(
+            IssueStatus::from_str_loose("backlog"),
+            Some(IssueStatus::Backlog)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("Backlog"),
+            Some(IssueStatus::Backlog)
+        );
+        assert_eq!(
+            IssueStatus::from_str_loose("BACKLOG"),
+            Some(IssueStatus::Backlog)
+        );
+    }
+
+    #[test]
+    fn triage_and_backlog_symbols() {
+        assert_eq!(IssueStatus::Triage.symbol(), "[?]");
+        assert_eq!(IssueStatus::Backlog.symbol(), "[.]");
+    }
+
+    #[test]
+    fn triage_backlog_excluded_from_planned_filter() {
+        let triage_issue = Issue {
+            id: "triage-1".into(),
+            title: "Triage issue".into(),
+            status: IssueStatus::Triage,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        };
+        let backlog_issue = Issue {
+            id: "backlog-1".into(),
+            title: "Backlog issue".into(),
+            status: IssueStatus::Backlog,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        };
+        let planned_issue = Issue {
+            id: "planned-1".into(),
+            title: "Planned issue".into(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec![],
+            branch_name: None,
+            parent: None,
+        };
+
+        let planned_filter = IssueFilter {
+            status: Some(IssueStatus::Planned),
+            ..Default::default()
+        };
+
+        // Triage and Backlog should NOT match the Planned filter used by auto-spawn
+        assert!(!triage_issue.matches(&planned_filter));
+        assert!(!backlog_issue.matches(&planned_filter));
+        assert!(planned_issue.matches(&planned_filter));
     }
 
     #[test]

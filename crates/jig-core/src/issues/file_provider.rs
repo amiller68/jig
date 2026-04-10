@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use crate::error::{Error, Result};
 
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus};
+use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
 
 /// File-based issue provider that reads from an `issues/` directory.
 pub struct FileProvider {
@@ -675,7 +675,13 @@ fn parse_issue_content(rel_path: &str, content: &str) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent,
+        parent: parent.map(|(id, title)| ParentIssue {
+            id,
+            title,
+            branch_name: None,
+            status: None,
+            body: None,
+        }),
     })
 }
 
@@ -767,7 +773,13 @@ fn parse_issue_file(path: &Path, issues_dir: &Path) -> Result<Issue> {
         children,
         labels,
         branch_name: None,
-        parent,
+        parent: parent.map(|(id, title)| ParentIssue {
+            id,
+            title,
+            branch_name: None,
+            status: None,
+            body: None,
+        }),
     })
 }
 
@@ -1414,5 +1426,61 @@ mod tests {
 
         let issue = provider.get("features/my-feature").unwrap().unwrap();
         assert_eq!(issue.labels, vec!["backend", "auto"]);
+    }
+
+    #[test]
+    fn triage_status_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("investigate.md"),
+            "# Investigate Crash\n\n**Status:** Triage\n**Priority:** High\n",
+        )
+        .unwrap();
+
+        let issue = parse_issue_file(&tmp.path().join("investigate.md"), tmp.path()).unwrap();
+        assert_eq!(issue.status, IssueStatus::Triage);
+        assert_eq!(issue.priority, Some(IssuePriority::High));
+    }
+
+    #[test]
+    fn backlog_status_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("deferred.md"),
+            "# Deferred Work\n\n**Status:** Backlog\n",
+        )
+        .unwrap();
+
+        let issue = parse_issue_file(&tmp.path().join("deferred.md"), tmp.path()).unwrap();
+        assert_eq!(issue.status, IssueStatus::Backlog);
+    }
+
+    #[test]
+    fn triage_and_backlog_excluded_from_spawnable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bugs = tmp.path().join("bugs");
+        std::fs::create_dir_all(&bugs).unwrap();
+        std::fs::write(
+            bugs.join("triage-item.md"),
+            "# Triage Item\n\n**Status:** Triage\n**Labels:** auto\n",
+        )
+        .unwrap();
+        std::fs::write(
+            bugs.join("backlog-item.md"),
+            "# Backlog Item\n\n**Status:** Backlog\n**Labels:** auto\n",
+        )
+        .unwrap();
+        std::fs::write(
+            bugs.join("planned-item.md"),
+            "# Planned Item\n\n**Status:** Planned\n**Labels:** auto\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let spawnable = provider.list_spawnable(&["auto".into()]).unwrap();
+
+        // Only the Planned issue should be spawnable
+        assert_eq!(spawnable.len(), 1);
+        assert_eq!(spawnable[0].title, "Planned Item");
     }
 }

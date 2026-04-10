@@ -80,8 +80,16 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         return Ok(());
     }
 
-    let base_branch = RepoContext::resolve_base_branch_for(repo_root)
-        .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string());
+    let base_branch = match input
+        .issue
+        .parent
+        .as_ref()
+        .and_then(|p| p.branch_name.as_deref())
+    {
+        Some(parent_branch) => format!("origin/{}", parent_branch),
+        None => RepoContext::resolve_base_branch_for(repo_root)
+            .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string()),
+    };
 
     let copy_files = config::get_copy_files(repo_root).map_err(|e| e.to_string())?;
     let on_create_hook = config::get_on_create_hook(repo_root).map_err(|e| e.to_string())?;

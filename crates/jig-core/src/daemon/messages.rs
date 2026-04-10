@@ -101,6 +101,14 @@ pub struct SpawnableIssue {
     pub kind: SpawnKind,
 }
 
+/// Response from the issue actor containing both spawnable and triageable issues.
+pub struct IssueResponse {
+    /// Issues eligible for normal auto-spawn (status=Planned).
+    pub spawnable: Vec<SpawnableIssue>,
+    /// Issues eligible for triage (status=Triage, repo has triage enabled).
+    pub triageable: Vec<SpawnableIssue>,
+}
+
 /// Request sent to the spawn actor to create workers.
 pub struct SpawnRequest {
     pub issues: Vec<SpawnableIssue>,

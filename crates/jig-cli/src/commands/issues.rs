@@ -92,7 +92,7 @@ pub enum IssuesCommand {
         body: Option<String>,
 
         /// Parent issue ID (e.g. "JIG-19") to create this as a sub-issue
-        #[arg(long)]
+        #[arg(short = 'P', long)]
         parent: Option<String>,
     },
 
@@ -134,7 +134,7 @@ pub enum IssuesCommand {
         remove_blocked_by: Vec<String>,
 
         /// Parent issue ID (e.g. "JIG-19") to set as parent
-        #[arg(long)]
+        #[arg(short = 'P', long)]
         parent: Option<String>,
 
         /// Remove the parent issue relation
@@ -699,8 +699,8 @@ impl fmt::Display for IssuesOutput {
                 write!(f, "{table}")
             }
             Self::Detail(issue) => {
-                if let Some((parent_id, parent_title)) = &issue.parent {
-                    writeln!(f, "Parent: {} — {}", parent_id, parent_title)?;
+                if let Some(parent) = &issue.parent {
+                    writeln!(f, "Parent: {} — {}", parent.id, parent.title)?;
                     writeln!(f)?;
                 }
                 write!(f, "{}", issue.body)?;
@@ -919,11 +919,11 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
             issue.status.as_str(),
             issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-"),
         )?;
-        if let Some((parent_id, parent_title)) = &issue.parent {
+        if let Some(parent) = &issue.parent {
             write!(
                 w,
                 "\x1B[2mParent: {} — {}\x1B[0m\r\n",
-                parent_id, parent_title
+                parent.id, parent.title
             )?;
         }
 

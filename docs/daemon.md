@@ -196,7 +196,29 @@ The `auto_spawn_labels` field in `[issues]` controls auto-spawning:
 
 The issue actor polls at the configured interval and the spawn actor creates worktrees + launches agents for eligible issues (status: planned, has required labels, dependencies satisfied).
 
-## Triage verification
+## Triage auto-spawn and tracking
+
+The daemon can automatically spawn lightweight triage workers for issues in **Triage** status. Enable this per-repo:
+
+```toml
+# jig.toml
+[triage]
+enabled = true
+timeout_seconds = 600    # max time before a triage worker is considered stuck (default 600)
+```
+
+### How it works
+
+The issue actor polls for triage-eligible issues (status=Triage) alongside normal spawnable issues. Triage and spawn share the worker budget. The `TriageTracker` (in-memory, on `DaemonRuntime`) prevents duplicate spawns and detects stuck workers:
+
+1. **Discovery**: Issue actor returns triageable issues separately from spawnable ones
+2. **Dedup**: Tracker filters out issues already being triaged (`is_active`)
+3. **Spawn**: Triage workers are named `triage-{issue_id}` and sent to the spawn actor
+4. **Registration**: On spawn, the tracker records the issue ID, worker name, and timestamp
+5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention` and the worker's tmux window is killed
+6. **Completion**: When a triage worker's tmux session exits, the tracker removes the entry
+
+### Triage verification
 
 When a worker with a linked issue exits (tmux window gone), the daemon checks whether the issue is still in **Triage** status. If so, the triage worker failed silently — the daemon emits a `NeedsIntervention` notification so a human can investigate.
 
@@ -209,6 +231,10 @@ The triage workflow:
 4. Daemon detects exit, checks issue status — Backlog means success, Triage means failure
 
 No auto-retry on failure. Failed triage requires human attention.
+
+### Persistence
+
+The tracker is in-memory only. On daemon restart, it rebuilds from active workers whose names start with `triage-`.
 
 ## Auto-pruning
 
