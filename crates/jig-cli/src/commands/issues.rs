@@ -121,13 +121,27 @@ pub enum IssuesCommand {
         #[arg(short, long)]
         priority: Option<String>,
 
-        /// Labels to set (can specify multiple -l flags)
+        /// Labels to set — REPLACES the current label set (can specify multiple -l flags).
+        /// Use --add-label / --remove-label for additive edits.
         #[arg(short, long)]
         label: Vec<String>,
+
+        /// Labels to add to the existing set (repeatable)
+        #[arg(long = "add-label")]
+        add_label: Vec<String>,
+
+        /// Labels to remove from the existing set (repeatable)
+        #[arg(long = "remove-label")]
+        remove_label: Vec<String>,
 
         /// Category/directory (file) or project name (Linear)
         #[arg(short, long)]
         category: Option<String>,
+
+        /// Assignee — "me" for the authenticated user, or a Linear user ID
+        /// (Linear provider only; ignored by the file provider)
+        #[arg(short = 'A', long)]
+        assignee: Option<String>,
 
         /// Add blocking dependencies (issue IDs that block this issue)
         #[arg(long, value_delimiter = ',')]
@@ -393,7 +407,10 @@ fn run_update(
     append: bool,
     priority: Option<&str>,
     labels: &[String],
+    add_labels: &[String],
+    remove_labels: &[String],
     category: Option<&str>,
+    assignee: Option<&str>,
     blocked_by: &[String],
     remove_blocked_by: &[String],
     parent: Option<&str>,
@@ -413,19 +430,29 @@ fn run_update(
         None => None,
     };
 
+    // --label (replace) is mutually exclusive with --add-label / --remove-label
+    if !labels.is_empty() && (!add_labels.is_empty() || !remove_labels.is_empty()) {
+        return Err(IssuesError::Usage(
+            "--label (replace) cannot be combined with --add-label / --remove-label".to_string(),
+        ));
+    }
+
     // Require at least one field to update
     if title.is_none()
         && body_text.is_none()
         && pri.is_none()
         && labels.is_empty()
+        && add_labels.is_empty()
+        && remove_labels.is_empty()
         && category.is_none()
+        && assignee.is_none()
         && blocked_by.is_empty()
         && remove_blocked_by.is_empty()
         && parent.is_none()
         && !remove_parent
     {
         return Err(IssuesError::Usage(
-            "at least one field to update is required (--title, --body, --priority, --label, --category, --blocked-by, --remove-blocked-by, --parent, --remove-parent)".to_string(),
+            "at least one field to update is required (--title, --body, --priority, --label, --add-label, --remove-label, --category, --assignee, --blocked-by, --remove-blocked-by, --parent, --remove-parent)".to_string(),
         ));
     }
 
@@ -451,11 +478,40 @@ fn run_update(
         (_, body) => body,
     };
 
+    // Compute the effective label set for this update.
+    //
+    // - If the user passed --label, use it as a replacement set.
+    // - Else if they passed --add-label / --remove-label, fetch the current
+    //   labels and apply the delta.
+    // - Else, no label mutation.
+    let mutate_labels = !add_labels.is_empty() || !remove_labels.is_empty();
+    let computed_labels: Vec<String> = if !labels.is_empty() {
+        labels.to_vec()
+    } else if mutate_labels {
+        let provider = repo.issue_provider()?;
+        let existing = provider
+            .get(id)?
+            .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
+        let mut set: Vec<String> = existing.labels.clone();
+        for add in add_labels {
+            if !set.iter().any(|l| l.eq_ignore_ascii_case(add)) {
+                set.push(add.clone());
+            }
+        }
+        set.retain(|l| !remove_labels.iter().any(|r| r.eq_ignore_ascii_case(l)));
+        set
+    } else {
+        Vec::new()
+    };
+
+    let labels_changed = !labels.is_empty() || mutate_labels;
+
     let has_field_updates = title.is_some()
         || effective_body.is_some()
         || pri.is_some()
-        || !labels.is_empty()
-        || category.is_some();
+        || labels_changed
+        || category.is_some()
+        || assignee.is_some();
 
     match repo.jig_toml.issues.provider.as_str() {
         "linear" => {
@@ -466,8 +522,9 @@ fn run_update(
                     title,
                     effective_body.as_deref(),
                     pri.as_ref(),
-                    labels,
+                    &computed_labels,
                     category,
+                    assignee,
                     parent,
                     remove_parent,
                 )?;
@@ -480,6 +537,11 @@ fn run_update(
             }
         }
         _ => {
+            if assignee.is_some() {
+                return Err(IssuesError::Usage(
+                    "--assignee is only supported by the Linear provider".to_string(),
+                ));
+            }
             let file_provider = repo.file_provider();
             if has_field_updates || parent.is_some() || remove_parent {
                 file_provider.update_issue(
@@ -487,7 +549,7 @@ fn run_update(
                     title,
                     effective_body.as_deref(),
                     pri.as_ref(),
-                    labels,
+                    &computed_labels,
                     category,
                     parent,
                     remove_parent,
@@ -661,7 +723,10 @@ impl Op for Issues {
                 append,
                 priority,
                 label,
+                add_label,
+                remove_label,
                 category,
+                assignee,
                 blocked_by,
                 remove_blocked_by,
                 parent,
@@ -674,7 +739,10 @@ impl Op for Issues {
                 *append,
                 priority.as_deref(),
                 label,
+                add_label,
+                remove_label,
                 category.as_deref(),
+                assignee.as_deref(),
                 blocked_by,
                 remove_blocked_by,
                 parent.as_deref(),
@@ -724,6 +792,9 @@ impl fmt::Display for IssuesOutput {
                     writeln!(f)?;
                 }
                 write!(f, "{}", issue.body)?;
+                if !issue.labels.is_empty() {
+                    write!(f, "\n\nLabels: {}", issue.labels.join(", "))?;
+                }
                 if !issue.depends_on.is_empty() {
                     write!(f, "\n\nBlocked by: {}", issue.depends_on.join(", "))?;
                 }
