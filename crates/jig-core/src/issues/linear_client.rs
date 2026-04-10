@@ -32,9 +32,11 @@ query ListIssues($filter: IssueFilter, $first: Int) {
       parent { identifier title description branchName state { type } }
       children { nodes { identifier } }
       labels { nodes { name } }
-      relations {
+      inverseRelations {
         nodes {
+          id
           type
+          issue { identifier }
           relatedIssue { identifier }
         }
       }
@@ -84,10 +86,11 @@ query GetIssue($filter: IssueFilter, $first: Int) {
       parent { identifier title description branchName state { type } }
       children { nodes { identifier } }
       labels { nodes { name } }
-      relations {
+      inverseRelations {
         nodes {
           id
           type
+          issue { identifier }
           relatedIssue { identifier }
         }
       }
@@ -317,7 +320,7 @@ struct RawIssue {
     parent: Option<RawParentRef>,
     children: NodeList<RawChildRef>,
     labels: NodeList<RawLabel>,
-    relations: NodeList<RawRelation>,
+    inverse_relations: NodeList<RawRelation>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,38 +359,45 @@ struct RawLabel {
     name: String,
 }
 
+/// A Linear issue relation record.
+///
+/// For a stored record `{issueId: A, relatedIssueId: B, type: "blocks"}` meaning
+/// "A blocks B", Linear does NOT flip `issue`/`relatedIssue` when exposing the
+/// record via `inverseRelations` — it returns the literal stored IDs. So from
+/// B's perspective (`inverseRelations`), `issue` is A (the blocker) and
+/// `related_issue` is B (this issue itself). Callers that want the "other side"
+/// in either direction should pick `issue` when reading `inverseRelations` and
+/// `related_issue` when reading outbound `relations`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawRelation {
     id: Option<String>,
     #[serde(rename = "type")]
     relation_type: String,
+    issue: RawChildRef,
+    #[allow(dead_code)]
     related_issue: RawChildRef,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateRelationData {
-    #[allow(dead_code)]
     issue_relation_create: CreateRelationResult,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateRelationResult {
-    #[allow(dead_code)]
     success: bool,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeleteRelationData {
-    #[allow(dead_code)]
     issue_relation_delete: DeleteRelationResult,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeleteRelationResult {
-    #[allow(dead_code)]
     success: bool,
 }
 
@@ -432,12 +442,16 @@ impl From<RawIssue> for Issue {
             .map(|p| p.name.clone())
             .unwrap_or_else(|| raw.team.name.clone());
 
+        // A "blocks" relation from the blocker's side shows up in `inverseRelations`
+        // from the blocked issue's side. Linear stores a single record per blocking
+        // edge with type=`blocks`; the blocked issue sees it as an inbound relation
+        // where the `issue` field is the blocker and `relatedIssue` is this issue.
         let depends_on: Vec<String> = raw
-            .relations
+            .inverse_relations
             .nodes
             .into_iter()
-            .filter(|r| r.relation_type == "is_blocked_by")
-            .map(|r| r.related_issue.identifier)
+            .filter(|r| r.relation_type == "blocks")
+            .map(|r| r.issue.identifier)
             .collect();
 
         let children: Vec<String> = raw
@@ -951,6 +965,11 @@ impl LinearClient {
     /// Create a "is blocked by" relation between two issues.
     ///
     /// `issue_identifier` is blocked by `blocker_identifier`.
+    ///
+    /// Linear's `IssueRelationType` enum does not have an `isBlockedBy` variant —
+    /// the only valid values are `blocks`, `duplicate`, `related`, and `similar`.
+    /// We express "X is blocked by Y" as the relation "Y blocks X", so the
+    /// blocker is the `issueId` and the blocked issue is the `relatedIssueId`.
     pub fn create_blocked_by_relation(
         &self,
         issue_identifier: &str,
@@ -960,9 +979,9 @@ impl LinearClient {
         let blocker_uuid = self.resolve_issue_uuid(blocker_identifier)?;
 
         let input = serde_json::json!({
-            "issueId": issue_uuid,
-            "relatedIssueId": blocker_uuid,
-            "type": "isBlockedBy"
+            "issueId": blocker_uuid,
+            "relatedIssueId": issue_uuid,
+            "type": "blocks"
         });
 
         let variables = serde_json::json!({ "input": input });
@@ -971,7 +990,13 @@ impl LinearClient {
             variables,
         };
 
-        let _data: CreateRelationData = self.execute(&request)?;
+        let data: CreateRelationData = self.execute(&request)?;
+        if !data.issue_relation_create.success {
+            return Err(Error::Linear(format!(
+                "Linear refused to create blocked-by relation: {} blocked by {}",
+                issue_identifier, blocker_identifier,
+            )));
+        }
         Ok(())
     }
 
@@ -1012,16 +1037,16 @@ impl LinearClient {
             .next()
             .ok_or_else(|| Error::Linear(format!("issue not found: {issue_identifier}")))?;
 
-        // Find the matching relation
+        // The "X blocked by Y" edge is stored as "Y blocks X", so from X's side
+        // it appears in `inverseRelations` with type=`blocks`, `issue`=Y (the
+        // blocker), and `relatedIssue`=X (this issue itself).
         let relation_id = raw_issue
-            .relations
+            .inverse_relations
             .nodes
             .into_iter()
             .find(|r| {
-                r.relation_type == "is_blocked_by"
-                    && r.related_issue
-                        .identifier
-                        .eq_ignore_ascii_case(blocker_identifier)
+                r.relation_type == "blocks"
+                    && r.issue.identifier.eq_ignore_ascii_case(blocker_identifier)
             })
             .and_then(|r| r.id)
             .ok_or_else(|| {
@@ -1037,7 +1062,13 @@ impl LinearClient {
             variables,
         };
 
-        let _data: DeleteRelationData = self.execute(&request)?;
+        let data: DeleteRelationData = self.execute(&request)?;
+        if !data.issue_relation_delete.success {
+            return Err(Error::Linear(format!(
+                "Linear refused to delete blocked-by relation: {} blocked by {}",
+                issue_identifier, blocker_identifier,
+            )));
+        }
         Ok(())
     }
 
