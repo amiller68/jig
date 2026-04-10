@@ -14,6 +14,8 @@ pub enum NotifyKind {
     WorkCompleted { pr_url: Option<String> },
     /// New review feedback was received on the worker's PR.
     FeedbackReceived { pr_url: String },
+    /// Automated review approved the worker's PR.
+    ReviewApproved { pr_url: Option<String> },
 }
 
 /// An action to be executed in response to a state transition.

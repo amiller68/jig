@@ -97,6 +97,7 @@ impl NotificationEvent {
             Self::FeedbackAddressed { .. } => "feedback_addressed",
             Self::NeedsIntervention { .. } => "needs_intervention",
             Self::WorkCompleted { .. } => "work_completed",
+            Self::ReviewApproved { .. } => "review_approved",
         }
     }
 }
