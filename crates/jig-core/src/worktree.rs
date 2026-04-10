@@ -206,7 +206,12 @@ impl Worktree {
         Ok(())
     }
 
-    /// Resume this worktree: appends a Resume event and relaunches with auto mode.
+    /// Resume this worktree by continuing the agent's prior session.
+    ///
+    /// For adapters that support session continuation (e.g. Claude Code's `-c` flag),
+    /// this picks up the most recent session transcript instead of starting fresh.
+    /// For adapters without continuation support, falls back to a fresh launch with
+    /// the provided context.
     pub fn resume(&self, context: Option<&str>) -> Result<()> {
         let repo_name = self.repo_name();
 
@@ -218,7 +223,22 @@ impl Worktree {
             let _ = event_log.append(&event);
         }
 
-        self.launch(context)
+        // Get adapter from config
+        let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
+        let agent_adapter =
+            adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+
+        if !agent_adapter.supports_continue() {
+            // Adapter doesn't support session continuation — fall back to re-spawn
+            return self.launch(context);
+        }
+
+        // Continue the prior session via the adapter's continue flag
+        session::create_window(&self.session_name, &self.name, &self.path)?;
+        let cmd = adapter::build_resume_command(agent_adapter);
+        session::send_keys(&self.session_name, &self.name, &cmd)?;
+
+        Ok(())
     }
 
     // ---------------------------------------------------------------
