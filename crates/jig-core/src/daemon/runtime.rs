@@ -181,7 +181,14 @@ impl DaemonRuntime {
     /// Trigger a git sync if the interval has elapsed and no sync is pending.
     ///
     /// When `repo_filter` is set, only sync repos matching that name.
-    pub fn maybe_trigger_sync(&mut self, registry: &RepoRegistry, repo_filter: Option<&str>) {
+    /// `parent_branches` contains (repo_name, repo_path, branch) tuples for
+    /// parent branches that child workers depend on.
+    pub fn maybe_trigger_sync(
+        &mut self,
+        registry: &RepoRegistry,
+        repo_filter: Option<&str>,
+        parent_branches: Vec<(String, PathBuf, String)>,
+    ) {
         if self.sync_pending {
             return;
         }
@@ -203,7 +210,14 @@ impl DaemonRuntime {
             return;
         }
 
-        if self.sync_tx.try_send(SyncRequest { repos }).is_ok() {
+        if self
+            .sync_tx
+            .try_send(SyncRequest {
+                repos,
+                parent_branches,
+            })
+            .is_ok()
+        {
             self.sync_pending = true;
             tracing::debug!("triggered sync");
         }

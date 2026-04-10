@@ -19,6 +19,10 @@ pub struct WorkerState {
     pub issue_ref: Option<String>,
     pub started_at: Option<i64>,
     pub last_event_at: Option<i64>,
+    /// Parent issue ID (e.g. "JIG-31") if this worker is a child of another issue.
+    pub parent_issue: Option<String>,
+    /// Parent issue's branch name, used as base branch for this child worktree.
+    pub parent_branch: Option<String>,
 }
 
 impl Default for WorkerState {
@@ -33,6 +37,8 @@ impl Default for WorkerState {
             issue_ref: None,
             started_at: None,
             last_event_at: None,
+            parent_issue: None,
+            parent_branch: None,
         }
     }
 }
@@ -94,11 +100,23 @@ impl WorkerState {
                 if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
                     self.issue_ref = Some(issue.to_string());
                 }
+                if let Some(pi) = event.data.get("parent_issue").and_then(|v| v.as_str()) {
+                    self.parent_issue = Some(pi.to_string());
+                }
+                if let Some(pb) = event.data.get("parent_branch").and_then(|v| v.as_str()) {
+                    self.parent_branch = Some(pb.to_string());
+                }
             }
             EventType::Spawn => {
                 self.status = WorkerStatus::Spawned;
                 if let Some(issue) = event.data.get("issue").and_then(|v| v.as_str()) {
                     self.issue_ref = Some(issue.to_string());
+                }
+                if let Some(pi) = event.data.get("parent_issue").and_then(|v| v.as_str()) {
+                    self.parent_issue = Some(pi.to_string());
+                }
+                if let Some(pb) = event.data.get("parent_branch").and_then(|v| v.as_str()) {
+                    self.parent_branch = Some(pb.to_string());
                 }
             }
             EventType::Resume => {
@@ -374,5 +392,35 @@ mod tests {
         };
         let state = WorkerState::reduce(&events, &config);
         assert_eq!(state.status, WorkerStatus::Initializing);
+    }
+
+    #[test]
+    fn parent_info_extracted_from_initializing() {
+        let events = vec![Event::new(EventType::Initializing)
+            .with_field("issue", "JIG-35")
+            .with_field("parent_issue", "JIG-31")
+            .with_field("parent_branch", "al/jig-31-feature")];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.parent_issue.as_deref(), Some("JIG-31"));
+        assert_eq!(state.parent_branch.as_deref(), Some("al/jig-31-feature"));
+    }
+
+    #[test]
+    fn parent_info_extracted_from_spawn() {
+        let events = vec![Event::new(EventType::Spawn)
+            .with_field("issue", "JIG-35")
+            .with_field("parent_issue", "JIG-31")
+            .with_field("parent_branch", "al/jig-31-feature")];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.parent_issue.as_deref(), Some("JIG-31"));
+        assert_eq!(state.parent_branch.as_deref(), Some("al/jig-31-feature"));
+    }
+
+    #[test]
+    fn parent_info_none_when_absent() {
+        let events = vec![Event::new(EventType::Spawn).with_field("issue", "JIG-35")];
+        let state = WorkerState::reduce(&events, &default_config());
+        assert_eq!(state.parent_issue, None);
+        assert_eq!(state.parent_branch, None);
     }
 }

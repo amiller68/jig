@@ -438,6 +438,45 @@ impl Repo {
     }
 
     // ------------------------------------------------------------------
+    // Remote operations
+    // ------------------------------------------------------------------
+
+    /// Fast-forward the current branch to match its remote tracking branch.
+    ///
+    /// Returns `true` if new commits were pulled, `false` if already up to date.
+    /// Returns `Err(MergeConflict)` if fast-forward is not possible.
+    pub fn fast_forward_to_remote(&self, branch: &str) -> Result<bool> {
+        let remote_ref = format!("origin/{}", branch);
+        let remote_branch = self
+            .inner
+            .find_branch(&remote_ref, git2::BranchType::Remote)
+            .map_err(|_| Error::BranchNotFound(remote_ref.clone()))?;
+
+        let annotated = self
+            .inner
+            .reference_to_annotated_commit(&remote_branch.into_reference())?;
+        let (analysis, _) = self.inner.merge_analysis(&[&annotated])?;
+
+        if analysis.is_up_to_date() {
+            return Ok(false);
+        }
+
+        if analysis.is_fast_forward() {
+            let target_oid = annotated.id();
+            let mut reference = self.inner.head()?;
+            reference.set_target(
+                target_oid,
+                &format!("fast-forward {} to {}", branch, remote_ref),
+            )?;
+            self.inner
+                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+            return Ok(true);
+        }
+
+        Err(Error::MergeConflict(remote_ref))
+    }
+
+    // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
 

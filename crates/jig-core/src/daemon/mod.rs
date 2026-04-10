@@ -24,7 +24,7 @@ pub mod spawn_actor;
 pub mod sync_actor;
 pub mod triage_tracker;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -226,6 +226,155 @@ impl<'a> Daemon<'a> {
         }
     }
 
+    /// Collect parent branches from active workers that need to be fetched during sync.
+    ///
+    /// Returns (repo_name, repo_path, branch) tuples for each unique parent branch.
+    fn collect_parent_branches(
+        &self,
+        workers_state: &WorkersState,
+        registry: &RepoRegistry,
+    ) -> Vec<(String, std::path::PathBuf, String)> {
+        let mut seen = HashSet::new();
+        let mut result = Vec::new();
+
+        for entry in workers_state.workers.values() {
+            if let Some(ref parent_branch) = entry.parent_branch {
+                let repo_key = format!("{}:{}", entry.repo, parent_branch);
+                if seen.insert(repo_key) {
+                    if let Some(repo_entry) = Self::find_repo_path(registry, &entry.repo) {
+                        result.push((
+                            entry.repo.clone(),
+                            repo_entry.path.clone(),
+                            parent_branch.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// After sync completes, check parent worktrees for new remote commits.
+    ///
+    /// For each parent worktree (a worker whose branch is used as the base branch
+    /// by child workers), run `git pull --ff-only` to incorporate merged child PRs.
+    /// If new commits were pulled, nudge the parent worker via tmux.
+    fn update_parent_worktrees(
+        &self,
+        workers_state: &WorkersState,
+        registry: &RepoRegistry,
+        runtime: &DaemonRuntime,
+    ) {
+        // Build a set of parent branches that child workers depend on.
+        let mut parent_branches: HashSet<(String, String)> = HashSet::new();
+        for entry in workers_state.workers.values() {
+            if entry.status == "merged" || entry.status == "archived" || entry.status == "failed" {
+                continue;
+            }
+            if let Some(ref pb) = entry.parent_branch {
+                parent_branches.insert((entry.repo.clone(), pb.clone()));
+            }
+        }
+
+        if parent_branches.is_empty() {
+            return;
+        }
+
+        // Find parent workers by matching branch name from workers_state
+        // (avoids re-reading event logs).
+        for (repo_name, parent_branch) in &parent_branches {
+            let parent_worker = workers_state.workers.iter().find_map(|(key, entry)| {
+                if &entry.repo == repo_name && entry.branch == *parent_branch {
+                    // Extract worker name from the key (format: "repo/worker")
+                    let worker_name = key.split('/').nth(1).unwrap_or(key);
+                    Some((worker_name.to_string(), entry.branch.clone()))
+                } else {
+                    None
+                }
+            });
+
+            let (worker_name, branch_name) = match parent_worker {
+                Some(pw) => pw,
+                None => continue,
+            };
+
+            let repo_entry = match Self::find_repo_path(registry, repo_name) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            let worktree_path = crate::config::worktree_path(&repo_entry.path, &worker_name);
+            if !worktree_path.exists() {
+                continue;
+            }
+
+            // Fast-forward the parent worktree to its remote tracking branch
+            // using git2 (no subprocess needed — sync actor already fetched).
+            let repo = match crate::git::Repo::open(&worktree_path) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        worker = %worker_name,
+                        repo = %repo_name,
+                        "failed to open parent worktree repo: {}",
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            match repo.fast_forward_to_remote(parent_branch) {
+                Ok(true) => {
+                    tracing::info!(
+                        worker = %worker_name,
+                        repo = %repo_name,
+                        branch = %parent_branch,
+                        "pulled new commits into parent worktree"
+                    );
+
+                    // Nudge the parent worker to let it know about new commits
+                    let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                    let target = TmuxTarget::new(&session, &worker_name);
+
+                    if self.tmux.has_window(&target) {
+                        let key = format!("{}/{}", repo_name, worker_name);
+                        let message = "Child work has been merged into your branch. \
+                                       New commits are available. Run `git log --oneline -5` \
+                                       to see what changed."
+                            .to_string();
+
+                        runtime.send_nudge(messages::NudgeRequest {
+                            session,
+                            window: branch_name,
+                            message,
+                            nudge_type_key: "parent_update".to_string(),
+                            is_stuck: false,
+                            repo_name: repo_name.to_string(),
+                            worker_name: worker_name.to_string(),
+                            worker_key: key,
+                        });
+                    }
+                }
+                Ok(false) => {
+                    tracing::debug!(
+                        worker = %worker_name,
+                        repo = %repo_name,
+                        "parent worktree already up to date"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        worker = %worker_name,
+                        repo = %repo_name,
+                        "fast-forward failed in parent worktree: {}",
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     /// Check if a triage worker has exited with its issue still in Triage status.
     ///
     /// Only fires on the transition from non-exited to exited (comparing old and
@@ -299,6 +448,11 @@ impl<'a> Daemon<'a> {
 
         // 1. Drain all pending actor responses (non-blocking)
         runtime.drain_sync();
+
+        // Parent-update phase: after sync, check if parent worktrees have new
+        // remote commits (from child PR merges) and pull them in.
+        self.update_parent_worktrees(&workers_state, &registry, runtime);
+
         runtime.drain_github();
         let issue_response = runtime.drain_issues();
         let mut spawnable = issue_response
@@ -485,7 +639,12 @@ impl<'a> Daemon<'a> {
 
         // 2. Trigger background sync if interval elapsed
         if !self.daemon_config.skip_sync {
-            runtime.maybe_trigger_sync(&registry, self.daemon_config.repo_filter.as_deref());
+            let parent_branches = self.collect_parent_branches(&workers_state, &registry);
+            runtime.maybe_trigger_sync(
+                &registry,
+                self.daemon_config.repo_filter.as_deref(),
+                parent_branches,
+            );
         }
 
         // 3. Process each worker
@@ -1023,6 +1182,7 @@ impl<'a> Daemon<'a> {
                 last_event_at: new_state.last_event_at.unwrap_or(0),
                 nudge_counts: new_state.nudge_counts.clone(),
                 review_feedback_count: current_review_feedback_count,
+                parent_branch: new_state.parent_branch.clone(),
             },
         );
 
@@ -1230,6 +1390,7 @@ impl<'a> Daemon<'a> {
                 last_event_at: new_state.last_event_at.unwrap_or(0),
                 nudge_counts: new_state.nudge_counts.clone(),
                 review_feedback_count: current_review_feedback_count,
+                parent_branch: new_state.parent_branch.clone(),
             },
         );
 
@@ -1757,6 +1918,8 @@ fn entry_to_worker_state(entry: &WorkerEntry) -> WorkerState {
         issue_ref: entry.issue.clone(),
         started_at: Some(entry.started_at),
         last_event_at: Some(entry.last_event_at),
+        parent_issue: None,
+        parent_branch: entry.parent_branch.clone(),
     }
 }
 
@@ -1777,6 +1940,7 @@ mod tests {
             last_event_at: 2000,
             nudge_counts: HashMap::new(),
             review_feedback_count: None,
+            parent_branch: None,
         };
         let state = entry_to_worker_state(&entry);
         assert_eq!(state.status, crate::worker::WorkerStatus::Running);

@@ -13,9 +13,10 @@ The jig daemon monitors spawned workers and takes action when they need attentio
 Every tick (default 30s), the daemon:
 
 1. **Drains actor responses** — Collects results from background actors (GitHub, nudge, prune, spawn, sync)
-2. **Syncs repos** — Background `git fetch` via the sync actor
-3. **Discovers workers** — Scans event logs for active workers
-4. **Processes each worker:**
+2. **Syncs repos** — Background `git fetch` via the sync actor (includes parent branches)
+3. **Updates parent worktrees** — Pulls merged child work into parent worktrees (see [Parent worktree auto-update](#parent-worktree-auto-update))
+4. **Discovers workers** — Scans event logs for active workers
+5. **Processes each worker:**
    - Reads JSONL event log and derives current state
    - Discovers PRs via GitHub actor (non-blocking)
    - Compares against previous state
@@ -31,7 +32,7 @@ The daemon offloads blocking I/O to background threads (actors) so the tick loop
 
 | Actor | Thread name | Purpose |
 |-------|------------|---------|
-| **sync** | `jig-sync` | `git fetch` for registered repos |
+| **sync** | `jig-sync` | `git fetch` for registered repos and parent branches |
 | **github** | `jig-github` | PR status, CI checks, review comments |
 | **issue** | `jig-issue` | Poll for spawnable issues (file/Linear) |
 | **spawn** | `jig-spawn` | Create worktrees and launch agents |
@@ -157,7 +158,7 @@ max = 2
 cooldown_seconds = 180
 ```
 
-Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits`, `auto_review`) can set `max` and `cooldown_seconds` independently. Resolution order: per-type repo config → repo defaults → global config → hardcoded defaults.
+Per-type nudge config (`idle`, `stuck`, `ci`, `conflict`, `review`, `bad_commits`, `auto_review`, `parent_update`) can set `max` and `cooldown_seconds` independently. Resolution order: per-type repo config → repo defaults → global config → hardcoded defaults.
 
 ## PR nudges
 
@@ -236,6 +237,26 @@ No auto-retry on failure. Failed triage requires human attention.
 ### Persistence
 
 The tracker is in-memory only. On daemon restart, it rebuilds from active workers whose names start with `triage-`.
+
+## Parent worktree auto-update
+
+When a child worker's PR is merged into its parent branch, the parent worktree needs to pick up those changes. The daemon handles this automatically.
+
+### How it works
+
+1. **Sync**: The sync actor fetches parent branches alongside repo base branches. Parent branch fetch failures are non-fatal (logged but skipped).
+2. **Pull**: After sync completes, the tick loop identifies parent worktrees by matching branch names from active workers. For each parent worktree with child workers, it runs `git pull --ff-only` (with a 30-second timeout).
+3. **Nudge**: If new commits were pulled, the parent worker receives a `parent_update` nudge via tmux, informing it that child work has been merged.
+
+### Data flow
+
+When a child worker is spawned from a parent issue, the `parent_issue` and `parent_branch` fields are recorded in the spawn event. The reducer extracts these into `WorkerState`, and they persist in `WorkerEntry` (`workers.json`) across ticks.
+
+### Safety
+
+- `git pull --ff-only` never creates merge commits — if the pull can't fast-forward (conflict), the daemon logs a warning and skips the update
+- The pull runs with a 30-second timeout to avoid blocking the tick thread
+- Parent branch fetch failures in the sync actor are non-fatal
 
 ## Auto-pruning
 
