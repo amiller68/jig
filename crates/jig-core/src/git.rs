@@ -82,6 +82,14 @@ impl Repo {
         Ok(false)
     }
 
+    /// Get the HEAD commit SHA as a hex string.
+    pub fn head_sha(&self) -> Result<String> {
+        let head = self.inner.head()?;
+        head.target()
+            .map(|oid| oid.to_string())
+            .ok_or_else(|| Error::BranchNotFound("HEAD".to_string()))
+    }
+
     /// Get the current branch name.
     pub fn current_branch(&self) -> Result<String> {
         let head = self.inner.head()?;

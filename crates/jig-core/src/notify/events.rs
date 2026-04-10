@@ -36,6 +36,11 @@ pub enum NotificationEvent {
         worker: String,
         pr_url: Option<String>,
     },
+    ReviewApproved {
+        repo: String,
+        worker: String,
+        pr_url: Option<String>,
+    },
 }
 
 /// A timestamped, uniquely identified notification.

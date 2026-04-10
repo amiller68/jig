@@ -32,6 +32,9 @@ pub struct WorkerEntry {
     /// Used by the daemon to identify parent worktrees for auto-update.
     #[serde(default)]
     pub parent_branch: Option<String>,
+    /// SHA of the last reviewed commit. Used to detect new work since last review.
+    #[serde(default)]
+    pub last_reviewed_sha: Option<String>,
 }
 
 /// Aggregated worker state across all repos.
@@ -123,6 +126,7 @@ mod tests {
             nudge_counts: HashMap::new(),
             review_feedback_count: None,
             parent_branch: None,
+            last_reviewed_sha: None,
         }
     }
 

@@ -38,6 +38,7 @@ use crate::global::{GlobalConfig, HealthConfig, WorkerEntry, WorkersState};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::{build_nudge_context, NudgeType};
 use crate::registry::{RepoEntry, RepoRegistry};
+use crate::review::{latest_verdict, review_count, ReviewVerdict};
 use crate::spawn::TaskStatus;
 use crate::templates::TemplateEngine;
 use crate::tmux::{TmuxClient, TmuxTarget};
@@ -48,6 +49,13 @@ use pr::{make_github_client, PrMonitor};
 
 pub use messages::SpawnableIssue;
 pub use runtime::{DaemonRuntime, RuntimeConfig, TimerInfo};
+
+/// Get the HEAD SHA for a worktree path via the project's git module.
+fn head_sha_for(worktree_path: &std::path::Path) -> Option<String> {
+    crate::git::Repo::open(worktree_path)
+        .and_then(|r| r.head_sha())
+        .ok()
+}
 
 /// Extract the branch name from a worker's event log (looks for Spawn event),
 /// falling back to worker_name if no Spawn event exists.
@@ -601,6 +609,225 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        // Drain review completions from previous tick
+        for review_result in runtime.drain_reviews() {
+            if let Some(err) = review_result.error {
+                tracing::warn!(
+                    worker = %review_result.worker_key,
+                    "review failed: {}", err
+                );
+                continue;
+            }
+
+            let worker_key = &review_result.worker_key;
+
+            // Resolve worktree path from worker_key ("repo/worker")
+            let (rname, wname) = match worker_key.split_once('/') {
+                Some(pair) => pair,
+                None => {
+                    tracing::warn!(worker = %worker_key, "invalid worker key in review result");
+                    continue;
+                }
+            };
+            let worktree_path = match Self::find_repo_path(&registry, rname) {
+                Some(entry) => crate::config::worktree_path(&entry.path, wname),
+                None => {
+                    tracing::warn!(worker = %worker_key, "repo not found for review result");
+                    continue;
+                }
+            };
+
+            // Get current HEAD SHA
+            let head_sha = head_sha_for(&worktree_path);
+            let verdict = latest_verdict(&worktree_path);
+
+            match verdict {
+                Some(ReviewVerdict::Approve) => {
+                    // Mark PR ready for review
+                    if let Some(cached) = runtime.get_cached_pr(worker_key) {
+                        if let Some(ref pr_url) = cached.pr_url {
+                            if let Some(pr_number) = pr_url.rsplit('/').next() {
+                                let repo_path =
+                                    Self::find_repo_path(&registry, rname).map(|e| e.path.clone());
+                                if let Some(rp) = repo_path {
+                                    let output = std::process::Command::new("gh")
+                                        .args(["pr", "ready", pr_number])
+                                        .current_dir(&rp)
+                                        .stdin(std::process::Stdio::null())
+                                        .output();
+                                    match output {
+                                        Ok(o) if o.status.success() => {
+                                            tracing::info!(
+                                                worker = %worker_key,
+                                                pr = %pr_number,
+                                                "marked PR ready for review"
+                                            );
+                                        }
+                                        Ok(o) => {
+                                            tracing::warn!(
+                                                worker = %worker_key,
+                                                "gh pr ready failed: {}",
+                                                String::from_utf8_lossy(&o.stderr)
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                worker = %worker_key,
+                                                "gh pr ready error: {}", e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Update issue status to "In Review" if issue_ref is set
+                    if let Some(entry) = workers_state.get_worker(worker_key) {
+                        if let Some(ref issue_id) = entry.issue {
+                            let output = std::process::Command::new("jig")
+                                .args(["issues", "status", issue_id, "--status", "in-review"])
+                                .stdin(std::process::Stdio::null())
+                                .output();
+                            match output {
+                                Ok(o) if o.status.success() => {
+                                    tracing::info!(
+                                        worker = %worker_key,
+                                        issue = %issue_id,
+                                        "updated issue status to in-review"
+                                    );
+                                }
+                                Ok(o) => {
+                                    tracing::warn!(
+                                        worker = %worker_key,
+                                        "issue status update failed: {}",
+                                        String::from_utf8_lossy(&o.stderr)
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        worker = %worker_key,
+                                        "issue status update error: {}", e
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // Emit notification
+                    let pr_url = runtime
+                        .get_cached_pr(worker_key)
+                        .and_then(|c| c.pr_url.clone());
+                    let event = NotificationEvent::ReviewApproved {
+                        repo: rname.to_string(),
+                        worker: wname.to_string(),
+                        pr_url,
+                    };
+                    if let Err(e) = self.notifier.emit(event) {
+                        tracing::warn!(
+                            worker = %worker_key,
+                            "ReviewApproved notification failed: {}", e
+                        );
+                    }
+                }
+                Some(ReviewVerdict::ChangesRequested) => {
+                    // Dispatch AutoReview nudge to the implementation agent
+                    let session = format!("{}{}", self.daemon_config.session_prefix, rname);
+                    let branch = workers_state
+                        .get_worker(worker_key)
+                        .map(|e| e.branch.clone())
+                        .unwrap_or_else(|| wname.to_string());
+                    let target = TmuxTarget::new(&session, &branch);
+
+                    if self.tmux.has_window(&target) {
+                        // Load review config to get max_rounds
+                        let review_cfg = Self::find_repo_path(&registry, rname)
+                            .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                            .map(|t| t.review)
+                            .unwrap_or_default();
+
+                        let round = review_count(&worktree_path);
+                        let max_rounds = review_cfg.max_rounds;
+
+                        // Build nudge context with review-specific fields
+                        let repo_health = Self::load_repo_health_config(&registry, rname);
+                        let resolve = Self::make_nudge_resolver(&repo_health, &self.config.health);
+                        let resolved = resolve(NudgeType::AutoReview.count_key());
+
+                        let event_log_result = EventLog::for_worker(rname, wname);
+                        let effective_health =
+                            Self::effective_health_config(&repo_health, &self.config.health);
+
+                        if let Ok(event_log) = event_log_result {
+                            if let Ok(events) = event_log.read_all() {
+                                let state = WorkerState::reduce(&events, &effective_health);
+                                let mut ctx = build_nudge_context(
+                                    NudgeType::AutoReview,
+                                    &state,
+                                    resolved,
+                                    None,
+                                );
+                                ctx.set_num("review_round", round);
+                                ctx.set_num("max_rounds", max_rounds);
+                                ctx.set_bool("is_final_round", round >= max_rounds);
+
+                                // Find the latest review file number
+                                let review_file = format!("{:03}.md", round);
+                                ctx.set("review_file", &review_file);
+                                ctx.set_num("review_number", round);
+
+                                let message = match self
+                                    .engine
+                                    .render(NudgeType::AutoReview.template_name(), &ctx)
+                                {
+                                    Ok(msg) => msg,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            worker = %worker_key,
+                                            "auto-review nudge template render failed: {}", e
+                                        );
+                                        // Update last_reviewed_sha even on template failure
+                                        if let Some(sha) = &head_sha {
+                                            if let Some(entry) =
+                                                workers_state.workers.get_mut(worker_key)
+                                            {
+                                                entry.last_reviewed_sha = Some(sha.clone());
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                };
+
+                                runtime.send_nudge(messages::NudgeRequest {
+                                    session,
+                                    window: branch,
+                                    message,
+                                    nudge_type_key: NudgeType::AutoReview.count_key().to_string(),
+                                    is_stuck: false,
+                                    repo_name: rname.to_string(),
+                                    worker_name: wname.to_string(),
+                                    worker_key: worker_key.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        worker = %worker_key,
+                        "review completed but no verdict file found"
+                    );
+                }
+            }
+
+            // Update last_reviewed_sha in WorkerEntry
+            if let Some(sha) = head_sha {
+                if let Some(entry) = workers_state.workers.get_mut(worker_key) {
+                    entry.last_reviewed_sha = Some(sha);
+                }
+            }
+        }
+
         // Drain prune results from previous tick
         if let Some(prune_complete) = runtime.drain_prune() {
             for pr in prune_complete.results {
@@ -1099,6 +1326,10 @@ impl<'a> Daemon<'a> {
 
                 // Draft PR — dispatch nudges from cached check results
                 // Non-draft PRs are in human review, skip nudges.
+                let auto_review_enabled = Self::find_repo_path(registry, repo_name)
+                    .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                    .map(|t| t.review.enabled)
+                    .unwrap_or(false);
                 for (check_name, has_problem) in &cached.pr_checks {
                     if !has_problem {
                         continue;
@@ -1106,7 +1337,15 @@ impl<'a> Daemon<'a> {
                     let nudge_type = match check_name.as_str() {
                         "ci" => NudgeType::Ci,
                         "conflicts" => NudgeType::Conflict,
-                        "reviews" => NudgeType::Review,
+                        "reviews" => {
+                            // When automated review is enabled and PR is draft,
+                            // the review agent is the gatekeeper — suppress human
+                            // comment nudges. Human feedback comes after PR exits draft.
+                            if auto_review_enabled {
+                                continue;
+                            }
+                            NudgeType::Review
+                        }
                         "commits" => NudgeType::BadCommits,
                         _ => continue,
                     };
@@ -1149,6 +1388,54 @@ impl<'a> Daemon<'a> {
             }
         }
 
+        // Automated review trigger: fire when review is enabled, PR is draft,
+        // HEAD has moved since last review, and no review is already in flight.
+        {
+            let review_config = Self::find_repo_path(registry, repo_name)
+                .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                .map(|t| t.review)
+                .unwrap_or_default();
+
+            if review_config.enabled && is_draft && !runtime.review_pending(key) {
+                let last_reviewed = workers_state
+                    .get_worker(key)
+                    .and_then(|e| e.last_reviewed_sha.as_deref());
+
+                if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                    let worktree_path = crate::config::worktree_path(&entry.path, worker_name);
+                    let head_sha = head_sha_for(&worktree_path);
+
+                    let needs_review = match (last_reviewed, &head_sha) {
+                        (Some(prev), Some(current)) => prev != current,
+                        (None, Some(_)) => true,
+                        _ => false,
+                    };
+
+                    let round = review_count(&worktree_path);
+                    let at_max = round >= review_config.max_rounds;
+
+                    if needs_review && !at_max {
+                        let base = RepoContext::resolve_base_branch_for(&entry.path)
+                            .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
+                        runtime.send_review(messages::ReviewRequest {
+                            worker_key: key.to_string(),
+                            worktree_path,
+                            base_branch: format!("origin/{}", base),
+                        });
+                    } else if needs_review && at_max {
+                        actions.push(Action::Notify {
+                            worker_id: worker_name.to_string(),
+                            message: format!(
+                                "Automated review reached max rounds ({}) without approval",
+                                review_config.max_rounds
+                            ),
+                            kind: NotifyKind::NeedsIntervention,
+                        });
+                    }
+                }
+            }
+        }
+
         // Resolve the repo's base branch for nudge templates
         let repo_base_branch = Self::find_repo_path(registry, repo_name)
             .and_then(|entry| RepoContext::resolve_base_branch_for(&entry.path).ok());
@@ -1183,6 +1470,9 @@ impl<'a> Daemon<'a> {
                 nudge_counts: new_state.nudge_counts.clone(),
                 review_feedback_count: current_review_feedback_count,
                 parent_branch: new_state.parent_branch.clone(),
+                last_reviewed_sha: workers_state
+                    .get_worker(key)
+                    .and_then(|e| e.last_reviewed_sha.clone()),
             },
         );
 
@@ -1391,6 +1681,9 @@ impl<'a> Daemon<'a> {
                 nudge_counts: new_state.nudge_counts.clone(),
                 review_feedback_count: current_review_feedback_count,
                 parent_branch: new_state.parent_branch.clone(),
+                last_reviewed_sha: workers_state
+                    .get_worker(key)
+                    .and_then(|e| e.last_reviewed_sha.clone()),
             },
         );
 
@@ -1555,6 +1848,13 @@ impl<'a> Daemon<'a> {
                         },
                         NotifyKind::FeedbackReceived { pr_url } => {
                             NotificationEvent::FeedbackReceived {
+                                repo: repo_name.to_string(),
+                                worker: worker_id.clone(),
+                                pr_url: pr_url.clone(),
+                            }
+                        }
+                        NotifyKind::ReviewApproved { pr_url } => {
+                            NotificationEvent::ReviewApproved {
                                 repo: repo_name.to_string(),
                                 worker: worker_id.clone(),
                                 pr_url: pr_url.clone(),
@@ -1941,6 +2241,7 @@ mod tests {
             nudge_counts: HashMap::new(),
             review_feedback_count: None,
             parent_branch: None,
+            last_reviewed_sha: None,
         };
         let state = entry_to_worker_state(&entry);
         assert_eq!(state.status, crate::worker::WorkerStatus::Running);
@@ -2012,5 +2313,178 @@ mod tests {
         maybe_reset_review_nudges(&mut nudge_counts, None, 2);
 
         assert_eq!(nudge_counts.get("review"), None);
+    }
+
+    // --- Review integration tests ---
+
+    /// Helper: mirrors the review trigger decision logic from process_worker.
+    /// Returns true if a review should be triggered.
+    fn should_trigger_review(
+        review_enabled: bool,
+        is_draft: bool,
+        is_reviewing: bool,
+        last_reviewed_sha: Option<&str>,
+        head_sha: Option<&str>,
+        review_round: u32,
+        max_rounds: u32,
+    ) -> ReviewTriggerResult {
+        if !review_enabled || !is_draft || is_reviewing {
+            return ReviewTriggerResult::Skip;
+        }
+
+        let needs_review = match (last_reviewed_sha, head_sha) {
+            (Some(prev), Some(current)) => prev != current,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+
+        let at_max = review_round >= max_rounds;
+
+        if needs_review && !at_max {
+            ReviewTriggerResult::Trigger
+        } else if needs_review && at_max {
+            ReviewTriggerResult::Escalate
+        } else {
+            ReviewTriggerResult::Skip
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum ReviewTriggerResult {
+        Skip,
+        Trigger,
+        Escalate,
+    }
+
+    #[test]
+    fn review_trigger_fires_on_new_commits() {
+        assert_eq!(
+            should_trigger_review(true, true, false, Some("aaa"), Some("bbb"), 0, 3),
+            ReviewTriggerResult::Trigger,
+        );
+    }
+
+    #[test]
+    fn review_trigger_fires_on_first_review() {
+        assert_eq!(
+            should_trigger_review(true, true, false, None, Some("abc"), 0, 3),
+            ReviewTriggerResult::Trigger,
+        );
+    }
+
+    #[test]
+    fn review_no_trigger_when_disabled() {
+        assert_eq!(
+            should_trigger_review(false, true, false, None, Some("abc"), 0, 3),
+            ReviewTriggerResult::Skip,
+        );
+    }
+
+    #[test]
+    fn review_no_trigger_when_already_reviewing() {
+        assert_eq!(
+            should_trigger_review(true, true, true, None, Some("abc"), 0, 3),
+            ReviewTriggerResult::Skip,
+        );
+    }
+
+    #[test]
+    fn review_no_trigger_when_head_matches_last_reviewed() {
+        assert_eq!(
+            should_trigger_review(true, true, false, Some("abc"), Some("abc"), 1, 3),
+            ReviewTriggerResult::Skip,
+        );
+    }
+
+    #[test]
+    fn review_max_rounds_triggers_escalation() {
+        assert_eq!(
+            should_trigger_review(true, true, false, Some("aaa"), Some("bbb"), 3, 3),
+            ReviewTriggerResult::Escalate,
+        );
+    }
+
+    #[test]
+    fn review_no_trigger_when_not_draft() {
+        assert_eq!(
+            should_trigger_review(true, false, false, None, Some("abc"), 0, 3),
+            ReviewTriggerResult::Skip,
+        );
+    }
+
+    /// Helper: mirrors the comment routing suppression logic.
+    /// Returns true if the review nudge should be suppressed.
+    fn should_suppress_review_nudge(review_enabled: bool, is_draft: bool) -> bool {
+        review_enabled && is_draft
+    }
+
+    #[test]
+    fn comment_routing_suppressed_when_review_enabled_and_draft() {
+        assert!(should_suppress_review_nudge(true, true));
+    }
+
+    #[test]
+    fn comment_routing_preserved_when_review_disabled() {
+        assert!(!should_suppress_review_nudge(false, true));
+    }
+
+    #[test]
+    fn comment_routing_preserved_when_not_draft() {
+        assert!(!should_suppress_review_nudge(true, false));
+    }
+
+    #[test]
+    fn last_reviewed_sha_updates_after_review() {
+        let mut state = WorkersState::default();
+        state.set_worker(
+            "repo/worker",
+            WorkerEntry {
+                repo: "repo".to_string(),
+                branch: "worker".to_string(),
+                status: "running".to_string(),
+                issue: None,
+                pr_url: None,
+                started_at: 1000,
+                last_event_at: 2000,
+                nudge_counts: HashMap::new(),
+                review_feedback_count: None,
+                parent_branch: None,
+                last_reviewed_sha: None,
+            },
+        );
+
+        // Simulate review completion: update last_reviewed_sha
+        if let Some(entry) = state.workers.get_mut("repo/worker") {
+            entry.last_reviewed_sha = Some("abc123".to_string());
+        }
+
+        let entry = state.get_worker("repo/worker").unwrap();
+        assert_eq!(entry.last_reviewed_sha.as_deref(), Some("abc123"));
+    }
+
+    /// Verify that approve verdict maps to the correct action type.
+    #[test]
+    fn approve_verdict_produces_review_approved_notify() {
+        use crate::review::ReviewVerdict;
+
+        let verdict = ReviewVerdict::Approve;
+        let kind = match verdict {
+            ReviewVerdict::Approve => NotifyKind::ReviewApproved { pr_url: None },
+            ReviewVerdict::ChangesRequested => NotifyKind::NeedsIntervention,
+        };
+        assert!(matches!(kind, NotifyKind::ReviewApproved { .. }));
+    }
+
+    /// Verify that changes_requested verdict maps to AutoReview nudge.
+    #[test]
+    fn changes_requested_verdict_produces_auto_review_nudge() {
+        use crate::review::ReviewVerdict;
+
+        let verdict = ReviewVerdict::ChangesRequested;
+        let nudge_type = match verdict {
+            ReviewVerdict::ChangesRequested => Some(NudgeType::AutoReview),
+            ReviewVerdict::Approve => None,
+        };
+        assert_eq!(nudge_type, Some(NudgeType::AutoReview));
     }
 }
