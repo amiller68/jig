@@ -108,6 +108,6 @@ This skill is for **manual** reviews. jig also supports **automated review** via
 - When `[review] enabled = true` in `jig.toml`, the daemon runs an ephemeral review agent on each push to a draft PR
 - Review findings are written to `.jig/reviews/NNN.md` via `jig review submit`
 - The implementation agent responds via `jig review respond --review N`
-- See `design/review/` for the full design
+- See `docs/review/` for the full design
 
 If you are reviewing a worktree that has automated review files in `.jig/reviews/`, read them for context — they may contain findings already addressed by the implementation agent.
