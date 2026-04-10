@@ -9,7 +9,9 @@ use crate::registry::RepoRegistry;
 
 use super::messages::*;
 use super::triage_tracker::TriageTracker;
-use super::{github_actor, issue_actor, nudge_actor, prune_actor, spawn_actor, sync_actor};
+use super::{
+    github_actor, issue_actor, nudge_actor, prune_actor, review_actor, spawn_actor, sync_actor,
+};
 
 /// Timer info for display in the ps watch footer.
 #[derive(Debug, Clone)]
@@ -78,6 +80,11 @@ pub struct DaemonRuntime {
     nudge_tx: flume::Sender<NudgeRequest>,
     nudge_rx: flume::Receiver<NudgeComplete>,
 
+    // Review actor
+    review_tx: flume::Sender<ReviewRequest>,
+    review_rx: flume::Receiver<ReviewComplete>,
+    review_pending: HashMap<String, bool>,
+
     config: RuntimeConfig,
 
     /// Tracks in-flight triage workers to prevent duplicate spawns.
@@ -117,6 +124,10 @@ impl DaemonRuntime {
         let (nudge_resp_tx, nudge_resp_rx) = flume::bounded(16);
         let nudge_handle = nudge_actor::spawn(nudge_req_rx, nudge_resp_tx);
 
+        let (review_req_tx, review_req_rx) = flume::bounded(4);
+        let (review_resp_tx, review_resp_rx) = flume::bounded(4);
+        let review_handle = review_actor::spawn(review_req_rx, review_resp_tx);
+
         // Start with past timestamps so first tick triggers sync/poll immediately
         let past = Instant::now();
 
@@ -148,6 +159,10 @@ impl DaemonRuntime {
             nudge_tx: nudge_req_tx,
             nudge_rx: nudge_resp_rx,
 
+            review_tx: review_req_tx,
+            review_rx: review_resp_rx,
+            review_pending: HashMap::new(),
+
             config,
             triage_tracker: TriageTracker::new(),
             first_poll_done: false,
@@ -158,6 +173,7 @@ impl DaemonRuntime {
                 prune_handle,
                 spawn_handle,
                 nudge_handle,
+                review_handle,
             ],
         }
     }
@@ -410,6 +426,36 @@ impl DaemonRuntime {
             results.push(resp);
         }
         results
+    }
+
+    /// Send a review request to the review actor (non-blocking).
+    /// Only one review per worker at a time; drops if already pending.
+    pub fn send_review(&mut self, req: ReviewRequest) {
+        if self.review_pending.contains_key(&req.worker_key) {
+            tracing::debug!(worker = %req.worker_key, "review already pending, skipping");
+            return;
+        }
+        let key = req.worker_key.clone();
+        if self.review_tx.try_send(req).is_ok() {
+            self.review_pending.insert(key, true);
+        } else {
+            tracing::debug!("review channel full, dropping review request");
+        }
+    }
+
+    /// Drain all completed review responses (non-blocking).
+    pub fn drain_reviews(&mut self) -> Vec<ReviewComplete> {
+        let mut results = Vec::new();
+        while let Ok(resp) = self.review_rx.try_recv() {
+            self.review_pending.remove(&resp.worker_key);
+            results.push(resp);
+        }
+        results
+    }
+
+    /// Whether a review is pending for a given worker.
+    pub fn review_pending(&self, worker_key: &str) -> bool {
+        self.review_pending.contains_key(worker_key)
     }
 
     /// Get runtime config reference.
