@@ -484,6 +484,89 @@ impl Repo {
         Err(Error::MergeConflict(remote_ref))
     }
 
+    /// Fast-forward a local branch ref to match its remote tracking branch,
+    /// without requiring the branch to be checked out or a worktree to exist.
+    ///
+    /// This operates directly on the branch reference (refs/heads/<branch>),
+    /// so it works from the main repo even when no worktree exists for the branch.
+    ///
+    /// Returns `true` if the ref was advanced, `false` if already up to date.
+    /// Returns `Err(MergeConflict)` if the local ref is not an ancestor of remote.
+    pub fn fast_forward_branch_ref(&self, branch: &str) -> Result<bool> {
+        let remote_ref_name = format!("origin/{}", branch);
+        let remote_branch = self
+            .inner
+            .find_branch(&remote_ref_name, git2::BranchType::Remote)
+            .map_err(|_| Error::BranchNotFound(remote_ref_name.clone()))?;
+
+        let remote_oid = remote_branch
+            .get()
+            .target()
+            .ok_or_else(|| Error::BranchNotFound(remote_ref_name.clone()))?;
+
+        let local_ref_name = format!("refs/heads/{}", branch);
+
+        // Check if local branch exists
+        let local_oid = match self.inner.find_reference(&local_ref_name) {
+            Ok(r) => match r.target() {
+                Some(oid) => oid,
+                None => return Err(Error::BranchNotFound(branch.to_string())),
+            },
+            Err(_) => {
+                // Local branch doesn't exist — create it pointing at remote
+                self.inner.reference(
+                    &local_ref_name,
+                    remote_oid,
+                    false,
+                    &format!("create {} from {}", branch, remote_ref_name),
+                )?;
+                return Ok(true);
+            }
+        };
+
+        // Already up to date
+        if local_oid == remote_oid {
+            return Ok(false);
+        }
+
+        // Verify fast-forward: local must be ancestor of remote
+        if !self.inner.graph_descendant_of(remote_oid, local_oid)? {
+            return Err(Error::MergeConflict(remote_ref_name));
+        }
+
+        // Advance the local ref
+        self.inner.reference(
+            &local_ref_name,
+            remote_oid,
+            true,
+            &format!("fast-forward {} to {}", branch, remote_ref_name),
+        )?;
+
+        Ok(true)
+    }
+
+    /// Push a branch to origin using a subprocess.
+    ///
+    /// Uses `git push origin <branch>` from the given repo path.
+    /// This is used after bare ref updates (no worktree) to sync with the remote.
+    pub fn push_branch(repo_path: &std::path::Path, branch: &str) -> Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["push", "origin", branch])
+            .current_dir(repo_path)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(Error::Custom(format!(
+                "git push origin {} failed: {}",
+                branch, stderr
+            )));
+        }
+
+        Ok(())
+    }
+
     // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
@@ -638,4 +721,302 @@ pub fn ensure_worktrees_excluded(git_common_dir: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Helper: create a git repo with an initial commit.
+    fn init_repo(dir: &Path) {
+        Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "init", "-q"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+    }
+
+    /// Helper: add self as remote "origin" (for fetch to work locally).
+    fn add_self_remote(dir: &Path) {
+        let path_str = dir.to_string_lossy().to_string();
+        Command::new("git")
+            .args(["remote", "add", "origin", &path_str])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+    }
+
+    /// Helper: create a bare "upstream" repo that acts as origin.
+    fn create_bare_upstream(dir: &Path) -> TempDir {
+        let upstream = TempDir::new().unwrap();
+        Command::new("git")
+            .args(["clone", "--bare", "-q"])
+            .arg(dir)
+            .arg(upstream.path())
+            .output()
+            .unwrap();
+
+        // Remove existing origin if any, then add pointing to bare repo
+        let _ = Command::new("git")
+            .args(["remote", "remove", "origin"])
+            .current_dir(dir)
+            .output();
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(upstream.path())
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+
+        upstream
+    }
+
+    #[test]
+    fn fast_forward_branch_ref_up_to_date() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+        add_self_remote(dir.path());
+
+        Command::new("git")
+            .args(["branch", "parent-branch"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let repo = Repo::open(dir.path()).unwrap();
+        let result = repo.fast_forward_branch_ref("parent-branch").unwrap();
+        assert!(!result, "should be up to date");
+    }
+
+    #[test]
+    fn fast_forward_branch_ref_advances_ref() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+
+        // Create parent-branch at the initial commit
+        Command::new("git")
+            .args(["branch", "parent-branch"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Add a new commit on main
+        Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "child-work", "-q"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        add_self_remote(dir.path());
+
+        // Get SHAs
+        let head_sha = String::from_utf8_lossy(
+            &Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(dir.path())
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+
+        let parent_sha = String::from_utf8_lossy(
+            &Command::new("git")
+                .args(["rev-parse", "HEAD~1"])
+                .current_dir(dir.path())
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+
+        // Set origin/parent-branch to HEAD (new commit)
+        Command::new("git")
+            .args(["branch", "-f", "parent-branch", &head_sha])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Reset local parent-branch to old commit
+        Command::new("git")
+            .args(["branch", "-f", "parent-branch", &parent_sha])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let repo = Repo::open(dir.path()).unwrap();
+        let result = repo.fast_forward_branch_ref("parent-branch").unwrap();
+        assert!(result, "should have advanced");
+
+        // Verify local matches remote
+        let local_ref = repo
+            .inner
+            .find_reference("refs/heads/parent-branch")
+            .unwrap();
+        let remote_ref = repo
+            .inner
+            .find_branch("origin/parent-branch", git2::BranchType::Remote)
+            .unwrap();
+        assert_eq!(local_ref.target(), remote_ref.get().target());
+    }
+
+    #[test]
+    fn fast_forward_branch_ref_creates_missing_local() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+        add_self_remote(dir.path());
+
+        // Create and fetch so origin/feature exists
+        Command::new("git")
+            .args(["branch", "feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Delete local branch
+        Command::new("git")
+            .args(["branch", "-D", "feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let repo = Repo::open(dir.path()).unwrap();
+        let result = repo.fast_forward_branch_ref("feature").unwrap();
+        assert!(result, "should have created local branch");
+
+        // Verify local branch was created matching remote
+        let local_ref = repo.inner.find_reference("refs/heads/feature").unwrap();
+        let remote_ref = repo
+            .inner
+            .find_branch("origin/feature", git2::BranchType::Remote)
+            .unwrap();
+        assert_eq!(local_ref.target(), remote_ref.get().target());
+    }
+
+    #[test]
+    fn fast_forward_branch_ref_diverged_errors() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+
+        Command::new("git")
+            .args(["branch", "parent-branch"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        add_self_remote(dir.path());
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Add a local-only commit to parent-branch
+        Command::new("git")
+            .args(["checkout", "-q", "parent-branch"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "local-only", "-q"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["checkout", "-q", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // origin/parent-branch is at init commit, local is at init+1
+        // origin is NOT a descendant of local — it's an ancestor.
+        // graph_descendant_of(remote, local) = false → MergeConflict
+        let repo = Repo::open(dir.path()).unwrap();
+        let result = repo.fast_forward_branch_ref("parent-branch");
+        assert!(result.is_err(), "should error on diverged branches");
+    }
+
+    #[test]
+    fn push_branch_works_with_bare_upstream() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+        let _upstream = create_bare_upstream(dir.path());
+
+        Command::new("git")
+            .args(["checkout", "-q", "-b", "test-push"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "push-test", "-q"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        Repo::push_branch(dir.path(), "test-push").unwrap();
+
+        // Verify origin has the branch
+        Command::new("git")
+            .args(["fetch", "-q", "origin"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let repo = Repo::open(dir.path()).unwrap();
+        let remote_branch = repo
+            .inner
+            .find_branch("origin/test-push", git2::BranchType::Remote);
+        assert!(
+            remote_branch.is_ok(),
+            "remote branch should exist after push"
+        );
+    }
 }
