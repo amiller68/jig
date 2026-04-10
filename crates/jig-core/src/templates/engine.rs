@@ -274,6 +274,21 @@ mod tests {
     }
 
     #[test]
+    fn render_spawn_preamble() {
+        let engine = TemplateEngine::new();
+        let mut ctx = TemplateContext::new();
+        ctx.set_num("max_nudges", 3);
+        ctx.set("task_context", "Implement feature X");
+
+        let result = engine.render("spawn-preamble", &ctx).unwrap();
+        assert!(result.contains("AUTONOMOUS MODE"));
+        assert!(result.contains("nudge messages (up to 3)"));
+        assert!(result.contains("Implement feature X"));
+        assert!(result.contains("AUTOMATED REVIEW"));
+        assert!(result.contains("jig review respond --review"));
+    }
+
+    #[test]
     fn render_triage_prompt_with_all_fields() {
         let engine = TemplateEngine::new();
         let mut ctx = TemplateContext::new();

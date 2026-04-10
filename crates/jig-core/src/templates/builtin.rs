@@ -26,6 +26,30 @@ IF YOU GET STUCK:
 - If unsure about an approach, pick the simplest one and go
 - If truly blocked, explain what's blocking you so the nudge system can relay it
 
+AUTOMATED REVIEW: After you create a draft PR, an automated review agent may review your code. If it requests changes, you'll receive a nudge with the path to a review file (e.g. .jig/reviews/001.md). When that happens:
+
+1. Read the review file to see the findings
+2. Address each finding — fix issues or prepare explanations
+3. Submit your response: jig review respond --review <N> (pipe your response markdown to stdin)
+4. Commit and push your changes
+5. The next review cycle triggers automatically on push
+
+Response format (pipe to jig review respond --review N):
+
+# Response to Review NNN
+
+## Addressed
+- `file:line` — finding description: what you did to fix it
+
+## Disputed
+- `file:line` — finding description: why you disagree
+
+## Deferred
+- `file:line` — finding description: why this is out of scope
+
+## Notes
+Any additional context.
+
 TASK:
 {{task_context}}
 "#;
