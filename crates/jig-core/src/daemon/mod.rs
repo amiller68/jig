@@ -234,7 +234,7 @@ impl<'a> Daemon<'a> {
         workers_state: &WorkersState,
         registry: &RepoRegistry,
     ) -> Vec<(String, std::path::PathBuf, String)> {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         let mut result = Vec::new();
 
         for entry in workers_state.workers.values() {
@@ -262,7 +262,6 @@ impl<'a> Daemon<'a> {
     /// If new commits were pulled, nudge the parent worker via tmux.
     fn update_parent_worktrees(
         &self,
-        worker_list: &[(String, String)],
         workers_state: &WorkersState,
         registry: &RepoRegistry,
         runtime: &DaemonRuntime,
@@ -282,27 +281,20 @@ impl<'a> Daemon<'a> {
             return;
         }
 
-        // Find parent workers: workers whose branch matches a parent_branch
-        // and whose worktree exists on disk.
+        // Find parent workers by matching branch name from workers_state
+        // (avoids re-reading event logs).
         for (repo_name, parent_branch) in &parent_branches {
-            // Find the parent worker in worker_list by matching branch name.
-            // Read events once and reuse the branch name for the nudge target.
-            let parent_worker = worker_list.iter().find_map(|(rn, wn)| {
-                if rn != repo_name {
-                    return None;
-                }
-                let events = EventLog::for_worker(rn, wn)
-                    .and_then(|log| log.read_all())
-                    .unwrap_or_default();
-                let branch = extract_branch_name(&events, wn);
-                if branch == *parent_branch {
-                    Some((rn, wn, branch))
+            let parent_worker = workers_state.workers.iter().find_map(|(key, entry)| {
+                if &entry.repo == repo_name && entry.branch == *parent_branch {
+                    // Extract worker name from the key (format: "repo/worker")
+                    let worker_name = key.split('/').nth(1).unwrap_or(key);
+                    Some((worker_name.to_string(), entry.branch.clone()))
                 } else {
                     None
                 }
             });
 
-            let (repo_name, worker_name, branch_name) = match parent_worker {
+            let (worker_name, branch_name) = match parent_worker {
                 Some(pw) => pw,
                 None => continue,
             };
@@ -312,14 +304,14 @@ impl<'a> Daemon<'a> {
                 None => continue,
             };
 
-            let worktree_path = crate::config::worktree_path(&repo_entry.path, worker_name);
+            let worktree_path = crate::config::worktree_path(&repo_entry.path, &worker_name);
             if !worktree_path.exists() {
                 continue;
             }
 
             // Run git pull --ff-only in the parent worktree with a 30-second
             // timeout to avoid blocking the tick thread indefinitely.
-            let child = match std::process::Command::new("git")
+            let mut child = match std::process::Command::new("git")
                 .args(["pull", "--ff-only"])
                 .current_dir(&worktree_path)
                 .stdin(std::process::Stdio::null())
@@ -339,15 +331,41 @@ impl<'a> Daemon<'a> {
                 }
             };
 
-            // Use a channel to wait for the child with a timeout.
+            // Poll with timeout, matching the pattern from tmux.rs run_tmux().
             const PULL_TIMEOUT: Duration = Duration::from_secs(30);
-            let (tx, rx) = flume::bounded(1);
-            std::thread::spawn(move || {
-                let _ = tx.send(child.wait_with_output());
-            });
+            let start = std::time::Instant::now();
+            let poll_interval = Duration::from_millis(100);
 
-            match rx.recv_timeout(PULL_TIMEOUT) {
-                Ok(Ok(output)) if output.status.success() => {
+            let output = loop {
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        break child.wait_with_output();
+                    }
+                    Ok(None) => {
+                        if start.elapsed() >= PULL_TIMEOUT {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            tracing::warn!(
+                                worker = %worker_name,
+                                repo = %repo_name,
+                                "git pull timed out in parent worktree ({}s limit)",
+                                PULL_TIMEOUT.as_secs()
+                            );
+                            break Err(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "git pull timed out",
+                            ));
+                        }
+                        std::thread::sleep(poll_interval);
+                    }
+                    Err(e) => {
+                        break Err(e);
+                    }
+                }
+            };
+
+            match output {
+                Ok(output) if output.status.success() => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     // "Already up to date." means no new commits
                     if stdout.contains("Already up to date") {
@@ -368,7 +386,7 @@ impl<'a> Daemon<'a> {
 
                     // Nudge the parent worker to let it know about new commits
                     let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                    let target = TmuxTarget::new(&session, worker_name);
+                    let target = TmuxTarget::new(&session, &worker_name);
 
                     if self.tmux.has_window(&target) {
                         let key = format!("{}/{}", repo_name, worker_name);
@@ -379,7 +397,7 @@ impl<'a> Daemon<'a> {
 
                         runtime.send_nudge(messages::NudgeRequest {
                             session,
-                            window: branch_name.clone(),
+                            window: branch_name,
                             message,
                             nudge_type_key: "parent_update".to_string(),
                             is_stuck: false,
@@ -389,7 +407,7 @@ impl<'a> Daemon<'a> {
                         });
                     }
                 }
-                Ok(Ok(output)) => {
+                Ok(output) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     tracing::warn!(
                         worker = %worker_name,
@@ -398,20 +416,15 @@ impl<'a> Daemon<'a> {
                         stderr.trim()
                     );
                 }
-                Ok(Err(e)) => {
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    // Already logged above when killing the process
+                }
+                Err(e) => {
                     tracing::warn!(
                         worker = %worker_name,
                         repo = %repo_name,
                         "git pull failed in parent worktree: {}",
                         e
-                    );
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        worker = %worker_name,
-                        repo = %repo_name,
-                        "git pull timed out in parent worktree ({}s limit)",
-                        PULL_TIMEOUT.as_secs()
                     );
                 }
             }
@@ -494,7 +507,7 @@ impl<'a> Daemon<'a> {
 
         // Parent-update phase: after sync, check if parent worktrees have new
         // remote commits (from child PR merges) and pull them in.
-        self.update_parent_worktrees(&worker_list, &workers_state, &registry, runtime);
+        self.update_parent_worktrees(&workers_state, &registry, runtime);
 
         runtime.drain_github();
         let issue_response = runtime.drain_issues();
