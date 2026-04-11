@@ -678,4 +678,211 @@ mod tests {
         let child = make_child_issue("ENG-101", IssueStatus::Planned, "ENG-100");
         assert!(!is_active_parent(&child));
     }
+
+    // -- Blocked-by DAG walking tests for parent-child children ---------------
+
+    /// Integration test: blocked-by DAG walking combined with parent-readiness
+    /// for the A→B→C chain scenario.
+    ///
+    /// Uses a MockProvider to simulate the Linear/file provider, and a real git
+    /// repo to test `is_child_spawnable`'s remote branch check.
+    #[test]
+    fn blocked_by_dag_with_parent_readiness() {
+        use std::process::Command as StdCommand;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path();
+
+        // Init a git repo with self-referencing remote so origin/ refs work
+        let run = |args: &[&str]| {
+            StdCommand::new("git")
+                .args(args)
+                .current_dir(repo_root)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "test@test.com")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "test@test.com")
+                .output()
+                .expect("git command failed");
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+        run(&["remote", "add", "origin", repo_root.to_str().unwrap()]);
+
+        // Create parent branch and push to origin
+        let parent_branch = "al/parent-epic";
+        run(&["branch", parent_branch]);
+        run(&["fetch", "origin"]);
+
+        let parent_meta = |status: IssueStatus| ParentIssue {
+            id: "ENG-100".to_string(),
+            title: "Parent Epic".to_string(),
+            branch_name: Some(parent_branch.to_string()),
+            status: Some(status),
+            body: None,
+        };
+
+        // Child A: no deps
+        let child_a = Issue {
+            id: "ENG-101".to_string(),
+            title: "Child A".to_string(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec!["auto".to_string()],
+            branch_name: None,
+            parent: Some(parent_meta(IssueStatus::InProgress)),
+        };
+
+        // Child B: blocked by A
+        let child_b = Issue {
+            depends_on: vec!["ENG-101".to_string()],
+            id: "ENG-102".to_string(),
+            title: "Child B".to_string(),
+            ..child_a.clone()
+        };
+
+        // Child C: blocked by B
+        let child_c = Issue {
+            depends_on: vec!["ENG-102".to_string()],
+            id: "ENG-103".to_string(),
+            title: "Child C".to_string(),
+            ..child_a.clone()
+        };
+
+        // --- Tick 1: A=Planned, B=Planned(blocked by A), C=Planned(blocked by B) ---
+        let provider = MockProvider::new(vec![child_a.clone(), child_b.clone(), child_c.clone()]);
+        let labels = vec!["auto".to_string()];
+        let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
+        let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
+        assert!(ids.contains(&"ENG-101"), "tick 1: A spawnable");
+        assert!(!ids.contains(&"ENG-102"), "tick 1: B blocked by A");
+        assert!(!ids.contains(&"ENG-103"), "tick 1: C blocked by B");
+
+        // --- Tick 2: A=Complete, B now unblocked ---
+        let child_a_done = Issue {
+            status: IssueStatus::Complete,
+            ..child_a.clone()
+        };
+        let provider =
+            MockProvider::new(vec![child_a_done.clone(), child_b.clone(), child_c.clone()]);
+        let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
+        let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
+        assert!(!ids.contains(&"ENG-101"), "tick 2: A already Complete");
+        assert!(ids.contains(&"ENG-102"), "tick 2: B spawnable");
+        assert!(!ids.contains(&"ENG-103"), "tick 2: C still blocked");
+
+        // --- Tick 3: B=Complete, C now unblocked ---
+        let child_b_done = Issue {
+            status: IssueStatus::Complete,
+            ..child_b.clone()
+        };
+        let provider = MockProvider::new(vec![
+            child_a_done.clone(),
+            child_b_done.clone(),
+            child_c.clone(),
+        ]);
+        let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
+        let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
+        assert!(ids.contains(&"ENG-103"), "tick 3: C spawnable");
+        assert_eq!(ids.len(), 1, "tick 3: only C left");
+
+        // --- Tick 4: C=Complete, nothing left ---
+        let child_c_done = Issue {
+            status: IssueStatus::Complete,
+            ..child_c.clone()
+        };
+        let provider = MockProvider::new(vec![child_a_done, child_b_done, child_c_done]);
+        let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
+        assert!(spawnable.is_empty(), "tick 4: no children left");
+    }
+
+    /// Verify that `is_child_spawnable` blocks children when parent is not InProgress.
+    #[test]
+    fn is_child_spawnable_requires_parent_in_progress() {
+        let child = make_child_issue("ENG-101", IssueStatus::Planned, "ENG-100");
+        // Default make_child_issue sets parent status to InProgress but no branch
+        // Since there's no repo, is_child_spawnable should fail on branch check.
+        // Here we test the status check by using a temp dir (no git repo).
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Child with parent InProgress but no remote branch → false
+        assert!(!is_child_spawnable(&child, tmp.path()));
+
+        // Child with parent Planned → false
+        let child_parent_planned = Issue {
+            parent: Some(ParentIssue {
+                id: "ENG-100".to_string(),
+                title: "Parent".to_string(),
+                branch_name: Some("al/parent".to_string()),
+                status: Some(IssueStatus::Planned),
+                body: None,
+            }),
+            ..child.clone()
+        };
+        assert!(!is_child_spawnable(&child_parent_planned, tmp.path()));
+
+        // Non-child issue → always true
+        let standalone = make_issue("ENG-200", IssueStatus::Planned, vec![]);
+        assert!(is_child_spawnable(&standalone, tmp.path()));
+    }
+
+    /// Verify that blocked-by gating in `collect_spawnable` works for standalone
+    /// (non-parent) issues — no regression from parent-child code paths.
+    #[test]
+    fn blocked_by_dag_standalone_no_regression() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // A — no deps
+        let step_a = Issue {
+            id: "ENG-201".to_string(),
+            title: "Step A".to_string(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec!["auto".to_string()],
+            branch_name: None,
+            parent: None,
+        };
+
+        // B — blocked by A
+        let step_b = Issue {
+            id: "ENG-202".to_string(),
+            title: "Step B".to_string(),
+            depends_on: vec!["ENG-201".to_string()],
+            ..step_a.clone()
+        };
+
+        let provider = MockProvider::new(vec![step_a.clone(), step_b.clone()]);
+        let labels = vec!["auto".to_string()];
+        let spawnable = collect_spawnable(&provider, &labels, tmp.path(), "test", 10, &[]);
+        let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
+        assert!(ids.contains(&"ENG-201"), "A spawnable");
+        assert!(!ids.contains(&"ENG-202"), "B blocked by A");
+
+        // Complete A → B spawnable
+        let step_a_done = Issue {
+            status: IssueStatus::Complete,
+            ..step_a
+        };
+        let provider = MockProvider::new(vec![step_a_done, step_b]);
+        let spawnable = collect_spawnable(&provider, &labels, tmp.path(), "test", 10, &[]);
+        let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
+        assert!(ids.contains(&"ENG-202"), "B now spawnable");
+    }
 }
