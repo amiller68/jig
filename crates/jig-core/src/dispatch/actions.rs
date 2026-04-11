@@ -39,4 +39,7 @@ pub enum Action {
 
     /// Archive worker and cleanup.
     Cleanup { worker_id: String },
+
+    /// Mark a linked issue as Complete after PR merge.
+    UpdateIssueStatus { worker_id: String, issue_id: String },
 }
