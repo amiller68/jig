@@ -6,6 +6,14 @@ How jig orchestrates multi-ticket epics using parent-child issue relationships.
 
 The parent issue owns the integration branch. Children do the work; the parent wraps up.
 
+```
+Parent (epic)     ──────────────────────────────────────────▶ wrap-up PR → main
+  │                                                           ▲
+  ├─ Child A (auto)   branch off parent ──▶ PR → parent      │
+  ├─ Child B (auto)   branch off parent ──▶ PR → parent ─────┘ (all merged)
+  └─ Child C (manual) branch off parent ──▶ PR → parent
+```
+
 ### Lifecycle
 
 1. **Setup**: User creates a parent issue (Todo) with child issues (Backlog), wiring `blocked-by` dependencies.
@@ -23,9 +31,92 @@ The parent issue owns the integration branch. Children do the work; the parent w
 - **Wrap-up timing**: Immediate on the first tick where all children are Complete + merged. No debounce.
 - **Parent's own code**: Allowed only as last-mile work during wrap-up. Parents must not block children.
 
-### Manual children
+## Auto vs Manual Children
 
-Not all children need the `auto` label. You can `jig spawn` a child manually, work on it, `jig pr` into the parent branch, and merge. The daemon counts the child toward wrap-up readiness regardless of who did the work.
+Choose between auto-spawned and manual children based on the nature of the work:
+
+| | Auto | Manual |
+|---|---|---|
+| **When to use** | Well-scoped, scriptable, independent tasks | Exploratory, sensitive, needs human judgment |
+| **Label** | Add `auto` label to the issue | No `auto` label |
+| **How spawned** | Daemon spawns automatically when deps clear | User runs `jig spawn --issue <child-id>` |
+| **Worker type** | Autonomous Claude Code agent | Human in a jig worktree (or manual agent) |
+| **Branch base** | Parent branch (automatic) | Parent branch (automatic via `jig spawn --issue`) |
+| **PR target** | Parent branch (automatic via `jig pr`) | Parent branch (automatic via `jig pr`) |
+| **Wrap-up readiness** | Counts when Complete + merged | Counts when Complete + merged |
+
+Both types count equally toward wrap-up readiness. The daemon tracks child completion regardless of who did the work.
+
+## Manual-Child Flow
+
+Step-by-step commands for working on a child issue manually.
+
+### 1. Create the child issue
+
+```bash
+# Create a child issue under the parent epic
+jig issues create "Investigate auth edge cases" \
+  --parent JIG-60 \
+  --category features
+```
+
+### 2. Spawn a worktree
+
+```bash
+# Spawn creates a worktree branched from the parent's integration branch
+jig spawn --issue JIG-64
+
+# Or, if using the file provider (no branch_name on parent), specify --base:
+jig spawn --issue features/investigate-auth --base origin/al/jig-60-parent-epic
+```
+
+The worktree is created from the parent branch. For Linear-backed issues, the parent branch is resolved automatically. For the file provider, use `--base` to specify the parent branch explicitly.
+
+### 3. Do the work
+
+```bash
+# Navigate to the worktree
+jig open <child-name>
+
+# Work normally — edit, commit, test
+cargo test
+git add -A && git commit -m "fix: handle auth edge case"
+```
+
+### 4. Create a PR targeting the parent branch
+
+```bash
+# From inside the worktree:
+jig pr
+
+# jig pr automatically detects the parent relationship and targets
+# the parent's branch instead of main.
+```
+
+### 5. Review and merge
+
+The PR targets the parent branch. After review and merge:
+- The daemon fast-forwards the parent branch to include the child's commits.
+- The child is counted toward wrap-up readiness.
+
+### 6. Mark complete
+
+```bash
+jig issues complete <child-id>
+```
+
+Or, if using Linear, the status syncs automatically when the PR merges.
+
+## PR Base Resolution
+
+`jig pr` resolves the PR base branch automatically:
+
+1. Detects the current worktree and looks up the associated worker in orchestrator state.
+2. Fetches the issue from the provider and checks for a parent relationship.
+3. If the issue has a parent with a `branch_name`, uses the parent branch as the PR base.
+4. Falls back to the repo's configured base branch (usually `origin/main`).
+
+This means child PRs always target the parent branch — no manual `--base` flag needed.
 
 ## Data model
 
@@ -48,10 +139,30 @@ The daemon uses `parent_branch` to:
 - Find parent worktrees for fast-forward pulls after child merges
 - Deliver `parent_update` nudges
 
+## Parent Worktree Auto-Update
+
+When a child PR is merged into the parent branch, the daemon automatically pulls the changes into the parent worktree (if one exists at wrap-up time):
+
+- Uses `git pull --ff-only` — never creates merge commits.
+- Sends a `parent_update` nudge to inform the parent worker of new commits.
+- Parent branch fetch failures are non-fatal.
+
+See [daemon.md](./daemon.md) for full details on the auto-update mechanism.
+
 ## Non-goals
 
 - **Nested parents** (epic of epics): undefined, future work.
 - **Parent cancellation**: undefined, future work.
+- **Parent blocking children**: Parents should not block children. The parent worker only runs at wrap-up time. If you need work done before children start, create it as a separate child (e.g., "T0: setup").
+
+## File Provider Limitations
+
+The file-based issue provider (`issues/` directory) does not store branch names on issues. This means:
+- The parent's `branch_name` is `None` when resolved from the file provider.
+- `jig spawn --issue <child>` falls back to the repo base branch unless `--base` is specified.
+- `jig pr` also cannot auto-resolve the parent branch for file-provider issues.
+
+For full parent-child orchestration, use the **Linear provider** which populates branch names from the API.
 
 ## Migration from the Old Model
 

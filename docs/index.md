@@ -29,7 +29,7 @@ Find the right doc by what you're working on. The **Sources** column tells you w
 | Document | Summary | Sources |
 |----------|---------|---------|
 | [daemon.md](./daemon.md) | Tick loop, actor threads, nudging, auto-spawn, auto-prune, PR monitoring | `crates/jig-core/src/daemon/*.rs` |
-| [parent-child.md](./parent-child.md) | Parent-as-integrator model, epic lifecycle, migration from old model | `crates/jig-core/src/daemon/mod.rs`, `crates/jig-core/src/daemon/issue_actor.rs`, `crates/jig-core/src/issues/types.rs` |
+| [Parent-Child Epics](./parent-child.md) | Parent-as-integrator model, auto vs manual children, wrap-up flow, migration | `crates/jig-core/src/spawn.rs`, `crates/jig-cli/src/commands/spawn.rs`, `crates/jig-cli/src/commands/pr.rs`, `crates/jig-core/src/daemon/issue_actor.rs` |
 | [Automated Review](./review/index.md) | Review agent, data model, trigger flow, comment routing | `crates/jig-core/src/review.rs`, `crates/jig-core/src/daemon/review_actor.rs`, `crates/jig-cli/src/commands/review/*.rs` |
 | [CLI Output Formatting](./cli/ui/STDOUT-FORMATTING.md) | Op trait pattern, Display impls, comfy-table usage, color conventions | `crates/jig-cli/src/op.rs`, `crates/jig-cli/src/ui.rs`, `crates/jig-cli/src/commands/*.rs` |
 
