@@ -289,7 +289,7 @@ No auto-retry on failure. Failed triage requires human attention.
 
 ### Persistence
 
-The tracker is in-memory only. On daemon restart, it rebuilds from active workers whose names start with `triage-`.
+The tracker persists to `~/.config/jig/state/triages.json` (atomic write via temp-file + rename). On daemon restart, `TriageTracker::load()` reads the file and reconciles each entry against its recorded `pid` — dropping entries whose process is no longer alive (checked via `kill(pid, 0)`).
 
 ## Parent branch auto-update
 

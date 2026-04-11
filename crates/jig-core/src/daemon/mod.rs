@@ -627,7 +627,7 @@ impl<'a> Daemon<'a> {
 
             // Stuck triage detection: check each active triage against its
             // repo's configured timeout (from [triage] timeout_seconds).
-            let stuck_ids: Vec<(String, String, String)> = {
+            let stuck_ids: Vec<(String, String)> = {
                 let mut stuck = Vec::new();
                 for entry in runtime.triage_tracker().stuck_entries() {
                     // Load per-repo triage timeout
@@ -636,29 +636,21 @@ impl<'a> Daemon<'a> {
                         .map(|toml| toml.triage.timeout_seconds)
                         .unwrap_or(600);
                     if now - entry.spawned_at > timeout {
-                        stuck.push((
-                            entry.issue_id.clone(),
-                            entry.worker_name.clone(),
-                            entry.repo_name.clone(),
-                        ));
+                        stuck.push((entry.issue_id.clone(), entry.repo_name.clone()));
                     }
                 }
                 stuck
             };
 
-            for (issue_id, worker_name, repo_name) in &stuck_ids {
+            for (issue_id, repo_name) in &stuck_ids {
                 tracing::warn!(
                     issue = %issue_id,
-                    worker = %worker_name,
                     "triage timed out, emitting NeedsIntervention"
                 );
                 let event = NotificationEvent::NeedsIntervention {
                     repo: repo_name.clone(),
-                    worker: worker_name.clone(),
-                    reason: format!(
-                        "Triage timed out for {} (worker: {})",
-                        issue_id, worker_name
-                    ),
+                    worker: issue_id.clone(),
+                    reason: format!("Triage timed out for {}", issue_id),
                 };
                 if let Err(e) = self.notifier.emit(event) {
                     tracing::warn!(
@@ -667,11 +659,8 @@ impl<'a> Daemon<'a> {
                     );
                 }
 
-                // Kill the worker's tmux window
-                let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                let target = TmuxTarget::new(&session, worker_name);
-                let _ = self.tmux.kill_window(&target);
-
+                // Note: subprocess termination for the stuck triage is
+                // handled by the triage_actor (JIG-50) via the persisted pid.
                 runtime.triage_tracker_mut().remove(issue_id);
             }
 
@@ -1129,13 +1118,20 @@ impl<'a> Daemon<'a> {
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
+                    // NOTE: pid, log_path, and prompt_path are populated by
+                    // the triage_actor once it spawns the subprocess
+                    // (JIG-50 / routing lives in a follow-up sub-issue).
+                    // Use the daemon's own pid as a placeholder so the entry
+                    // survives reconciliation until the daemon restarts.
                     runtime.triage_tracker_mut().register(
                         si.issue.id.clone(),
                         triage_tracker::TriageEntry {
-                            worker_name: si.worker_name.clone(),
-                            spawned_at: now,
                             issue_id: si.issue.id.clone(),
                             repo_name,
+                            spawned_at: now,
+                            pid: std::process::id(),
+                            log_path: std::path::PathBuf::new(),
+                            prompt_path: std::path::PathBuf::new(),
                         },
                     );
                     messages::TriageIssue {
@@ -2374,7 +2370,7 @@ where
     let notifier = make_notifier(&global_config)?;
     let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
 
-    let mut runtime = DaemonRuntime::new(runtime_config);
+    let mut runtime = DaemonRuntime::new(runtime_config)?;
     let quit = Arc::new(AtomicBool::new(false));
 
     // Install signal handler for graceful shutdown
