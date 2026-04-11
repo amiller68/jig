@@ -235,6 +235,19 @@ impl<'a> Daemon<'a> {
         }
     }
 
+    /// Returns `true` if a non-terminal worker already exists for the given issue ID.
+    ///
+    /// Used as a migration guard: when the daemon is about to spawn a parent
+    /// worker for wrap-up (all children complete), this check prevents
+    /// double-spawning if an old-model parent worker is still active.
+    pub fn has_active_parent_worker(workers_state: &WorkersState, issue_id: &str) -> bool {
+        workers_state.workers.values().any(|entry| {
+            let is_terminal =
+                entry.status == "merged" || entry.status == "archived" || entry.status == "failed";
+            !is_terminal && entry.issue.as_deref() == Some(issue_id)
+        })
+    }
+
     /// Collect parent branches from active workers that need to be fetched during sync.
     ///
     /// Returns (repo_name, repo_path, branch) tuples for each unique parent branch.
@@ -2596,5 +2609,68 @@ mod tests {
             ReviewVerdict::Approve => None,
         };
         assert_eq!(nudge_type, Some(NudgeType::AutoReview));
+    }
+
+    fn make_worker_entry(issue: Option<&str>, status: &str) -> WorkerEntry {
+        WorkerEntry {
+            repo: "test".to_string(),
+            branch: "main".to_string(),
+            status: status.to_string(),
+            issue: issue.map(|s| s.to_string()),
+            pr_url: None,
+            started_at: 1000,
+            last_event_at: 2000,
+            nudge_counts: HashMap::new(),
+            review_feedback_count: None,
+            parent_branch: None,
+            last_reviewed_sha: None,
+        }
+    }
+
+    #[test]
+    fn has_active_parent_worker_finds_running_worker() {
+        let mut state = WorkersState::default();
+        state.set_worker(
+            "test/parent-worker",
+            make_worker_entry(Some("ENG-100"), "running"),
+        );
+
+        assert!(Daemon::has_active_parent_worker(&state, "ENG-100"));
+    }
+
+    #[test]
+    fn has_active_parent_worker_ignores_terminal_statuses() {
+        for status in &["merged", "archived", "failed"] {
+            let mut state = WorkersState::default();
+            state.set_worker(
+                "test/parent-worker",
+                make_worker_entry(Some("ENG-100"), status),
+            );
+
+            assert!(
+                !Daemon::has_active_parent_worker(&state, "ENG-100"),
+                "status '{}' should be considered terminal",
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn has_active_parent_worker_no_match() {
+        let mut state = WorkersState::default();
+        state.set_worker(
+            "test/other-worker",
+            make_worker_entry(Some("ENG-200"), "running"),
+        );
+
+        assert!(!Daemon::has_active_parent_worker(&state, "ENG-100"));
+    }
+
+    #[test]
+    fn has_active_parent_worker_no_issue_field() {
+        let mut state = WorkersState::default();
+        state.set_worker("test/worker", make_worker_entry(None, "running"));
+
+        assert!(!Daemon::has_active_parent_worker(&state, "ENG-100"));
     }
 }
