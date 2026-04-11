@@ -132,6 +132,9 @@ pub struct IssueResponse {
     pub triageable: Vec<SpawnableIssue>,
     /// Parent integration branches created or verified this poll.
     pub parent_branches: Vec<ParentBranchResult>,
+    /// Parent issues ready for wrap-up (all children Complete + merged into the
+    /// parent integration branch).
+    pub wrapup: Vec<SpawnableIssue>,
 }
 
 /// Request sent to the spawn actor to create workers.
