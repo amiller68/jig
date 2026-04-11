@@ -138,6 +138,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
     let mut all_spawnable = Vec::new();
     let mut all_triageable = Vec::new();
     let mut all_parent_branches = Vec::new();
+    let mut all_wrapup = Vec::new();
 
     for (repo_root, base_branch) in &req.repos {
         let ctx = match RepoContext::from_path(repo_root) {
@@ -221,14 +222,29 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
                 &req.existing_workers,
             );
             spawnable.retain(|si| !is_active_parent(&si.issue));
+            remaining_budget = remaining_budget.saturating_sub(spawnable.len());
             all_spawnable.extend(spawnable);
         }
+
+        // Wrap-up path: collect parent issues whose children are all Complete
+        // and merged into the parent integration branch. A wrap-up worker runs
+        // against the parent branch to finalize integration and open the PR.
+        let wrapup = collect_wrapup_parents(
+            provider.as_ref(),
+            provider_kind,
+            repo_root,
+            &repo_name,
+            remaining_budget,
+            &req.existing_workers,
+        );
+        all_wrapup.extend(wrapup);
     }
 
     IssueResponse {
         spawnable: all_spawnable,
         triageable: all_triageable,
         parent_branches: all_parent_branches,
+        wrapup: all_wrapup,
     }
 }
 
@@ -284,6 +300,176 @@ fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
         .inner()
         .find_branch(&format!("origin/{branch}"), git2::BranchType::Remote);
     result.is_ok()
+}
+
+/// Collect parent issues that are ready for wrap-up spawning.
+///
+/// A parent is ready when:
+/// - It's InProgress with a branch name.
+/// - It has ≥1 child and every child is Complete.
+/// - Every child's branch is merged into (reachable from) the parent's branch.
+fn collect_wrapup_parents(
+    provider: &dyn IssueProvider,
+    provider_kind: ProviderKind,
+    repo_root: &Path,
+    repo_name: &str,
+    budget: usize,
+    existing_workers: &[(String, String)],
+) -> Vec<SpawnableIssue> {
+    let issues = match provider.list(&IssueFilter {
+        status: Some(IssueStatus::InProgress),
+        ..Default::default()
+    }) {
+        Ok(issues) => issues,
+        Err(e) => {
+            tracing::debug!(repo = %repo_name, error = %e, "failed to list issues for wrapup check");
+            return vec![];
+        }
+    };
+
+    let mut result = Vec::new();
+    let mut count = 0;
+
+    for issue in issues {
+        if count >= budget {
+            break;
+        }
+        // Only consider issues with children (parent issues).
+        if issue.children.is_empty() {
+            continue;
+        }
+        // Skip if a worker already exists for this parent.
+        let worker_name = derive_worker_name(&issue.id, issue.branch_name.as_deref());
+        if existing_workers.iter().any(|(_, wn)| wn == &worker_name) {
+            continue;
+        }
+        if !is_parent_ready_for_wrapup(&issue, repo_root) {
+            continue;
+        }
+        tracing::info!(
+            repo = %repo_name,
+            issue = %issue.id,
+            "parent issue ready for wrap-up spawn"
+        );
+        result.push(SpawnableIssue {
+            repo_root: repo_root.to_path_buf(),
+            issue,
+            worker_name,
+            provider_kind,
+            kind: SpawnKind::Wrapup,
+        });
+        count += 1;
+    }
+
+    result
+}
+
+/// Check if a parent issue is ready for wrap-up spawning.
+///
+/// Uses the eagerly-fetched `ChildIssue` metadata on `parent.children` to avoid
+/// additional provider calls. Returns `true` iff every child is `Complete` and
+/// every child branch is reachable from the parent branch tip on origin.
+pub fn is_parent_ready_for_wrapup(parent: &Issue, repo_root: &Path) -> bool {
+    let Some(parent_branch) = &parent.branch_name else {
+        tracing::debug!(
+            issue = %parent.id,
+            "parent not ready for wrapup: no branch name"
+        );
+        return false;
+    };
+
+    // All children must be Complete. Collect child branches for the git check.
+    let mut child_branches: Vec<(String, String)> = Vec::new();
+    for child in &parent.children {
+        if child.status != Some(IssueStatus::Complete) {
+            tracing::debug!(
+                parent = %parent.id,
+                child = %child.id,
+                status = ?child.status,
+                "parent not ready for wrapup: child not Complete"
+            );
+            return false;
+        }
+        let branch = match &child.branch_name {
+            Some(b) => b.clone(),
+            None => derive_worker_name(&child.id, None),
+        };
+        child_branches.push((child.id.clone(), branch));
+    }
+
+    let Ok(repo) = Repo::open(repo_root) else {
+        tracing::debug!(
+            issue = %parent.id,
+            "parent not ready for wrapup: failed to open repo"
+        );
+        return false;
+    };
+
+    // Resolve parent branch tip on origin — the integration branch is a
+    // remote-only ref for the daemon, so we require the origin copy.
+    let parent_ref = format!("origin/{}", parent_branch);
+    let parent_oid = match repo
+        .inner()
+        .find_branch(&parent_ref, git2::BranchType::Remote)
+    {
+        Ok(branch) => match branch.get().target() {
+            Some(oid) => oid,
+            None => {
+                tracing::debug!(
+                    issue = %parent.id,
+                    branch = %parent_ref,
+                    "parent not ready for wrapup: parent branch has no target"
+                );
+                return false;
+            }
+        },
+        Err(_) => {
+            tracing::debug!(
+                issue = %parent.id,
+                branch = %parent_ref,
+                "parent not ready for wrapup: parent branch not found on remote"
+            );
+            return false;
+        }
+    };
+
+    for (child_id, child_branch) in &child_branches {
+        if !is_branch_merged_into(repo.inner(), child_branch, parent_oid) {
+            tracing::debug!(
+                parent = %parent.id,
+                child = %child_id,
+                branch = %child_branch,
+                "parent not ready for wrapup: child branch not merged"
+            );
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Check if a branch's tip is reachable from (merged into) a target commit.
+///
+/// Tries `origin/{branch}` first, then falls back to the local `{branch}` ref.
+fn is_branch_merged_into(repo: &git2::Repository, branch: &str, target_oid: git2::Oid) -> bool {
+    let remote_ref = format!("origin/{}", branch);
+    if let Ok(remote_branch) = repo.find_branch(&remote_ref, git2::BranchType::Remote) {
+        if let Some(child_oid) = remote_branch.get().target() {
+            return repo
+                .graph_descendant_of(target_oid, child_oid)
+                .unwrap_or(false);
+        }
+    }
+
+    if let Ok(local_branch) = repo.find_branch(branch, git2::BranchType::Local) {
+        if let Some(child_oid) = local_branch.get().target() {
+            return repo
+                .graph_descendant_of(target_oid, child_oid)
+                .unwrap_or(false);
+        }
+    }
+
+    false
 }
 
 /// Returns `true` if the issue is an active parent — i.e. it has ≥1 child in
@@ -884,5 +1070,218 @@ mod tests {
         let spawnable = collect_spawnable(&provider, &labels, tmp.path(), "test", 10, &[]);
         let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
         assert!(ids.contains(&"ENG-202"), "B now spawnable");
+    }
+
+    // -- Wrap-up readiness tests ---------------------------------------------
+
+    /// Set up a self-remote git repo with a parent branch and merged children.
+    /// Returns (repo_root, merged_child_branches).
+    fn setup_wrapup_repo(child_names: &[&str], merged: &[&str]) -> (tempfile::TempDir, String) {
+        use std::process::Command as StdCommand;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path();
+
+        let git = |args: &[&str]| {
+            let out = StdCommand::new("git")
+                .args(args)
+                .current_dir(repo_root)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "test@test.com")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "test@test.com")
+                .output()
+                .expect("git command failed");
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        git(&["init", "-q", "-b", "main"]);
+        git(&[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+        git(&["remote", "add", "origin", repo_root.to_str().unwrap()]);
+
+        let parent_branch = "al/epic-parent";
+        git(&["checkout", "-b", parent_branch]);
+        git(&[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "parent init",
+        ]);
+
+        for child in child_names {
+            git(&["checkout", parent_branch]);
+            git(&["checkout", "-b", child]);
+            git(&[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                &format!("child {}", child),
+            ]);
+
+            if merged.contains(child) {
+                git(&["checkout", parent_branch]);
+                git(&[
+                    "-c",
+                    "commit.gpgsign=false",
+                    "merge",
+                    "--no-ff",
+                    "-q",
+                    "-m",
+                    &format!("merge {}", child),
+                    child,
+                ]);
+            }
+        }
+
+        git(&["checkout", parent_branch]);
+        git(&["fetch", "origin"]);
+
+        (tmp, parent_branch.to_string())
+    }
+
+    fn make_parent_with_children(id: &str, branch: &str, children: Vec<ChildIssue>) -> Issue {
+        Issue {
+            id: id.to_string(),
+            title: format!("Epic {}", id),
+            status: IssueStatus::InProgress,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children,
+            labels: vec![],
+            branch_name: Some(branch.to_string()),
+            parent: None,
+        }
+    }
+
+    #[test]
+    fn wrapup_ready_all_children_complete_and_merged() {
+        let (tmp, parent_branch) =
+            setup_wrapup_repo(&["child-1", "child-2"], &["child-1", "child-2"]);
+        let parent = make_parent_with_children(
+            "ENG-100",
+            &parent_branch,
+            vec![
+                ChildIssue {
+                    id: "ENG-101".into(),
+                    status: Some(IssueStatus::Complete),
+                    branch_name: Some("child-1".into()),
+                },
+                ChildIssue {
+                    id: "ENG-102".into(),
+                    status: Some(IssueStatus::Complete),
+                    branch_name: Some("child-2".into()),
+                },
+            ],
+        );
+        assert!(is_parent_ready_for_wrapup(&parent, tmp.path()));
+    }
+
+    #[test]
+    fn wrapup_not_ready_child_not_complete() {
+        let (tmp, parent_branch) = setup_wrapup_repo(&["child-1"], &["child-1"]);
+        let parent = make_parent_with_children(
+            "ENG-100",
+            &parent_branch,
+            vec![ChildIssue {
+                id: "ENG-101".into(),
+                status: Some(IssueStatus::InProgress),
+                branch_name: Some("child-1".into()),
+            }],
+        );
+        assert!(!is_parent_ready_for_wrapup(&parent, tmp.path()));
+    }
+
+    #[test]
+    fn wrapup_not_ready_child_branch_not_merged() {
+        // child-2 is created but NOT merged into the parent branch
+        let (tmp, parent_branch) = setup_wrapup_repo(&["child-1", "child-2"], &["child-1"]);
+        let parent = make_parent_with_children(
+            "ENG-100",
+            &parent_branch,
+            vec![
+                ChildIssue {
+                    id: "ENG-101".into(),
+                    status: Some(IssueStatus::Complete),
+                    branch_name: Some("child-1".into()),
+                },
+                ChildIssue {
+                    id: "ENG-102".into(),
+                    status: Some(IssueStatus::Complete),
+                    branch_name: Some("child-2".into()),
+                },
+            ],
+        );
+        assert!(!is_parent_ready_for_wrapup(&parent, tmp.path()));
+    }
+
+    #[test]
+    fn wrapup_not_ready_no_parent_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = Issue {
+            branch_name: None,
+            ..make_parent_with_children(
+                "ENG-100",
+                "ignored",
+                vec![ChildIssue {
+                    id: "ENG-101".into(),
+                    status: Some(IssueStatus::Complete),
+                    branch_name: Some("child-1".into()),
+                }],
+            )
+        };
+        assert!(!is_parent_ready_for_wrapup(&parent, tmp.path()));
+    }
+
+    #[test]
+    fn collect_wrapup_skips_existing_worker() {
+        let (tmp, parent_branch) = setup_wrapup_repo(&["child-1"], &["child-1"]);
+        let parent = make_parent_with_children(
+            "ENG-100",
+            &parent_branch,
+            vec![ChildIssue {
+                id: "ENG-101".into(),
+                status: Some(IssueStatus::Complete),
+                branch_name: Some("child-1".into()),
+            }],
+        );
+        let provider = MockProvider::new(vec![parent.clone()]);
+
+        // First call: should find wrap-up candidate.
+        let wrapup1 =
+            collect_wrapup_parents(&provider, ProviderKind::File, tmp.path(), "r", 10, &[]);
+        assert_eq!(wrapup1.len(), 1);
+        assert_eq!(wrapup1[0].kind, SpawnKind::Wrapup);
+
+        // Second call: existing worker → skip.
+        let worker_name = derive_worker_name(&parent.id, parent.branch_name.as_deref());
+        let existing = vec![("r".to_string(), worker_name)];
+        let wrapup2 = collect_wrapup_parents(
+            &provider,
+            ProviderKind::File,
+            tmp.path(),
+            "r",
+            10,
+            &existing,
+        );
+        assert!(wrapup2.is_empty());
     }
 }

@@ -174,6 +174,42 @@ impl Worktree {
         session::pane_is_running(&self.session_name, &self.name)
     }
 
+    /// Launch a tmux window for this worktree using the wrap-up preamble.
+    ///
+    /// Used for parent epic workers spawned after all children are complete
+    /// and merged into the parent integration branch. The wrap-up preamble
+    /// renders the parent title and the list of completed child IDs.
+    pub fn launch_wrapup(
+        &self,
+        context: Option<&str>,
+        parent_title: &str,
+        children: &[String],
+    ) -> Result<()> {
+        let engine = TemplateEngine::new().with_repo(&self.repo_root);
+        let global_config = GlobalConfig::load()?;
+        let mut tpl_ctx = TemplateContext::new();
+        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
+        tpl_ctx.set("parent_title", parent_title);
+        tpl_ctx.set(
+            "task_context",
+            context.unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ),
+        );
+        tpl_ctx.set_list("children", children.to_vec());
+        let effective_context = engine.render("spawn-preamble-wrapup", &tpl_ctx)?;
+
+        let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
+        let agent_adapter =
+            adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+
+        session::create_window(&self.session_name, &self.name, &self.path)?;
+        let cmd = adapter::build_spawn_command(agent_adapter, Some(&effective_context));
+        session::send_keys(&self.session_name, &self.name, &cmd)?;
+
+        Ok(())
+    }
+
     /// Launch a tmux window for this worktree (always uses auto mode).
     pub fn launch(&self, context: Option<&str>) -> Result<()> {
         // Always render preamble

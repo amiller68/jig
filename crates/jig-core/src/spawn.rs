@@ -31,6 +31,10 @@ pub enum SpawnKind {
     Normal,
     /// Read-only triage agent — one-shot `--print` mode with restricted tools.
     Triage,
+    /// Wrap-up worker for a parent epic — spawned after all children are complete
+    /// and merged. Uses the wrap-up preamble template and the parent's own
+    /// integration branch as the base.
+    Wrapup,
 }
 
 /// Task status for ps command
@@ -80,15 +84,24 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         return Ok(());
     }
 
-    let base_branch = match input
-        .issue
-        .parent
-        .as_ref()
-        .and_then(|p| p.branch_name.as_deref())
-    {
-        Some(parent_branch) => format!("origin/{}", parent_branch),
-        None => RepoContext::resolve_base_branch_for(repo_root)
-            .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string()),
+    let base_branch = if input.kind == SpawnKind::Wrapup {
+        // Wrap-up workers use the parent's own integration branch as base.
+        // The branch already exists on origin with all child work merged in.
+        match input.issue.branch_name.as_deref() {
+            Some(branch) => format!("origin/{}", branch),
+            None => return Err("wrap-up spawn requires issue to have a branch_name".to_string()),
+        }
+    } else {
+        match input
+            .issue
+            .parent
+            .as_ref()
+            .and_then(|p| p.branch_name.as_deref())
+        {
+            Some(parent_branch) => format!("origin/{}", parent_branch),
+            None => RepoContext::resolve_base_branch_for(repo_root)
+                .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string()),
+        }
     };
 
     let copy_files = config::get_copy_files(repo_root).map_err(|e| e.to_string())?;
@@ -148,6 +161,13 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
             wt.launch(Some(&context)).map_err(|e| e.to_string())?;
             // Update issue status to InProgress to prevent duplicate spawning
             update_issue_status(repo_root, &input.issue.id);
+        }
+        SpawnKind::Wrapup => {
+            let child_ids: Vec<String> =
+                input.issue.children.iter().map(|c| c.id.clone()).collect();
+            wt.launch_wrapup(Some(&context), &input.issue.title, &child_ids)
+                .map_err(|e| e.to_string())?;
+            // Parent is already InProgress — no status update needed
         }
         SpawnKind::Triage => {
             // Triage is now handled by the triage_actor as a direct subprocess.

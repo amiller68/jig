@@ -539,6 +539,10 @@ impl<'a> Daemon<'a> {
             .as_ref()
             .map(|r| r.triageable.clone())
             .unwrap_or_default();
+        let mut wrapup = issue_response
+            .as_ref()
+            .map(|r| r.wrapup.clone())
+            .unwrap_or_default();
 
         // Log parent integration branch results from the issue actor.
         if let Some(ref resp) = issue_response {
@@ -581,6 +585,7 @@ impl<'a> Daemon<'a> {
                 let response = issue_actor::process_request(&req);
                 spawnable = response.spawnable;
                 triageable = response.triageable;
+                wrapup = response.wrapup;
                 // Log parent branch results from inline poll
                 for pb in &response.parent_branches {
                     if let Some(ref err) = pb.error {
@@ -602,6 +607,12 @@ impl<'a> Daemon<'a> {
                     tracing::info!(
                         count = triageable.len(),
                         "first-tick inline issue poll found triageable issues"
+                    );
+                }
+                if !wrapup.is_empty() {
+                    tracing::info!(
+                        count = wrapup.len(),
+                        "first-tick inline issue poll found wrapup parents"
                     );
                 }
             }
@@ -1083,7 +1094,26 @@ impl<'a> Daemon<'a> {
             self.daemon_config.repo_filter.as_deref(),
         );
 
-        // 5. Send spawnable issues to background spawn actor (non-blocking)
+        // 5. Send spawnable issues to background spawn actor (non-blocking).
+        //    Wrap-up parents are dispatched through the same actor. Skip any
+        //    wrap-up whose issue already has an active worker (old-model
+        //    migration guard — prevents double-spawning).
+        if !wrapup.is_empty() {
+            wrapup.retain(|si| {
+                let active = Self::has_active_parent_worker(&workers_state, &si.issue.id);
+                if active {
+                    tracing::info!(
+                        issue = %si.issue.id,
+                        worker = %si.worker_name,
+                        "skipping wrap-up spawn: active worker already exists for issue"
+                    );
+                }
+                !active
+            });
+            if !wrapup.is_empty() {
+                spawnable.extend(wrapup);
+            }
+        }
         if !spawnable.is_empty() {
             runtime.send_spawn(spawnable);
         }
@@ -1207,6 +1237,34 @@ impl<'a> Daemon<'a> {
                             result
                                 .errors
                                 .push(format!("auto-spawn {}: {}", issue.issue.id, e));
+                        }
+                    }
+                }
+                // Spawn wrap-up parents (same codepath as normal spawn, but
+                // skipped if a worker already exists for the parent — old-model
+                // migration guard).
+                for issue in response.wrapup {
+                    if Self::has_active_parent_worker(&workers_state, &issue.issue.id) {
+                        tracing::info!(
+                            issue = %issue.issue.id,
+                            worker = %issue.worker_name,
+                            "skipping wrap-up spawn: active worker already exists for issue"
+                        );
+                        continue;
+                    }
+                    match self.auto_spawn_worker(&issue) {
+                        Ok(()) => {
+                            tracing::info!(
+                                worker = %issue.worker_name,
+                                issue = %issue.issue.id,
+                                "spawned wrap-up worker for parent"
+                            );
+                            result.auto_spawned.push(issue.worker_name.clone());
+                        }
+                        Err(e) => {
+                            result
+                                .errors
+                                .push(format!("wrapup-spawn {}: {}", issue.issue.id, e));
                         }
                     }
                 }
