@@ -129,7 +129,9 @@ pub struct IssueResponse {
     /// Issues eligible for normal auto-spawn (status=Planned).
     pub spawnable: Vec<SpawnableIssue>,
     /// Issues eligible for triage (status=Triage, repo has triage enabled).
-    pub triageable: Vec<SpawnableIssue>,
+    /// Triage issues run as direct subprocesses (no worker/worktree/tmux), so
+    /// they use their own payload type that bypasses the spawn actor entirely.
+    pub triageable: Vec<TriageIssue>,
     /// Parent integration branches created or verified this poll.
     pub parent_branches: Vec<ParentBranchResult>,
     /// Parent issues ready for wrap-up (all children Complete + merged into the

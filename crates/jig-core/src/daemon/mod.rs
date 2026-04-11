@@ -1118,35 +1118,31 @@ impl<'a> Daemon<'a> {
             runtime.send_spawn(spawnable);
         }
 
-        // 6. Send triageable issues to background triage actor (subprocess, non-blocking)
+        // 6. Send triageable issues to background triage actor (subprocess, non-blocking).
+        //    The issue actor now emits `TriageIssue` directly, so no conversion
+        //    from `SpawnableIssue` is needed — triageable flows through its own
+        //    channel, never through `spawn_tx`. Duplicate prevention is handled
+        //    by the `is_active` filter above plus `TriageTracker` registration
+        //    here on the triage-routing path.
         if !triageable.is_empty() {
             let now = chrono::Utc::now().timestamp();
-            let triage_issues: Vec<messages::TriageIssue> = triageable
-                .into_iter()
-                .map(|si| {
-                    let repo_name = si
-                        .repo_root
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    runtime.triage_tracker_mut().register(
-                        si.issue.id.clone(),
-                        triage_tracker::TriageEntry {
-                            worker_name: si.worker_name.clone(),
-                            spawned_at: now,
-                            issue_id: si.issue.id.clone(),
-                            repo_name,
-                        },
-                    );
-                    messages::TriageIssue {
-                        repo_root: si.repo_root,
-                        issue: si.issue,
-                        worker_name: si.worker_name,
-                        provider_kind: si.provider_kind,
-                    }
-                })
-                .collect();
-            runtime.send_triage(triage_issues);
+            for ti in &triageable {
+                let repo_name = ti
+                    .repo_root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                runtime.triage_tracker_mut().register(
+                    ti.issue.id.clone(),
+                    triage_tracker::TriageEntry {
+                        worker_name: ti.worker_name.clone(),
+                        spawned_at: now,
+                        issue_id: ti.issue.id.clone(),
+                        repo_name,
+                    },
+                );
+            }
+            runtime.send_triage(triageable);
         }
 
         result.spawning = runtime.spawning_workers().to_vec();
