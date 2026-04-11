@@ -174,6 +174,24 @@ When a worker has an open **draft** PR, the daemon monitors it for problems:
 
 **Non-draft PRs** do not receive nudges — they're in human review. The STATE column shows `review` (cyan). Health problems still appear in the HEALTH column for visibility.
 
+## Auto-complete on merge
+
+When a worker's PR merges, the daemon can automatically mark the linked issue as Complete. Enable this per-repo in `jig.toml`:
+
+```toml
+[issues]
+auto_complete_on_merge = true  # default: false
+```
+
+When enabled and a PR merges, the daemon:
+
+1. Checks whether the worker has a linked issue (`issue` field in `workers.json`).
+2. Fetches the issue's current status — skips if already Complete.
+3. Calls `update_status` on the issue provider to set status to Complete.
+4. Logs the result. Failure is non-fatal — the worker is still cleaned up even if the status update fails.
+
+This works for both child and parent workers in [parent-child](parent-child.md) flows: child PR merges → child issue auto-completes → wrap-up auto-spawns → parent PR merges → parent issue auto-completes.
+
 ## Automated review
 
 When enabled, the daemon triggers an AI review agent on draft PRs whenever new commits are pushed. This automates the review-revise cycle before human review.

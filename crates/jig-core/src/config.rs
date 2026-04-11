@@ -443,6 +443,10 @@ pub struct IssuesConfig {
     /// - `Some(["x", "y"])`: only spawn issues carrying all listed labels
     #[serde(default)]
     pub auto_spawn_labels: Option<Vec<String>>,
+    /// Automatically mark linked issues as Complete when a worker's PR merges.
+    /// Defaults to false for safety — enable explicitly after reading the changelog.
+    #[serde(default)]
+    pub auto_complete_on_merge: bool,
 }
 
 /// Linear issue provider configuration in jig.toml.
@@ -479,6 +483,7 @@ impl Default for IssuesConfig {
             directory: default_issues_directory(),
             linear: None,
             auto_spawn_labels: None,
+            auto_complete_on_merge: false,
         }
     }
 }

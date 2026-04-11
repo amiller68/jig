@@ -101,6 +101,8 @@ The PR targets the parent branch. After review and merge:
 
 ### 6. Mark complete
 
+With `auto_complete_on_merge = true` in `[issues]`, the daemon marks the child issue as Complete automatically when the child PR merges — no manual step needed. Without it:
+
 ```bash
 jig issues complete <child-id>
 ```

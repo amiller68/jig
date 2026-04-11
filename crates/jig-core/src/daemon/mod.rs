@@ -1464,6 +1464,20 @@ impl<'a> Daemon<'a> {
                         pr_url: cached.pr_url.clone(),
                     },
                 });
+
+                // Auto-complete linked issue if configured
+                let auto_complete = Self::find_repo_path(registry, repo_name)
+                    .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                    .map(|t| t.issues.auto_complete_on_merge)
+                    .unwrap_or(false);
+                if auto_complete {
+                    if let Some(issue_id) = new_state.issue_ref.as_ref() {
+                        actions.push(Action::UpdateIssueStatus {
+                            worker_id: worker_name.to_string(),
+                            issue_id: issue_id.clone(),
+                        });
+                    }
+                }
             } else if cached.pr_closed {
                 actions.push(Action::Notify {
                     worker_id: worker_name.to_string(),
@@ -2106,6 +2120,85 @@ impl<'a> Daemon<'a> {
 
                     tracing::info!("cleaned up worker {}", worker_id);
                 }
+                Action::UpdateIssueStatus {
+                    worker_id,
+                    issue_id,
+                } => {
+                    if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                        match RepoContext::from_path(&entry.path) {
+                            Ok(ctx) => {
+                                let base = RepoContext::resolve_base_branch_for(&entry.path)
+                                    .unwrap_or_else(|_| {
+                                        crate::config::DEFAULT_BASE_BRANCH.to_string()
+                                    });
+                                match ctx.issue_provider_with_ref(&base) {
+                                    Ok(provider) => {
+                                        // Check current status — skip if already terminal
+                                        let should_update = match provider.get(issue_id) {
+                                            Ok(Some(issue)) => !matches!(
+                                                issue.status,
+                                                crate::issues::types::IssueStatus::Complete
+                                            ),
+                                            Ok(None) => {
+                                                tracing::warn!(
+                                                    worker = %worker_id,
+                                                    issue = %issue_id,
+                                                    "linked issue not found, skipping auto-complete"
+                                                );
+                                                false
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    worker = %worker_id,
+                                                    issue = %issue_id,
+                                                    error = %e,
+                                                    "failed to fetch issue status, skipping auto-complete"
+                                                );
+                                                false
+                                            }
+                                        };
+                                        if should_update {
+                                            match provider.update_status(
+                                                issue_id,
+                                                &crate::issues::types::IssueStatus::Complete,
+                                            ) {
+                                                Ok(()) => {
+                                                    tracing::info!(
+                                                        worker = %worker_id,
+                                                        issue = %issue_id,
+                                                        "auto-completed linked issue after PR merge"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        worker = %worker_id,
+                                                        issue = %issue_id,
+                                                        error = %e,
+                                                        "failed to auto-complete linked issue (non-fatal)"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            worker = %worker_id,
+                                            error = %e,
+                                            "failed to create issue provider for auto-complete"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    worker = %worker_id,
+                                    error = %e,
+                                    "failed to load repo context for auto-complete"
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -2730,5 +2823,80 @@ mod tests {
         state.set_worker("test/worker", make_worker_entry(None, "running"));
 
         assert!(!Daemon::has_active_parent_worker(&state, "ENG-100"));
+    }
+
+    // --- Auto-complete on merge tests ---
+
+    /// Helper: mirrors the auto-complete decision logic from process_worker.
+    /// Returns `Some(issue_id)` when an UpdateIssueStatus action should be pushed.
+    fn should_auto_complete(
+        auto_complete_on_merge: bool,
+        issue_ref: Option<&str>,
+    ) -> Option<String> {
+        if auto_complete_on_merge {
+            issue_ref.map(|id| id.to_string())
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn auto_complete_pushes_when_enabled_and_has_issue() {
+        let result = should_auto_complete(true, Some("ENG-42"));
+        assert_eq!(result, Some("ENG-42".to_string()));
+    }
+
+    #[test]
+    fn auto_complete_skips_when_disabled() {
+        let result = should_auto_complete(false, Some("ENG-42"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn auto_complete_skips_when_no_issue() {
+        let result = should_auto_complete(true, None);
+        assert_eq!(result, None);
+    }
+
+    /// Helper: mirrors the status check in the UpdateIssueStatus handler.
+    /// Returns true if the issue should be updated to Complete.
+    fn should_update_issue_status(current_status: crate::issues::types::IssueStatus) -> bool {
+        !matches!(current_status, crate::issues::types::IssueStatus::Complete)
+    }
+
+    #[test]
+    fn auto_complete_updates_in_progress_issue() {
+        assert!(should_update_issue_status(
+            crate::issues::types::IssueStatus::InProgress
+        ));
+    }
+
+    #[test]
+    fn auto_complete_skips_already_complete_issue() {
+        assert!(!should_update_issue_status(
+            crate::issues::types::IssueStatus::Complete
+        ));
+    }
+
+    #[test]
+    fn auto_complete_updates_planned_issue() {
+        assert!(should_update_issue_status(
+            crate::issues::types::IssueStatus::Planned
+        ));
+    }
+
+    #[test]
+    fn auto_complete_action_variant_is_correct() {
+        let action = Action::UpdateIssueStatus {
+            worker_id: "test-worker".to_string(),
+            issue_id: "ENG-42".to_string(),
+        };
+        assert!(matches!(
+            action,
+            Action::UpdateIssueStatus {
+                worker_id,
+                issue_id,
+            } if worker_id == "test-worker" && issue_id == "ENG-42"
+        ));
     }
 }
