@@ -88,7 +88,17 @@ impl Op for Spawn {
 
         // Create worktree if needed using Worktree::create
         let wt = if !worktree_path.exists() {
-            let base = self.base.as_deref().unwrap_or(&repo.base_branch);
+            // Resolve base branch: explicit --base > parent branch > repo default
+            let parent_base = issue
+                .as_ref()
+                .and_then(|i| i.parent.as_ref())
+                .and_then(|p| p.branch_name.as_deref())
+                .map(|b| format!("origin/{}", b));
+            let base = self
+                .base
+                .as_deref()
+                .or(parent_base.as_deref())
+                .unwrap_or(&repo.base_branch);
             let copy_files = config::get_copy_files(&repo.repo_root)?;
             let on_create_hook = config::get_on_create_hook(&repo.repo_root)?;
 
