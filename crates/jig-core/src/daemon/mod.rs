@@ -264,11 +264,14 @@ impl<'a> Daemon<'a> {
         result
     }
 
-    /// After sync completes, check parent worktrees for new remote commits.
+    /// After sync completes, fast-forward parent branches to match their remote.
     ///
-    /// For each parent worktree (a worker whose branch is used as the base branch
-    /// by child workers), run `git pull --ff-only` to incorporate merged child PRs.
-    /// If new commits were pulled, nudge the parent worker via tmux.
+    /// For each parent branch (a branch used as the base branch by child workers):
+    /// - If a parent worktree exists → fast-forward via checkout (existing behavior).
+    /// - If no parent worktree exists → fast-forward the local branch ref directly
+    ///   via git2, then push to origin so other daemons/repos stay in sync.
+    ///
+    /// If new commits were pulled and a worktree exists, nudge the parent worker.
     fn update_parent_worktrees(
         &self,
         workers_state: &WorkersState,
@@ -314,71 +317,122 @@ impl<'a> Daemon<'a> {
             };
 
             let worktree_path = crate::config::worktree_path(&repo_entry.path, &worker_name);
-            if !worktree_path.exists() {
-                continue;
-            }
+            let worktree_exists = worktree_path.exists();
 
-            // Fast-forward the parent worktree to its remote tracking branch
-            // using git2 (no subprocess needed — sync actor already fetched).
-            let repo = match crate::git::Repo::open(&worktree_path) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(
-                        worker = %worker_name,
-                        repo = %repo_name,
-                        "failed to open parent worktree repo: {}",
-                        e
-                    );
-                    continue;
-                }
-            };
+            if worktree_exists {
+                // Worktree exists: fast-forward via checkout (original path).
+                let repo = match crate::git::Repo::open(&worktree_path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(
+                            worker = %worker_name,
+                            repo = %repo_name,
+                            "failed to open parent worktree repo: {}",
+                            e
+                        );
+                        continue;
+                    }
+                };
 
-            match repo.fast_forward_to_remote(parent_branch) {
-                Ok(true) => {
-                    tracing::info!(
-                        worker = %worker_name,
-                        repo = %repo_name,
-                        branch = %parent_branch,
-                        "pulled new commits into parent worktree"
-                    );
+                match repo.fast_forward_to_remote(parent_branch) {
+                    Ok(true) => {
+                        tracing::info!(
+                            worker = %worker_name,
+                            repo = %repo_name,
+                            branch = %parent_branch,
+                            "pulled new commits into parent worktree"
+                        );
 
-                    // Nudge the parent worker to let it know about new commits
-                    let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                    let target = TmuxTarget::new(&session, &worker_name);
+                        // Nudge the parent worker to let it know about new commits
+                        let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                        let target = TmuxTarget::new(&session, &worker_name);
 
-                    if self.tmux.has_window(&target) {
-                        let key = format!("{}/{}", repo_name, worker_name);
-                        let message = "Child work has been merged into your branch. \
-                                       New commits are available. Run `git log --oneline -5` \
-                                       to see what changed."
-                            .to_string();
+                        if self.tmux.has_window(&target) {
+                            let key = format!("{}/{}", repo_name, worker_name);
+                            let message = "Child work has been merged into your branch. \
+                                           New commits are available. Run `git log --oneline -5` \
+                                           to see what changed."
+                                .to_string();
 
-                        runtime.send_nudge(messages::NudgeRequest {
-                            session,
-                            window: branch_name,
-                            message,
-                            nudge_type_key: "parent_update".to_string(),
-                            is_stuck: false,
-                            repo_name: repo_name.to_string(),
-                            worker_name: worker_name.to_string(),
-                            worker_key: key,
-                        });
+                            runtime.send_nudge(messages::NudgeRequest {
+                                session,
+                                window: branch_name,
+                                message,
+                                nudge_type_key: "parent_update".to_string(),
+                                is_stuck: false,
+                                repo_name: repo_name.to_string(),
+                                worker_name: worker_name.to_string(),
+                                worker_key: key,
+                            });
+                        }
+                    }
+                    Ok(false) => {
+                        tracing::debug!(
+                            worker = %worker_name,
+                            repo = %repo_name,
+                            "parent worktree already up to date"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            worker = %worker_name,
+                            repo = %repo_name,
+                            "fast-forward failed in parent worktree: {}",
+                            e
+                        );
                     }
                 }
-                Ok(false) => {
-                    tracing::debug!(
-                        worker = %worker_name,
-                        repo = %repo_name,
-                        "parent worktree already up to date"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        worker = %worker_name,
-                        repo = %repo_name,
-                        "fast-forward failed in parent worktree: {}",
-                        e
-                    );
+            } else {
+                // No worktree: fast-forward the local branch ref directly from
+                // the main repo, then push to origin.
+                let repo = match crate::git::Repo::open(&repo_entry.path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(
+                            repo = %repo_name,
+                            branch = %parent_branch,
+                            "failed to open main repo for bare branch update: {}",
+                            e
+                        );
+                        continue;
+                    }
+                };
+
+                match repo.fast_forward_branch_ref(parent_branch) {
+                    Ok(true) => {
+                        tracing::info!(
+                            repo = %repo_name,
+                            branch = %parent_branch,
+                            "fast-forwarded parent branch ref (no worktree)"
+                        );
+
+                        // Push to origin so remote stays in sync
+                        if let Err(e) =
+                            crate::git::Repo::push_branch(&repo_entry.path, parent_branch)
+                        {
+                            tracing::warn!(
+                                repo = %repo_name,
+                                branch = %parent_branch,
+                                "push after bare fast-forward failed: {}",
+                                e
+                            );
+                        }
+                    }
+                    Ok(false) => {
+                        tracing::debug!(
+                            repo = %repo_name,
+                            branch = %parent_branch,
+                            "parent branch ref already up to date (no worktree)"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            repo = %repo_name,
+                            branch = %parent_branch,
+                            "bare fast-forward failed for parent branch: {}",
+                            e
+                        );
+                    }
                 }
             }
         }
