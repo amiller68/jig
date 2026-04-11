@@ -23,14 +23,12 @@ use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker, WorkerStatus};
 use crate::worktree::Worktree;
 
-/// Distinguishes normal (interactive) worker spawns from lightweight triage spawns.
+/// Distinguishes normal (interactive) worker spawns from wrap-up parent spawns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpawnKind {
     /// Interactive worker in a tmux session — full tool access, persistent session.
     #[default]
     Normal,
-    /// Read-only triage agent — one-shot `--print` mode with restricted tools.
-    Triage,
     /// Wrap-up worker for a parent epic — spawned after all children are complete
     /// and merged. Uses the wrap-up preamble template and the parent's own
     /// integration branch as the base.
@@ -169,14 +167,6 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
                 .map_err(|e| e.to_string())?;
             // Parent is already InProgress — no status update needed
         }
-        SpawnKind::Triage => {
-            // Triage is now handled by the triage_actor as a direct subprocess.
-            // If this codepath is reached, it means triage was routed through
-            // spawn incorrectly.
-            return Err(
-                "triage should be handled by triage_actor, not spawn_worker_for_issue".to_string(),
-            );
-        }
     }
 
     Ok(())
@@ -214,9 +204,6 @@ pub fn update_issue_status(repo_root: &Path, issue_id: &str) {
     }
 }
 
-/// Allowed tools for triage workers — read-only access plus jig CLI and Linear MCP.
-pub const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"];
-
 /// Render the triage prompt for an issue.
 ///
 /// Returns the rendered prompt text. Used by both the `triage_actor` (subprocess)
@@ -244,6 +231,9 @@ pub fn render_triage_prompt(repo_root: &Path, issue: &Issue) -> Result<String> {
 /// with stdin piped from the prompt. Returns `Ok(())` on success or an
 /// error message on failure.
 pub fn run_triage_subprocess(repo_root: &Path, issue: &Issue) -> std::result::Result<(), String> {
+    // Allowed tools for triage workers — read-only access plus jig CLI and Linear MCP.
+    const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"];
+
     let prompt = render_triage_prompt(repo_root, issue).map_err(|e| e.to_string())?;
 
     let jig_toml = config::JigToml::load(repo_root)
@@ -646,7 +636,7 @@ mod tests {
     #[test]
     fn spawn_kind_equality() {
         assert_eq!(SpawnKind::Normal, SpawnKind::Normal);
-        assert_eq!(SpawnKind::Triage, SpawnKind::Triage);
-        assert_ne!(SpawnKind::Normal, SpawnKind::Triage);
+        assert_eq!(SpawnKind::Wrapup, SpawnKind::Wrapup);
+        assert_ne!(SpawnKind::Normal, SpawnKind::Wrapup);
     }
 }
