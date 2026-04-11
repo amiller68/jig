@@ -10,7 +10,7 @@ use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 use crossterm::terminal;
 
-use jig_core::daemon::{WorkerDisplayInfo, WorkerTickInfo};
+use jig_core::daemon::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
 use jig_core::spawn::TaskStatus;
 use jig_core::worker::WorkerStatus;
 
@@ -493,6 +493,122 @@ pub fn render_worker_table_grouped(workers: &[WorkerDisplayInfo], borders: bool)
 }
 
 // ---------------------------------------------------------------------------
+// Triage table
+// ---------------------------------------------------------------------------
+
+/// Standard triage table header cells.
+fn triage_header() -> Vec<Cell> {
+    vec![
+        Cell::new("ISSUE").add_attribute(Attribute::Bold),
+        Cell::new("MODEL").add_attribute(Attribute::Bold),
+        Cell::new("ELAPSED").add_attribute(Attribute::Bold),
+        Cell::new("REPO").add_attribute(Attribute::Bold),
+    ]
+}
+
+/// Build a row of cells for a single triage entry.
+fn triage_row(t: &TriageDisplayInfo) -> Vec<Cell> {
+    let elapsed = format_duration_short(t.elapsed_secs);
+    vec![
+        Cell::new(&t.issue_id).fg(Color::Cyan),
+        Cell::new(&t.model).fg(Color::White),
+        Cell::new(&elapsed)
+            .fg(Color::White)
+            .set_alignment(CellAlignment::Right),
+        Cell::new(&t.repo_name).fg(Color::DarkGrey),
+    ]
+}
+
+/// Render a triage table from display info.
+///
+/// `borders`: true uses UTF8_BORDERS_ONLY (watch mode), false uses NOTHING.
+pub fn render_triage_table(triages: &[TriageDisplayInfo], borders: bool) -> Table {
+    let mut table = Table::new();
+    let preset = if borders {
+        presets::UTF8_BORDERS_ONLY
+    } else {
+        presets::NOTHING
+    };
+    table
+        .load_preset(preset)
+        .enforce_styling()
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(triage_header());
+
+    for t in triages {
+        table.add_row(triage_row(t));
+    }
+
+    table
+}
+
+/// Render the full triage section with header. Returns empty string if no triages.
+pub fn render_triage_section(triages: &[TriageDisplayInfo], borders: bool) -> String {
+    if triages.is_empty() {
+        return String::new();
+    }
+    let table = render_triage_table(triages, borders);
+    if is_plain() {
+        format!("TRIAGES\n{}", table)
+    } else {
+        format!("\x1B[1mTRIAGES\x1B[0m\n{}", table)
+    }
+}
+
+/// Render triage section grouped by repo, with bold repo headers.
+pub fn render_triage_section_grouped(triages: &[TriageDisplayInfo], borders: bool) -> String {
+    if triages.is_empty() {
+        return String::new();
+    }
+
+    // Collect unique repos in order of appearance
+    let mut repos: Vec<String> = Vec::new();
+    for t in triages {
+        if !repos.contains(&t.repo_name) {
+            repos.push(t.repo_name.clone());
+        }
+    }
+
+    let preset = if borders {
+        presets::UTF8_BORDERS_ONLY
+    } else {
+        presets::NOTHING
+    };
+
+    let mut sections: Vec<String> = Vec::new();
+
+    for repo in &repos {
+        let repo_triages: Vec<&TriageDisplayInfo> =
+            triages.iter().filter(|t| &t.repo_name == repo).collect();
+
+        let mut table = Table::new();
+        table
+            .load_preset(preset)
+            .enforce_styling()
+            .set_content_arrangement(ContentArrangement::Dynamic)
+            .set_header(triage_header());
+
+        for t in &repo_triages {
+            table.add_row(triage_row(t));
+        }
+
+        let table_str = table.to_string();
+        let indented: String = table_str
+            .lines()
+            .map(|line| format!("  {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("\x1B[1m{}\x1B[0m\n{}", repo, indented));
+    }
+
+    if is_plain() {
+        format!("TRIAGES\n{}", sections.join("\n\n"))
+    } else {
+        format!("\x1B[1mTRIAGES\x1B[0m\n{}", sections.join("\n\n"))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Alternate screen
 // ---------------------------------------------------------------------------
 
@@ -545,5 +661,91 @@ mod tests {
         assert_eq!(format_duration_short(3660), "1h1m");
         assert_eq!(format_duration_short(7260), "2h1m");
         assert_eq!(format_duration_short(7200), "2h");
+    }
+
+    #[test]
+    fn render_triage_section_empty_returns_empty() {
+        let section = render_triage_section(&[], false);
+        assert!(section.is_empty());
+    }
+
+    #[test]
+    fn render_triage_section_shows_header_and_entries() {
+        set_plain(true);
+        let triages = vec![
+            TriageDisplayInfo {
+                issue_id: "JIG-77".to_string(),
+                model: "sonnet".to_string(),
+                elapsed_secs: 134,
+                repo_name: "my-repo".to_string(),
+            },
+            TriageDisplayInfo {
+                issue_id: "JIG-81".to_string(),
+                model: "sonnet".to_string(),
+                elapsed_secs: 45,
+                repo_name: "my-repo".to_string(),
+            },
+        ];
+        let section = render_triage_section(&triages, false);
+        assert!(section.contains("TRIAGES"));
+        assert!(section.contains("JIG-77"));
+        assert!(section.contains("JIG-81"));
+        assert!(section.contains("sonnet"));
+        assert!(section.contains("2m14s"));
+        assert!(section.contains("45s"));
+        set_plain(false);
+    }
+
+    #[test]
+    fn render_triage_table_has_correct_columns() {
+        set_plain(true);
+        let triages = vec![TriageDisplayInfo {
+            issue_id: "JIG-99".to_string(),
+            model: "haiku".to_string(),
+            elapsed_secs: 3661,
+            repo_name: "test-repo".to_string(),
+        }];
+        let table = render_triage_table(&triages, false).to_string();
+        assert!(table.contains("ISSUE"));
+        assert!(table.contains("MODEL"));
+        assert!(table.contains("ELAPSED"));
+        assert!(table.contains("REPO"));
+        assert!(table.contains("JIG-99"));
+        assert!(table.contains("haiku"));
+        assert!(table.contains("1h1m"));
+        assert!(table.contains("test-repo"));
+        set_plain(false);
+    }
+
+    #[test]
+    fn render_triage_section_grouped_empty_returns_empty() {
+        let section = render_triage_section_grouped(&[], false);
+        assert!(section.is_empty());
+    }
+
+    #[test]
+    fn render_triage_section_grouped_shows_repo_headers() {
+        set_plain(true);
+        let triages = vec![
+            TriageDisplayInfo {
+                issue_id: "JIG-1".to_string(),
+                model: "sonnet".to_string(),
+                elapsed_secs: 10,
+                repo_name: "repo-a".to_string(),
+            },
+            TriageDisplayInfo {
+                issue_id: "JIG-2".to_string(),
+                model: "sonnet".to_string(),
+                elapsed_secs: 20,
+                repo_name: "repo-b".to_string(),
+            },
+        ];
+        let section = render_triage_section_grouped(&triages, false);
+        assert!(section.contains("TRIAGES"));
+        assert!(section.contains("repo-a"));
+        assert!(section.contains("repo-b"));
+        assert!(section.contains("JIG-1"));
+        assert!(section.contains("JIG-2"));
+        set_plain(false);
     }
 }
