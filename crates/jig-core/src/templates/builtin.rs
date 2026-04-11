@@ -18,6 +18,8 @@ const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as
 
 YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), draft PR created via `jig pr` or /draft, and issue marked complete (see completion instructions in the task). Call /review when ready.
 
+IMPORTANT: Create the draft PR using `jig pr` (or `/draft`, which wraps it). NEVER use `gh pr create` directly — it bypasses parent branch resolution and will target the wrong base branch.
+
 HOW MONITORING WORKS: A daemon watches your activity via tool-use events. If you go idle or get stuck for ~5 minutes, you'll receive automated nudge messages (up to {{max_nudges}}). After that, a human is notified. Do not wait for input.
 
 IF YOU GET STUCK:
@@ -247,3 +249,32 @@ Fix with interactive rebase:
 4. git push --force-with-lease
 5. Call /review
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_preamble_forbids_gh_pr_create() {
+        assert!(
+            SPAWN_PREAMBLE.contains("NEVER use `gh pr create`"),
+            "SPAWN_PREAMBLE must explicitly forbid `gh pr create`"
+        );
+    }
+
+    #[test]
+    fn spawn_preamble_directs_to_jig_pr() {
+        assert!(
+            SPAWN_PREAMBLE.contains("`jig pr`"),
+            "SPAWN_PREAMBLE must direct workers to use `jig pr`"
+        );
+    }
+
+    #[test]
+    fn spawn_preamble_wrapup_forbids_gh_pr_create() {
+        assert!(
+            SPAWN_PREAMBLE_WRAPUP.contains("Do NOT use `gh pr create`"),
+            "SPAWN_PREAMBLE_WRAPUP must explicitly forbid `gh pr create`"
+        );
+    }
+}
