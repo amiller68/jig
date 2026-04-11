@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use crate::error::{Error, Result};
 
 use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
+use super::types::{ChildIssue, Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
 
 /// File-based issue provider that reads from an `issues/` directory.
 pub struct FileProvider {
@@ -831,8 +831,8 @@ fn infer_category(rel_path: &Path) -> Option<String> {
     None
 }
 
-/// Extract child ticket IDs from a `## Tickets` table in an epic index.
-fn extract_children(content: &str, parent_rel: &Path) -> Vec<String> {
+/// Extract child tickets from a `## Tickets` table in an epic index.
+fn extract_children(content: &str, parent_rel: &Path) -> Vec<ChildIssue> {
     let parent_dir = parent_rel.parent().unwrap_or(Path::new(""));
     let mut children = Vec::new();
     let mut in_tickets = false;
@@ -860,12 +860,35 @@ fn extract_children(content: &str, parent_rel: &Path) -> Vec<String> {
                     .with_extension("")
                     .to_string_lossy()
                     .replace('\\', "/");
-                children.push(child_id);
+
+                // Try to extract status from the last table column
+                let status = extract_child_status_from_row(trimmed);
+
+                children.push(ChildIssue {
+                    id: child_id,
+                    status,
+                    branch_name: None,
+                });
             }
         }
     }
 
     children
+}
+
+/// Extract the status from a table row's last column.
+///
+/// Expects rows like: `| 0 | [Title](./file.md) | Planned |`
+fn extract_child_status_from_row(row: &str) -> Option<IssueStatus> {
+    let columns: Vec<&str> = row.split('|').collect();
+    // A row `| a | b | c |` splits into ["", " a ", " b ", " c ", ""]
+    // The status is in the second-to-last non-empty column
+    if columns.len() >= 4 {
+        let status_col = columns[columns.len() - 2].trim();
+        IssueStatus::from_str_loose(status_col)
+    } else {
+        None
+    }
 }
 
 /// Extract the first markdown link target from a string: `[text](target)`.
@@ -950,10 +973,11 @@ mod tests {
     fn extract_children_from_table() {
         let content = "# Epic\n\n## Tickets\n\n| # | Ticket | Status |\n|---|--------|--------|\n| 0 | [First](./0-first.md) | Planned |\n| 1 | [Second](./1-second.md) | Planned |\n\n## Other\n";
         let children = extract_children(content, Path::new("epics/my-epic/index.md"));
-        assert_eq!(
-            children,
-            vec!["epics/my-epic/0-first", "epics/my-epic/1-second"]
-        );
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].id, "epics/my-epic/0-first");
+        assert_eq!(children[0].status, Some(IssueStatus::Planned));
+        assert_eq!(children[1].id, "epics/my-epic/1-second");
+        assert_eq!(children[1].status, Some(IssueStatus::Planned));
     }
 
     #[test]

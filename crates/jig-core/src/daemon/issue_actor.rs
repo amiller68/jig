@@ -220,7 +220,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
                 remaining_budget,
                 &req.existing_workers,
             );
-            spawnable.retain(|si| !is_active_parent(&si.issue, provider.as_ref()));
+            spawnable.retain(|si| !is_active_parent(&si.issue));
             all_spawnable.extend(spawnable);
         }
     }
@@ -287,16 +287,16 @@ fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
 }
 
 /// Returns `true` if the issue is an active parent — i.e. it has ≥1 child in
-/// Backlog or InProgress status. Active parents are excluded from normal
-/// auto-spawn because the daemon owns their integration branch.
-fn is_active_parent(issue: &Issue, provider: &dyn IssueProvider) -> bool {
+/// Backlog, InProgress, or Planned status. Active parents are excluded from
+/// normal auto-spawn because the daemon owns their integration branch.
+fn is_active_parent(issue: &Issue) -> bool {
     if issue.children.is_empty() {
         return false;
     }
-    issue.children.iter().any(|child_id| {
+    issue.children.iter().any(|c| {
         matches!(
-            provider.get(child_id),
-            Ok(Some(child)) if matches!(child.status, IssueStatus::Backlog | IssueStatus::InProgress | IssueStatus::Planned)
+            c.status,
+            Some(IssueStatus::Backlog) | Some(IssueStatus::InProgress) | Some(IssueStatus::Planned)
         )
     })
 }
@@ -423,14 +423,13 @@ fn collect_parent_candidates(provider: &dyn IssueProvider) -> Vec<Issue> {
             if issue.children.is_empty() {
                 continue;
             }
-            // Check if ≥1 child is in Backlog or InProgress (active child)
-            let has_active_child = issue.children.iter().any(|child_id| {
+            // Check if ≥1 child is in Backlog, InProgress, or Planned (active child)
+            let has_active_child = issue.children.iter().any(|c| {
                 matches!(
-                    provider.get(child_id),
-                    Ok(Some(child)) if matches!(
-                        child.status,
-                        IssueStatus::Backlog | IssueStatus::InProgress | IssueStatus::Planned
-                    )
+                    c.status,
+                    Some(IssueStatus::Backlog)
+                        | Some(IssueStatus::InProgress)
+                        | Some(IssueStatus::Planned)
                 )
             });
             if has_active_child {
@@ -482,7 +481,7 @@ fn create_and_push_branch(repo_root: &Path, branch: &str, base_branch: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::issues::types::{Issue, IssueStatus, ParentIssue};
+    use crate::issues::types::{ChildIssue, Issue, IssueStatus, ParentIssue};
 
     /// A mock provider for testing parent detection logic.
     struct MockProvider {
@@ -522,7 +521,7 @@ mod tests {
         }
     }
 
-    fn make_issue(id: &str, status: IssueStatus, children: Vec<String>) -> Issue {
+    fn make_issue(id: &str, status: IssueStatus, children: Vec<ChildIssue>) -> Issue {
         Issue {
             id: id.to_string(),
             title: format!("Issue {}", id),
@@ -562,44 +561,57 @@ mod tests {
         }
     }
 
+    fn child_ref(id: &str, status: IssueStatus) -> ChildIssue {
+        ChildIssue {
+            id: id.to_string(),
+            status: Some(status),
+            branch_name: None,
+        }
+    }
+
     #[test]
     fn is_active_parent_with_backlog_child() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".to_string()]);
-        let child = make_issue("ENG-101", IssueStatus::Backlog, vec![]);
-        let provider = MockProvider::new(vec![parent.clone(), child]);
-
-        assert!(is_active_parent(&parent, &provider));
+        let parent = make_issue(
+            "ENG-100",
+            IssueStatus::Planned,
+            vec![child_ref("ENG-101", IssueStatus::Backlog)],
+        );
+        assert!(is_active_parent(&parent));
     }
 
     #[test]
     fn is_active_parent_with_in_progress_child() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".to_string()]);
-        let child = make_issue("ENG-101", IssueStatus::InProgress, vec![]);
-        let provider = MockProvider::new(vec![parent.clone(), child]);
-
-        assert!(is_active_parent(&parent, &provider));
+        let parent = make_issue(
+            "ENG-100",
+            IssueStatus::Planned,
+            vec![child_ref("ENG-101", IssueStatus::InProgress)],
+        );
+        assert!(is_active_parent(&parent));
     }
 
     #[test]
     fn is_not_active_parent_all_children_complete() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".to_string()]);
-        let child = make_issue("ENG-101", IssueStatus::Complete, vec![]);
-        let provider = MockProvider::new(vec![parent.clone(), child]);
-
-        assert!(!is_active_parent(&parent, &provider));
+        let parent = make_issue(
+            "ENG-100",
+            IssueStatus::Planned,
+            vec![child_ref("ENG-101", IssueStatus::Complete)],
+        );
+        assert!(!is_active_parent(&parent));
     }
 
     #[test]
     fn is_not_active_parent_no_children() {
         let issue = make_issue("ENG-100", IssueStatus::Planned, vec![]);
-        let provider = MockProvider::new(vec![issue.clone()]);
-
-        assert!(!is_active_parent(&issue, &provider));
+        assert!(!is_active_parent(&issue));
     }
 
     #[test]
     fn collect_parent_candidates_finds_planned_parent() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".to_string()]);
+        let parent = make_issue(
+            "ENG-100",
+            IssueStatus::Planned,
+            vec![child_ref("ENG-101", IssueStatus::Backlog)],
+        );
         let child = make_issue("ENG-101", IssueStatus::Backlog, vec![]);
         let provider = MockProvider::new(vec![parent, child]);
 
@@ -613,7 +625,7 @@ mod tests {
         let parent = make_issue(
             "ENG-100",
             IssueStatus::InProgress,
-            vec!["ENG-101".to_string()],
+            vec![child_ref("ENG-101", IssueStatus::InProgress)],
         );
         let child = make_issue("ENG-101", IssueStatus::InProgress, vec![]);
         let provider = MockProvider::new(vec![parent, child]);
@@ -628,7 +640,7 @@ mod tests {
         let parent = make_issue(
             "ENG-100",
             IssueStatus::Complete,
-            vec!["ENG-101".to_string()],
+            vec![child_ref("ENG-101", IssueStatus::Complete)],
         );
         let child = make_issue("ENG-101", IssueStatus::Complete, vec![]);
         let provider = MockProvider::new(vec![parent, child]);
@@ -639,7 +651,11 @@ mod tests {
 
     #[test]
     fn collect_parent_candidates_skips_no_active_children() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".to_string()]);
+        let parent = make_issue(
+            "ENG-100",
+            IssueStatus::Planned,
+            vec![child_ref("ENG-101", IssueStatus::Complete)],
+        );
         let child = make_issue("ENG-101", IssueStatus::Complete, vec![]);
         let provider = MockProvider::new(vec![parent, child]);
 
@@ -649,22 +665,17 @@ mod tests {
 
     #[test]
     fn active_parent_excluded_from_spawnable() {
-        // A parent with an active child should be detected as an active parent
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".to_string()]);
-        let child = make_issue("ENG-101", IssueStatus::Backlog, vec![]);
-        let provider = MockProvider::new(vec![parent.clone(), child]);
-
-        // The parent should be filtered out from auto-spawn
-        assert!(is_active_parent(&parent, &provider));
+        let parent = make_issue(
+            "ENG-100",
+            IssueStatus::Planned,
+            vec![child_ref("ENG-101", IssueStatus::Backlog)],
+        );
+        assert!(is_active_parent(&parent));
     }
 
     #[test]
     fn child_issue_not_active_parent() {
-        // A child issue (with a parent reference but no children) should not be
-        // treated as an active parent.
         let child = make_child_issue("ENG-101", IssueStatus::Planned, "ENG-100");
-        let provider = MockProvider::new(vec![child.clone()]);
-
-        assert!(!is_active_parent(&child, &provider));
+        assert!(!is_active_parent(&child));
     }
 }
