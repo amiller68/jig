@@ -108,10 +108,8 @@ pub fn supported_agents() -> &'static [&'static str] {
 
 /// Build a triage command as an argv vector for direct subprocess execution.
 ///
-/// Returns a `Vec<String>` suitable for `std::process::Command`. The prompt
-/// is piped to stdin by the caller — Claude Code has no file-based prompt
-/// flag, and stdin avoids any shell-escaping pitfalls with long markdown
-/// prompts.
+/// Returns a `Vec<String>` suitable for `std::process::Command`. The
+/// prompt is piped to stdin by the caller.
 pub fn build_triage_argv(
     adapter: &AgentAdapter,
     model: &str,

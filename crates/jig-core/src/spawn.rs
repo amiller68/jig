@@ -23,7 +23,7 @@ use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker, WorkerStatus};
 use crate::worktree::Worktree;
 
-/// Distinguishes normal (interactive) worker spawns from wrap-up parent spawns.
+/// Distinguishes normal (interactive) worker spawns from wrap-up spawns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpawnKind {
     /// Interactive worker in a tmux session — full tool access, persistent session.

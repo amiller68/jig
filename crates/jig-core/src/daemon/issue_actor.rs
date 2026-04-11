@@ -87,7 +87,7 @@ fn collect_spawnable(
     result
 }
 
-/// Collect triageable issues from a provider, skipping any already being triaged.
+/// Collect triageable issues from a provider.
 ///
 /// Returns [`TriageIssue`]s directly — triage no longer creates workers, so
 /// there's no worker-name collision check against `existing_workers`. The
