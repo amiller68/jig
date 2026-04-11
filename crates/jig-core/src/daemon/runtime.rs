@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::context::RepoContext;
+use crate::error::Result;
 use crate::registry::RepoRegistry;
 
 use super::messages::*;
@@ -105,7 +106,11 @@ pub struct DaemonRuntime {
 
 impl DaemonRuntime {
     /// Create a new runtime, spawning all actor threads.
-    pub fn new(config: RuntimeConfig) -> Self {
+    ///
+    /// Loads the persisted triage tracker from disk and reconciles it
+    /// against live subprocess pids so that restarts don't lose in-flight
+    /// triage state.
+    pub fn new(config: RuntimeConfig) -> Result<Self> {
         let (sync_req_tx, sync_req_rx) = flume::bounded(1);
         let (sync_resp_tx, sync_resp_rx) = flume::bounded(1);
         let sync_handle = sync_actor::spawn(sync_req_rx, sync_resp_tx);
@@ -141,7 +146,9 @@ impl DaemonRuntime {
         // Start with past timestamps so first tick triggers sync/poll immediately
         let past = Instant::now();
 
-        Self {
+        let triage_tracker = TriageTracker::load()?;
+
+        Ok(Self {
             sync_tx: sync_req_tx,
             sync_rx: sync_resp_rx,
             sync_pending: false,
@@ -178,7 +185,7 @@ impl DaemonRuntime {
             triage_pending: false,
 
             config,
-            triage_tracker: TriageTracker::new(),
+            triage_tracker,
             first_poll_done: false,
             _handles: vec![
                 sync_handle,
@@ -190,7 +197,7 @@ impl DaemonRuntime {
                 review_handle,
                 triage_handle,
             ],
-        }
+        })
     }
 
     /// Trigger a git sync if the interval has elapsed and no sync is pending.

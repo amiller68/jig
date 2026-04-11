@@ -277,14 +277,14 @@ timeout_seconds = 600    # max time before a triage worker is considered stuck (
 
 ### How it works
 
-The issue actor polls for triage-eligible issues (status=Triage) alongside normal spawnable issues. Triage and spawn share the worker budget. The `TriageTracker` (in-memory, on `DaemonRuntime`) prevents duplicate spawns and detects stuck workers:
+The issue actor polls for triage-eligible issues (status=Triage) alongside normal spawnable issues. Triage and spawn share the worker budget. The `TriageTracker` (persisted to disk, loaded on `DaemonRuntime` startup) prevents duplicate spawns and detects stuck workers:
 
 1. **Discovery**: Issue actor returns triageable issues separately from spawnable ones
 2. **Dedup**: Tracker filters out issues already being triaged (`is_active`)
 3. **Spawn**: Triage workers are named `triage-{issue_id}` and sent to the spawn actor
-4. **Registration**: On spawn, the tracker records the issue ID, worker name, and timestamp
-5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention` and the worker's tmux window is killed
-6. **Completion**: When a triage worker's tmux session exits, the tracker removes the entry
+4. **Registration**: On spawn, the tracker records the issue ID, pid, and timestamp
+5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention`; subprocess termination is handled by the triage actor via the persisted pid
+6. **Completion**: When a triage worker exits, the tracker removes the entry
 
 ### Triage verification
 
@@ -302,7 +302,7 @@ No auto-retry on failure. Failed triage requires human attention.
 
 ### Persistence
 
-The tracker is in-memory only. On daemon restart, it rebuilds from active workers whose names start with `triage-`.
+The tracker persists to `~/.config/jig/state/triages.json` (atomic write via temp-file + rename). On daemon restart, `TriageTracker::load()` reads the file and reconciles each entry against its recorded `pid` — dropping entries whose process is no longer alive (checked via `kill(pid, 0)`).
 
 ## Parent branch auto-update
 
