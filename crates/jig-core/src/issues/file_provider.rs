@@ -1536,4 +1536,228 @@ mod tests {
         assert_eq!(spawnable.len(), 1);
         assert_eq!(spawnable[0].title, "Planned Item");
     }
+
+    /// Tests the A→B→C blocked-by chain for parent-child children.
+    ///
+    /// Scenario: parent P has children A, B, C.
+    /// B is blocked by A, C is blocked by B.
+    /// At each step, only the child whose deps are all Complete should be spawnable.
+    #[test]
+    fn list_spawnable_parent_child_blocked_by_chain() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tasks = tmp.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+
+        // Parent P — InProgress (already set up by daemon in T1)
+        std::fs::write(
+            tasks.join("parent.md"),
+            "# Parent Epic\n\n**Status:** In Progress\n**Labels:** auto\n",
+        )
+        .unwrap();
+
+        // Child A — Planned, no deps (first in chain)
+        std::fs::write(
+            tasks.join("child-a.md"),
+            "# Child A\n\n**Status:** Planned\n**Labels:** auto\n**Parent:** tasks/parent\n",
+        )
+        .unwrap();
+
+        // Child B — Planned, blocked by A
+        std::fs::write(
+            tasks.join("child-b.md"),
+            "# Child B\n\n**Status:** Planned\n**Labels:** auto\n\
+             **Parent:** tasks/parent\n**Depends-On:** tasks/child-a\n",
+        )
+        .unwrap();
+
+        // Child C — Planned, blocked by B
+        std::fs::write(
+            tasks.join("child-c.md"),
+            "# Child C\n\n**Status:** Planned\n**Labels:** auto\n\
+             **Parent:** tasks/parent\n**Depends-On:** tasks/child-b\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let labels = vec!["auto".to_string()];
+
+        // Tick 1: only A is spawnable (B blocked by A, C blocked by B)
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert_eq!(spawnable.len(), 1, "tick 1: only A should be spawnable");
+        assert_eq!(spawnable[0].id, "tasks/child-a");
+
+        // Mark A Complete
+        std::fs::write(
+            tasks.join("child-a.md"),
+            "# Child A\n\n**Status:** Complete\n**Labels:** auto\n**Parent:** tasks/parent\n",
+        )
+        .unwrap();
+
+        // Tick 2: B is now spawnable (A is Complete), C still blocked by B
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert_eq!(spawnable.len(), 1, "tick 2: only B should be spawnable");
+        assert_eq!(spawnable[0].id, "tasks/child-b");
+
+        // Mark B Complete
+        std::fs::write(
+            tasks.join("child-b.md"),
+            "# Child B\n\n**Status:** Complete\n**Labels:** auto\n\
+             **Parent:** tasks/parent\n**Depends-On:** tasks/child-a\n",
+        )
+        .unwrap();
+
+        // Tick 3: C is now spawnable (B is Complete)
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert_eq!(spawnable.len(), 1, "tick 3: only C should be spawnable");
+        assert_eq!(spawnable[0].id, "tasks/child-c");
+
+        // Mark C Complete
+        std::fs::write(
+            tasks.join("child-c.md"),
+            "# Child C\n\n**Status:** Complete\n**Labels:** auto\n\
+             **Parent:** tasks/parent\n**Depends-On:** tasks/child-b\n",
+        )
+        .unwrap();
+
+        // Tick 4: no children left to spawn
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert!(
+            spawnable.is_empty(),
+            "tick 4: no children should be spawnable"
+        );
+    }
+
+    /// Tests that the blocked-by chain works for standalone (non-parent) issues too,
+    /// ensuring no regression from the parent-child path.
+    #[test]
+    fn list_spawnable_standalone_blocked_by_chain() {
+        let tmp = tempfile::tempdir().unwrap();
+        let features = tmp.path().join("features");
+        std::fs::create_dir_all(&features).unwrap();
+
+        // A — no deps
+        std::fs::write(
+            features.join("step-a.md"),
+            "# Step A\n\n**Status:** Planned\n**Labels:** auto\n",
+        )
+        .unwrap();
+
+        // B — blocked by A
+        std::fs::write(
+            features.join("step-b.md"),
+            "# Step B\n\n**Status:** Planned\n**Labels:** auto\n\
+             **Depends-On:** features/step-a\n",
+        )
+        .unwrap();
+
+        // C — blocked by B
+        std::fs::write(
+            features.join("step-c.md"),
+            "# Step C\n\n**Status:** Planned\n**Labels:** auto\n\
+             **Depends-On:** features/step-b\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let labels = vec!["auto".to_string()];
+
+        // Only A spawnable
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert_eq!(spawnable.len(), 1);
+        assert_eq!(spawnable[0].id, "features/step-a");
+
+        // Complete A → B spawnable
+        std::fs::write(
+            features.join("step-a.md"),
+            "# Step A\n\n**Status:** Complete\n**Labels:** auto\n",
+        )
+        .unwrap();
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert_eq!(spawnable.len(), 1);
+        assert_eq!(spawnable[0].id, "features/step-b");
+
+        // Complete B → C spawnable
+        std::fs::write(
+            features.join("step-b.md"),
+            "# Step B\n\n**Status:** Complete\n**Labels:** auto\n\
+             **Depends-On:** features/step-a\n",
+        )
+        .unwrap();
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert_eq!(spawnable.len(), 1);
+        assert_eq!(spawnable[0].id, "features/step-c");
+
+        // Complete C → nothing left
+        std::fs::write(
+            features.join("step-c.md"),
+            "# Step C\n\n**Status:** Complete\n**Labels:** auto\n\
+             **Depends-On:** features/step-b\n",
+        )
+        .unwrap();
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        assert!(spawnable.is_empty());
+    }
+
+    /// Tests that the blocked-by chain for parent-child siblings works alongside
+    /// independent children (A has no deps, D has no deps, B blocked by A).
+    #[test]
+    fn list_spawnable_parent_child_mixed_deps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tasks = tmp.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+
+        // Parent P
+        std::fs::write(
+            tasks.join("parent.md"),
+            "# Parent\n\n**Status:** In Progress\n**Labels:** auto\n",
+        )
+        .unwrap();
+
+        // Child A — no deps
+        std::fs::write(
+            tasks.join("child-a.md"),
+            "# Child A\n\n**Status:** Planned\n**Labels:** auto\n**Parent:** tasks/parent\n",
+        )
+        .unwrap();
+
+        // Child B — blocked by A
+        std::fs::write(
+            tasks.join("child-b.md"),
+            "# Child B\n\n**Status:** Planned\n**Labels:** auto\n\
+             **Parent:** tasks/parent\n**Depends-On:** tasks/child-a\n",
+        )
+        .unwrap();
+
+        // Child D — no deps (independent)
+        std::fs::write(
+            tasks.join("child-d.md"),
+            "# Child D\n\n**Status:** Planned\n**Labels:** auto\n**Parent:** tasks/parent\n",
+        )
+        .unwrap();
+
+        let provider = FileProvider::new(tmp.path());
+        let labels = vec!["auto".to_string()];
+
+        // Tick 1: A and D are spawnable, B is not
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        let ids: Vec<&str> = spawnable.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(spawnable.len(), 2, "tick 1: A and D should be spawnable");
+        assert!(ids.contains(&"tasks/child-a"), "A should be spawnable");
+        assert!(ids.contains(&"tasks/child-d"), "D should be spawnable");
+        assert!(!ids.contains(&"tasks/child-b"), "B should NOT be spawnable");
+
+        // Complete A → B becomes spawnable
+        std::fs::write(
+            tasks.join("child-a.md"),
+            "# Child A\n\n**Status:** Complete\n**Labels:** auto\n**Parent:** tasks/parent\n",
+        )
+        .unwrap();
+        let spawnable = provider.list_spawnable(&labels).unwrap();
+        let ids: Vec<&str> = spawnable.iter().map(|i| i.id.as_str()).collect();
+        assert!(ids.contains(&"tasks/child-b"), "B should now be spawnable");
+        assert!(
+            ids.contains(&"tasks/child-d"),
+            "D should still be spawnable"
+        );
+    }
 }
