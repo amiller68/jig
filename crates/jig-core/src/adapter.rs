@@ -152,10 +152,7 @@ pub fn build_resume_command(adapter: &AgentAdapter) -> String {
 
 /// Tools that are always blocked for spawned workers.
 /// Workers must use `jig pr` instead of raw `gh` PR commands.
-pub const DEFAULT_DISALLOWED_TOOLS: &[&str] = &[
-    "Bash(gh pr create:*)",
-    "Bash(gh pr merge:*)",
-];
+pub const DEFAULT_DISALLOWED_TOOLS: &[&str] = &["Bash(gh pr create:*)", "Bash(gh pr merge:*)"];
 
 /// Build the spawn command for an agent (always appends auto_flag).
 ///
