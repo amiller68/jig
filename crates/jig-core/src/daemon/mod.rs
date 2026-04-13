@@ -509,17 +509,22 @@ impl<'a> Daemon<'a> {
             .map(|r| r.wrapup.clone())
             .unwrap_or_default();
 
+        // Accumulate parent branch results from both async and inline-poll
+        // paths so the sync actor can fetch their tracking refs.
+        let mut parent_branch_results: Vec<messages::ParentBranchResult> = issue_response
+            .as_ref()
+            .map(|r| r.parent_branches.clone())
+            .unwrap_or_default();
+
         // Log parent integration branch results from the issue actor.
-        if let Some(ref resp) = issue_response {
-            for pb in &resp.parent_branches {
-                if let Some(ref err) = pb.error {
-                    tracing::warn!(
-                        repo = %pb.repo_name,
-                        issue = %pb.issue_id,
-                        branch = %pb.branch_name,
-                        "parent branch error: {}", err
-                    );
-                }
+        for pb in &parent_branch_results {
+            if let Some(ref err) = pb.error {
+                tracing::warn!(
+                    repo = %pb.repo_name,
+                    issue = %pb.issue_id,
+                    branch = %pb.branch_name,
+                    "parent branch error: {}", err
+                );
             }
         }
 
@@ -562,6 +567,7 @@ impl<'a> Daemon<'a> {
                         );
                     }
                 }
+                parent_branch_results.extend(response.parent_branches);
                 if !spawnable.is_empty() {
                     tracing::info!(
                         count = spawnable.len(),
@@ -952,7 +958,34 @@ impl<'a> Daemon<'a> {
 
         // 2. Trigger background sync if interval elapsed
         if !self.daemon_config.skip_sync {
-            let parent_branches = self.collect_parent_branches(&workers_state, &registry);
+            let mut parent_branches = self.collect_parent_branches(&workers_state, &registry);
+
+            // Also include parent branches from the issue actor response.
+            // This closes the chicken-and-egg gap: ensure_parent_branches
+            // creates/pushes parent branches before any child worker exists,
+            // so collect_parent_branches (which only looks at active workers)
+            // won't include them. Without this, the tracking ref
+            // (refs/remotes/origin/{branch}) never gets populated by fetch,
+            // and remote_branch_exists returns false indefinitely.
+            {
+                let mut seen: HashSet<String> = parent_branches
+                    .iter()
+                    .map(|(name, _, branch)| format!("{}:{}", name, branch))
+                    .collect();
+                for pb in &parent_branch_results {
+                    if pb.error.is_none() {
+                        let key = format!("{}:{}", pb.repo_name, pb.branch_name);
+                        if seen.insert(key) {
+                            parent_branches.push((
+                                pb.repo_name.clone(),
+                                pb.repo_root.clone(),
+                                pb.branch_name.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+
             runtime.maybe_trigger_sync(
                 &registry,
                 self.daemon_config.repo_filter.as_deref(),
@@ -1103,7 +1136,12 @@ impl<'a> Daemon<'a> {
             runtime.send_spawn(spawnable);
         }
 
-        // 6. Send triageable issues to background triage actor (subprocess, non-blocking)
+        // 6. Send triageable issues to background triage actor (subprocess, non-blocking).
+        //    The issue actor now emits `TriageIssue` directly, so no conversion
+        //    from `SpawnableIssue` is needed — triageable flows through its own
+        //    channel, never through `spawn_tx`. Duplicate prevention is handled
+        //    by the `is_active` filter above plus `TriageTracker` registration
+        //    here on the triage-routing path.
         if !triageable.is_empty() {
             let now = chrono::Utc::now().timestamp();
             for ti in &triageable {

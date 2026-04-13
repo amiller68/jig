@@ -89,10 +89,11 @@ fn collect_spawnable(
 
 /// Collect triageable issues from a provider.
 ///
-/// Returns [`TriageIssue`]s directly — triage no longer creates workers, so
-/// there's no worker-name collision check against `existing_workers`. The
-/// `TriageTracker` (keyed by issue id) is used in the daemon tick to avoid
-/// re-dispatching an in-flight triage.
+/// Triage runs as a direct subprocess (no worktree, branch, or tmux window),
+/// so these issues bypass the spawn actor entirely and do not have a
+/// corresponding worker in `existing_workers`. Duplicate prevention for
+/// in-flight triages is handled by `TriageTracker::is_active` in the daemon
+/// tick loop, not by checking worker names here.
 fn collect_triageable(
     provider: &dyn IssueProvider,
     provider_kind: ProviderKind,
@@ -112,6 +113,8 @@ fn collect_triageable(
         .into_iter()
         .take(budget)
         .map(|issue| {
+            // Synthetic display name for logging/notifications; there is no
+            // worktree or tmux window behind it.
             let worker_name = format!("triage-{}", issue.id.to_lowercase());
             TriageIssue {
                 repo_root: repo_root.to_path_buf(),
@@ -625,6 +628,11 @@ fn collect_parent_candidates(provider: &dyn IssueProvider) -> Vec<Issue> {
 }
 
 /// Create a local branch from `origin/{base_branch}` and push it to origin.
+///
+/// If the local branch already exists (e.g. leftover from a previous run),
+/// skip creation and push the existing branch. This prevents a deadlock where
+/// `git2::Repository::branch()` fails with "reference already exists" every
+/// tick while the tracking ref remains absent.
 fn create_and_push_branch(repo_root: &Path, branch: &str, base_branch: &str) -> Result<(), String> {
     let repo = Repo::open(repo_root).map_err(|e| format!("failed to open repo: {}", e))?;
     let inner = repo.inner();
@@ -640,12 +648,23 @@ fn create_and_push_branch(repo_root: &Path, branch: &str, base_branch: &str) -> 
         .peel_to_commit()
         .map_err(|e| format!("failed to peel to commit: {}", e))?;
 
-    // Create local branch
-    inner
-        .branch(branch, &commit, false)
-        .map_err(|e| format!("failed to create branch '{}': {}", branch, e))?;
+    // Create local branch — tolerate "already exists" so we can still push
+    match inner.branch(branch, &commit, false) {
+        Ok(_) => {}
+        Err(e) if e.code() == git2::ErrorCode::Exists => {
+            tracing::debug!(
+                branch = %branch,
+                "local branch already exists, skipping creation — will push existing"
+            );
+        }
+        Err(e) => {
+            return Err(format!("failed to create branch '{}': {}", branch, e));
+        }
+    }
 
-    // Push to origin via subprocess (git2 push requires credential setup)
+    // Push to origin via subprocess (git2 push requires credential setup).
+    // A successful push also populates the local tracking ref
+    // (refs/remotes/origin/{branch}), closing the remote_branch_exists gap.
     let output = Command::new("git")
         .args(["push", "origin", &format!("{branch}:{branch}")])
         .current_dir(repo_root)
@@ -1280,5 +1299,188 @@ mod tests {
             &existing,
         );
         assert!(wrapup2.is_empty());
+    }
+
+    // -- create_and_push_branch / ensure_parent_branches deadlock fix tests ---
+
+    /// Helper: set up a self-referencing git repo (origin points at itself)
+    /// with an initial commit and `git fetch origin` so tracking refs exist.
+    fn setup_self_remote_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+        use std::process::Command as StdCommand;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path().to_path_buf();
+
+        let git = |args: &[&str]| {
+            let out = StdCommand::new("git")
+                .args(args)
+                .current_dir(&repo_root)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "test@test.com")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "test@test.com")
+                .output()
+                .expect("git command failed");
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        git(&["init", "-q", "-b", "main"]);
+        git(&[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+        git(&["remote", "add", "origin", repo_root.to_str().unwrap()]);
+        git(&["fetch", "origin"]);
+
+        (tmp, repo_root)
+    }
+
+    /// When a local branch exists but the tracking ref does not,
+    /// `create_and_push_branch` should succeed (not error with
+    /// "reference already exists") and the tracking ref should be
+    /// populated after the push.
+    #[test]
+    fn create_and_push_branch_tolerates_existing_local_branch() {
+        use std::process::Command as StdCommand;
+
+        let (_tmp, repo_root) = setup_self_remote_repo();
+
+        let branch = "al/parent-integration";
+
+        // Create the local branch manually (simulating leftover from earlier run)
+        let out = StdCommand::new("git")
+            .args(["branch", branch])
+            .current_dir(&repo_root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+
+        // Verify: local branch exists
+        let repo = Repo::open(&repo_root).unwrap();
+        assert!(
+            repo.inner()
+                .find_branch(branch, git2::BranchType::Local)
+                .is_ok(),
+            "local branch should exist"
+        );
+        // Verify: tracking ref does NOT exist yet
+        assert!(
+            !remote_branch_exists(&repo_root, branch),
+            "tracking ref should not exist before push"
+        );
+
+        // This is the call that used to fail with "reference already exists"
+        let result = create_and_push_branch(&repo_root, branch, "main");
+        assert!(
+            result.is_ok(),
+            "create_and_push_branch should succeed: {:?}",
+            result.err()
+        );
+
+        // After push, the tracking ref should be populated
+        assert!(
+            remote_branch_exists(&repo_root, branch),
+            "tracking ref should exist after push"
+        );
+    }
+
+    /// When no local branch exists, `create_and_push_branch` should
+    /// create it and push — the normal happy path still works.
+    #[test]
+    fn create_and_push_branch_creates_new_branch() {
+        let (_tmp, repo_root) = setup_self_remote_repo();
+
+        let branch = "al/new-parent";
+        assert!(!remote_branch_exists(&repo_root, branch));
+
+        let result = create_and_push_branch(&repo_root, branch, "main");
+        assert!(result.is_ok(), "should succeed: {:?}", result.err());
+        assert!(remote_branch_exists(&repo_root, branch));
+    }
+
+    /// `ensure_parent_branches` with a pre-existing local branch and no
+    /// tracking ref should succeed and make children spawnable.
+    #[test]
+    fn ensure_parent_branches_with_stale_local_branch() {
+        use std::process::Command as StdCommand;
+
+        let (_tmp, repo_root) = setup_self_remote_repo();
+
+        let parent_branch = "al/eng-100-parent-epic";
+
+        // Pre-seed: local branch exists, no tracking ref
+        let out = StdCommand::new("git")
+            .args(["branch", parent_branch])
+            .current_dir(&repo_root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(!remote_branch_exists(&repo_root, parent_branch));
+
+        // Set up issues: parent with a child
+        let parent = Issue {
+            id: "ENG-100".to_string(),
+            title: "Parent Epic".to_string(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![child_ref("ENG-101", IssueStatus::Backlog)],
+            labels: vec![],
+            branch_name: Some(parent_branch.to_string()),
+            parent: None,
+        };
+        let provider = MockProvider::new(vec![parent]);
+
+        let results = ensure_parent_branches(&provider, &repo_root, "test", "main");
+
+        // Should succeed without error
+        assert_eq!(results.len(), 1);
+        let pb = &results[0];
+        assert!(pb.error.is_none(), "should not error: {:?}", pb.error);
+        assert!(pb.created, "branch should be marked as created");
+
+        // Tracking ref should now exist
+        assert!(
+            remote_branch_exists(&repo_root, parent_branch),
+            "tracking ref should be populated after ensure_parent_branches"
+        );
+
+        // Child should now be spawnable
+        let child = Issue {
+            id: "ENG-101".to_string(),
+            title: "Child".to_string(),
+            status: IssueStatus::Planned,
+            priority: None,
+            category: None,
+            depends_on: vec![],
+            body: String::new(),
+            source: String::new(),
+            children: vec![],
+            labels: vec!["auto".to_string()],
+            branch_name: None,
+            parent: Some(ParentIssue {
+                id: "ENG-100".to_string(),
+                title: "Parent Epic".to_string(),
+                branch_name: Some(parent_branch.to_string()),
+                status: Some(IssueStatus::InProgress),
+                body: None,
+            }),
+        };
+        assert!(
+            is_child_spawnable(&child, &repo_root),
+            "child should be spawnable after parent branch is pushed"
+        );
     }
 }
