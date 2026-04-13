@@ -73,19 +73,39 @@ impl Ps {
         };
 
         let mut display = vec![];
+        let mut triage_display = vec![];
         jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
             display.clone_from(&tick.worker_display);
+            triage_display.clone_from(&tick.triage_display);
             false
         })?;
 
-        if display.is_empty() {
+        if display.is_empty() && triage_display.is_empty() {
             eprintln!("No spawned sessions");
         } else if global {
-            let output = ui::render_worker_table_grouped(&display, false);
-            eprintln!("{output}");
+            if !display.is_empty() {
+                let output = ui::render_worker_table_grouped(&display, false);
+                eprintln!("{output}");
+            }
+            let triage_section = ui::render_triage_section_grouped(&triage_display, false);
+            if !triage_section.is_empty() {
+                if !display.is_empty() {
+                    eprintln!();
+                }
+                eprintln!("{triage_section}");
+            }
         } else {
-            let table = ui::render_worker_table(&display, false);
-            eprintln!("{table}");
+            if !display.is_empty() {
+                let table = ui::render_worker_table(&display, false);
+                eprintln!("{table}");
+            }
+            let triage_section = ui::render_triage_section(&triage_display, false);
+            if !triage_section.is_empty() {
+                if !display.is_empty() {
+                    eprintln!();
+                }
+                eprintln!("{triage_section}");
+            }
         }
 
         Ok(NoOutput)
@@ -270,7 +290,17 @@ fn run_watch(
                     } else {
                         ui::render_worker_table(&tick.worker_display, true).to_string()
                     };
+                    let triage_output = if global {
+                        ui::render_triage_section_grouped(&tick.triage_display, true)
+                    } else {
+                        ui::render_triage_section(&tick.triage_display, true)
+                    };
                     let status_line = format_tick_status(&Some(tick));
+                    let triage_count = if tick.triage_display.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} triages", tick.triage_display.len())
+                    };
                     let spawning_section = if tick.spawning.is_empty() {
                         String::new()
                     } else {
@@ -282,8 +312,13 @@ fn run_watch(
                     };
                     let nudge_section = format_nudge_messages(&tick.nudge_messages);
                     let timer_section = format_timer_info(&tick.timer_info);
+                    let triage_section = if triage_output.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n{triage_output}\n")
+                    };
                     let output = format!(
-                        "\x1B[1mjig ps --watch\x1B[0m — {} workers  \x1B[2m(every {}s)\x1B[0m{status_line}\n\n{table_output}{spawning_section}{nudge_section}\n\x1B[2m[l]ogs  [q]uit{timer_section}\x1B[0m",
+                        "\x1B[1mjig ps --watch\x1B[0m — {} workers{triage_count}  \x1B[2m(every {}s)\x1B[0m{status_line}\n\n{table_output}{triage_section}{spawning_section}{nudge_section}\n\x1B[2m[l]ogs  [q]uit{timer_section}\x1B[0m",
                         tick.worker_display.len(), interval,
                     );
                     for line in output.lines() {

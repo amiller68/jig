@@ -91,6 +91,19 @@ pub struct WorkerDisplayInfo {
     pub nudge_cooldown_remaining: Option<u64>,
 }
 
+/// Pre-computed display data for an in-flight triage subprocess.
+#[derive(Debug, Clone)]
+pub struct TriageDisplayInfo {
+    /// Linear issue identifier (e.g. "JIG-77").
+    pub issue_id: String,
+    /// Triage model name (e.g. "sonnet").
+    pub model: String,
+    /// Seconds elapsed since the triage was spawned.
+    pub elapsed_secs: u64,
+    /// Repo name this triage belongs to.
+    pub repo_name: String,
+}
+
 /// Per-worker PR health info collected during a tick.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerTickInfo {
@@ -147,6 +160,8 @@ pub struct TickResult {
     pub pruned: Vec<String>,
     /// Pre-computed display data for the render callback (zero I/O).
     pub worker_display: Vec<WorkerDisplayInfo>,
+    /// Pre-computed display data for in-flight triages.
+    pub triage_display: Vec<TriageDisplayInfo>,
     /// Nudge messages delivered this tick: (worker_name, nudge_type, message_text).
     pub nudge_messages: Vec<(String, String, String)>,
     /// Timer info for the daemon's sync and poll intervals.
@@ -1005,6 +1020,27 @@ impl<'a> Daemon<'a> {
             !is_terminal && !tmux_dead
         });
         result.worker_display.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Build triage display from tracker
+        {
+            let now = chrono::Utc::now().timestamp();
+            for entry in runtime.triage_tracker().active_entries() {
+                let model = Self::find_repo_path(&registry, &entry.repo_name)
+                    .and_then(|re| JigToml::load(&re.path).ok().flatten())
+                    .map(|toml| toml.triage.model.clone())
+                    .unwrap_or_else(|| "sonnet".to_string());
+                let elapsed = (now - entry.spawned_at).max(0) as u64;
+                result.triage_display.push(TriageDisplayInfo {
+                    issue_id: entry.issue_id.clone(),
+                    model,
+                    elapsed_secs: elapsed,
+                    repo_name: entry.repo_name.clone(),
+                });
+            }
+            result
+                .triage_display
+                .sort_by(|a, b| a.issue_id.cmp(&b.issue_id));
+        }
 
         // Save updated state
         workers_state.save().unwrap_or_else(|e| {
