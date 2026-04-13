@@ -17,9 +17,9 @@ The daemon treats an issue as an epic parent when **all** of these are true:
 2. At least one child has status **Backlog**, **InProgress**, or **Planned**
 3. The parent itself is **Planned** or **InProgress**
 
-That's it. No special label. No config flag. The detection is structural — if an issue has active children, it's an epic.
+That's it. No config flag specific to epics. The detection is structural — if an issue has active children, it's an epic.
 
-The parent does **not** need the auto-spawn label. Children do (if you want the daemon to spawn them automatically), but the parent is detected purely by structure and status.
+The parent does **not** need the `auto_spawn_labels` label (that's only for children entering the spawn pipeline). However, the parent **does** need to pass through the provider's configured filters. If your Linear profile or per-repo config has `labels = ["jig"]`, the parent must carry that label to be visible to the daemon's `list()` call at all. Same goes for `team`, `projects`, and `assignee` filters — the parent must match whatever the provider is scoped to.
 
 ## The lifecycle
 
@@ -49,7 +49,7 @@ Parent (Planned)
 On the first tick where the parent is detected, the daemon:
 
 1. Derives a branch name from the issue (uses Linear's `branchName` if set, otherwise generates one from the issue ID)
-2. Creates the branch from `origin/<base_branch>` (usually `origin/main`)
+2. Creates the branch from `origin/<base_branch>` (whatever the repo's configured base branch is)
 3. Pushes to origin
 4. Flips the parent issue to **InProgress**
 
@@ -69,7 +69,7 @@ Children branch off the parent's integration branch (not main) and their PRs tar
 
 ### Stage 3: Integration
 
-Each time a child PR merges into the parent branch, the daemon fast-forwards the local tracking ref. If a parent worktree exists (only during wrap-up), it pulls the changes and nudges the parent worker.
+Each time a child PR merges into the parent branch, the daemon fast-forwards the local ref to match the remote. During most of the epic lifecycle there is no parent worktree — the branch is managed bare. If a parent worktree does exist (during wrap-up), the daemon also pulls into it and nudges the parent worker.
 
 Child merges accumulate on the parent branch. No merge commits — fast-forward only.
 
@@ -162,7 +162,7 @@ jig issues complete AUTH-5
 
 1. Look up the current worktree's linked issue
 2. If the issue has a parent with a `branch_name`, use that as the PR base
-3. Otherwise fall back to the repo's configured base branch (usually `origin/main`)
+3. Otherwise fall back to the repo's configured base branch
 
 This means child PRs always target the parent's integration branch — agents don't need to know about it.
 
