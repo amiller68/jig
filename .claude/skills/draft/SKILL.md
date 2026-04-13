@@ -2,8 +2,7 @@
 description: Push current branch and create a draft PR. Use when ready to share work for review or collaborate on a branch.
 allowed-tools:
   - Bash(git:*)
-  - Bash(gh pr:*)
-  - Bash(gh repo:*)
+  - Bash(jig pr:*)
   - Read
   - Glob
   - Grep
@@ -13,12 +12,7 @@ Create a draft pull request for the current branch.
 
 ## Steps
 
-1. Get the current branch name:
-   ```
-   git branch --show-current
-   ```
-
-2. Check for uncommitted changes:
+1. Check for uncommitted changes:
    ```
    git status --porcelain
    ```
@@ -28,34 +22,26 @@ Create a draft pull request for the current branch.
    c. Create a commit with a descriptive message based on the changes
    d. Use conventional commit format (feat:, fix:, docs:, refactor:, test:, chore:)
 
-3. Check if the branch has an upstream:
+2. Create the draft PR:
    ```
-   git status -sb
+   jig pr
    ```
-   - If no upstream: `git push -u origin <branch>`
-   - If upstream exists: `git push`
+   This automatically pushes the branch and creates a draft PR with the correct base branch (including parent branch resolution for epic children).
 
-4. Determine the base branch. Check in order:
-   - `main` branch exists? Use `main`
-   - `master` branch exists? Use `master`
-   - Fall back to the repo's default branch: `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`
+3. Return the PR URL to the user.
 
-5. Gather context — commits unique to this branch:
-   ```
-   git log <base>..HEAD --oneline
-   ```
+## Viewing PR feedback
 
-6. Create a draft PR:
-   ```
-   gh pr create --draft --base <base>
-   ```
-   - Title: descriptive of what the branch accomplishes
-   - Body: summarize ALL changes based on the commits
+After the PR is created, use `jig pr comments` to view review feedback:
 
-7. Return the PR URL to the user.
+```
+jig pr comments              # unaddressed feedback on current branch's PR
+jig pr comments --pr 123     # explicit PR number
+```
 
 ## Important
 
 - **Commit ALL uncommitted changes** before pushing — don't leave anything behind
 - Do NOT use `--no-verify` when pushing — let git hooks run
 - If the linter/formatter finds issues, fix them before committing
+- Use `jig pr` to create PRs — NEVER use `gh pr create` directly
