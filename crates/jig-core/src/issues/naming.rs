@@ -54,16 +54,6 @@ pub fn sanitize_worker_name(name: &str) -> String {
     }
 }
 
-/// Derive a triage worker name by prepending `triage-` to the normal worker name.
-///
-/// Examples:
-/// - `jig-38-add-statuses` → `triage-jig-38-add-statuses`
-/// - `feature/aut-4969-spawn` → `triage-feature/aut-4969-spawn`
-pub fn derive_triage_worker_name(issue_id: &str, branch_name: Option<&str>) -> String {
-    let base = derive_worker_name(issue_id, branch_name);
-    format!("triage-{}", base)
-}
-
 /// Try to extract a Linear-style identifier (e.g. `AUT-5044`) from a string.
 ///
 /// Handles:
@@ -233,29 +223,6 @@ mod tests {
     #[test]
     fn sanitize_worker_name_empty_fallback() {
         assert_eq!(sanitize_worker_name("..."), "worker");
-    }
-
-    // -- derive_triage_worker_name tests --
-
-    #[test]
-    fn triage_worker_name_has_prefix() {
-        assert_eq!(
-            derive_triage_worker_name("JIG-38", Some("al/jig-38-add-statuses")),
-            "triage-al/jig-38-add-statuses"
-        );
-    }
-
-    #[test]
-    fn triage_worker_name_no_branch() {
-        assert_eq!(derive_triage_worker_name("ENG-123", None), "triage-eng-123");
-    }
-
-    #[test]
-    fn triage_worker_name_file_issue() {
-        assert_eq!(
-            derive_triage_worker_name("features/my-feature", None),
-            "triage-features/my-feature"
-        );
     }
 
     // -- extract_linear_identifier tests --

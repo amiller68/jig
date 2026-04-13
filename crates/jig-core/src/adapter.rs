@@ -106,32 +106,10 @@ pub fn supported_agents() -> &'static [&'static str] {
     &["claude"]
 }
 
-/// Build a triage command for ephemeral execution with `--model` and
-/// `--allowed-tools` restrictions. The prompt is supplied on stdin by
-/// redirecting from `prompt_file` — Claude Code has no file-based prompt
-/// flag, and stdin redirection avoids any shell-escaping pitfalls with
-/// long markdown prompts.
-pub fn build_triage_command(
-    adapter: &AgentAdapter,
-    prompt_file: &std::path::Path,
-    model: &str,
-    allowed_tools: &[&str],
-) -> String {
-    let mut cmd = format!("{} {}", adapter.command, adapter.ephemeral_flags);
-    cmd = format!("{} --model {}", cmd, model);
-    if !allowed_tools.is_empty() {
-        let tools = allowed_tools.join(",");
-        cmd = format!("{} --allowed-tools \"{}\"", cmd, tools);
-    }
-    cmd = format!("{} < {}", cmd, prompt_file.display());
-    cmd
-}
-
 /// Build a triage command as an argv vector for direct subprocess execution.
 ///
-/// Unlike [`build_triage_command`] which returns a shell string for tmux,
-/// this returns a `Vec<String>` suitable for `std::process::Command`. The
-/// prompt is read from `prompt_file` and piped to stdin by the caller.
+/// Returns a `Vec<String>` suitable for `std::process::Command`. The
+/// prompt is piped to stdin by the caller.
 pub fn build_triage_argv(
     adapter: &AgentAdapter,
     model: &str,
@@ -328,24 +306,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_triage_command() {
-        let prompt_file = std::path::Path::new("/tmp/worktree/.jig/triage-prompt.md");
-        let cmd = build_triage_command(
-            &CLAUDE_CODE,
-            prompt_file,
-            "sonnet",
-            &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"],
-        );
-        assert_eq!(
-            cmd,
-            "claude --print --no-session-persistence --dangerously-skip-permissions \
-             --model sonnet \
-             --allowed-tools \"Read,Glob,Grep,Bash(jig *),mcp__linear*\" \
-             < /tmp/worktree/.jig/triage-prompt.md"
-        );
-    }
-
-    #[test]
     fn test_build_triage_argv() {
         let argv = build_triage_argv(
             &CLAUDE_CODE,
@@ -380,18 +340,6 @@ mod tests {
                 "--model",
                 "opus",
             ]
-        );
-    }
-
-    #[test]
-    fn test_build_triage_command_custom_model() {
-        let prompt_file = std::path::Path::new("/tmp/triage.md");
-        let cmd = build_triage_command(&CLAUDE_CODE, prompt_file, "opus", &[]);
-        assert_eq!(
-            cmd,
-            "claude --print --no-session-persistence --dangerously-skip-permissions \
-             --model opus \
-             < /tmp/triage.md"
         );
     }
 }
