@@ -540,6 +540,10 @@ pub struct AgentConfig {
     /// Agent type (e.g., "claude-code", "cursor")
     #[serde(rename = "type", default = "default_agent_type")]
     pub agent_type: String,
+    /// Tools to disallow for spawned workers (passed as `--disallowedTools`).
+    /// Example: `["Bash(gh pr create:*)", "Bash(gh pr merge:*)"]`
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
 }
 
 fn default_agent_type() -> String {
@@ -550,6 +554,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             agent_type: default_agent_type(),
+            disallowed_tools: Vec::new(),
         }
     }
 }

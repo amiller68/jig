@@ -204,7 +204,11 @@ impl Worktree {
             adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
 
         session::create_window(&self.session_name, &self.name, &self.path)?;
-        let cmd = adapter::build_spawn_command(agent_adapter, Some(&effective_context));
+        let cmd = adapter::build_spawn_command(
+            agent_adapter,
+            Some(&effective_context),
+            &config.agent.disallowed_tools,
+        );
         session::send_keys(&self.session_name, &self.name, &cmd)?;
 
         Ok(())
@@ -234,7 +238,11 @@ impl Worktree {
         session::create_window(&self.session_name, &self.name, &self.path)?;
 
         // Build spawn command using adapter (always auto)
-        let cmd = adapter::build_spawn_command(agent_adapter, Some(&effective_context));
+        let cmd = adapter::build_spawn_command(
+            agent_adapter,
+            Some(&effective_context),
+            &config.agent.disallowed_tools,
+        );
 
         // Send command to window
         session::send_keys(&self.session_name, &self.name, &cmd)?;

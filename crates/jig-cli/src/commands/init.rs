@@ -404,7 +404,7 @@ fn launch_audit(
     extra: Option<&str>,
 ) -> Result<(), InitError> {
     let prompt = audit_prompt(adapter, has_backup, extra);
-    let cmd = adapter::build_spawn_command(adapter, Some(&prompt));
+    let cmd = adapter::build_spawn_command(adapter, Some(&prompt), &[]);
 
     let session_name = "jig-init";
     let window_name = repo_root

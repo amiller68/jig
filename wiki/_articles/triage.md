@@ -63,7 +63,7 @@ Triage respects the same provider filters as auto-spawn. If your Linear config s
 
 ## What the agent can do
 
-Triage agents run with a restricted tool set — read-only access plus the jig CLI and Linear MCP:
+Triage agents run with a restricted tool set — read-only codebase access plus the jig CLI:
 
 | Tool | Purpose |
 |------|---------|
@@ -71,9 +71,8 @@ Triage agents run with a restricted tool set — read-only access plus the jig C
 | `Glob` | Find files by pattern |
 | `Grep` | Search file contents |
 | `Bash(jig *)` | Run jig CLI commands (issues update, issues status) |
-| `mcp__linear*` | Query Linear for additional context |
 
-No `Edit`, no `Write`, no general `Bash`. The agent cannot modify code — it can only read the codebase and write back to Linear.
+No `Edit`, no `Write`, no general `Bash`. The agent cannot modify code — it can only read the codebase and write back to Linear via `jig issues`.
 
 ### What the agent produces
 
@@ -138,7 +137,7 @@ jig issues list --status backlog   # triaged, awaiting human review
 | **Trigger** | Issue in Triage status | Issue in Planned status with auto-spawn label |
 | **Execution** | One-shot subprocess | Persistent tmux session |
 | **Worktree** | None | Dedicated git worktree |
-| **Tools** | Read-only (Read, Glob, Grep, jig CLI, Linear MCP) | Full access (Edit, Write, Bash, all MCP) |
+| **Tools** | Read-only (Read, Glob, Grep, jig CLI) | Full access (Edit, Write, Bash) |
 | **Output** | Updates issue description, transitions to Backlog | Commits code, opens draft PR |
 | **Duration** | Minutes (default timeout: 10 min) | Hours to days |
 | **Model** | Sonnet (configurable) | Configurable per-repo |

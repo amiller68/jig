@@ -231,8 +231,8 @@ pub fn render_triage_prompt(repo_root: &Path, issue: &Issue) -> Result<String> {
 /// with stdin piped from the prompt. Returns `Ok(())` on success or an
 /// error message on failure.
 pub fn run_triage_subprocess(repo_root: &Path, issue: &Issue) -> std::result::Result<(), String> {
-    // Allowed tools for triage workers — read-only access plus jig CLI and Linear MCP.
-    const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"];
+    // Allowed tools for triage workers — read-only codebase access plus jig CLI.
+    const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)"];
 
     let prompt = render_triage_prompt(repo_root, issue).map_err(|e| e.to_string())?;
 
@@ -380,7 +380,11 @@ pub fn launch_tmux_window(
     session::create_window(&repo.session_name, name, worktree_path)?;
 
     // Build spawn command using adapter (always auto)
-    let cmd = adapter::build_spawn_command(agent_adapter, Some(&effective_context));
+    let cmd = adapter::build_spawn_command(
+        agent_adapter,
+        Some(&effective_context),
+        &config.agent.disallowed_tools,
+    );
 
     // Send command to window
     session::send_keys(&repo.session_name, name, &cmd)?;

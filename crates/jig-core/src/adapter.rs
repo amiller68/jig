@@ -150,8 +150,22 @@ pub fn build_resume_command(adapter: &AgentAdapter) -> String {
     cmd
 }
 
-/// Build the spawn command for an agent (always appends auto_flag)
-pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>) -> String {
+/// Tools that are always blocked for spawned workers.
+/// Workers must use `jig pr` instead of raw `gh` PR commands.
+pub const DEFAULT_DISALLOWED_TOOLS: &[&str] = &[
+    "Bash(gh pr create:*)",
+    "Bash(gh pr merge:*)",
+];
+
+/// Build the spawn command for an agent (always appends auto_flag).
+///
+/// Merges `DEFAULT_DISALLOWED_TOOLS` with any extra `disallowed_tools`
+/// from config, then passes the combined list via `--disallowedTools`.
+pub fn build_spawn_command(
+    adapter: &AgentAdapter,
+    context: Option<&str>,
+    disallowed_tools: &[String],
+) -> String {
     let mut cmd = adapter.command.to_string();
 
     if let Some(ctx) = context {
@@ -163,6 +177,18 @@ pub fn build_spawn_command(adapter: &AgentAdapter, context: Option<&str>) -> Str
     if !adapter.auto_flag.is_empty() {
         cmd.push(' ');
         cmd.push_str(adapter.auto_flag);
+    }
+
+    // Merge hardcoded defaults with config extras
+    let mut all_tools: Vec<&str> = DEFAULT_DISALLOWED_TOOLS.to_vec();
+    for tool in disallowed_tools {
+        if !all_tools.contains(&tool.as_str()) {
+            all_tools.push(tool.as_str());
+        }
+    }
+    if !all_tools.is_empty() {
+        let tools = all_tools.join(",");
+        cmd = format!("{} --disallowedTools \"{}\"", cmd, tools);
     }
 
     cmd
@@ -190,24 +216,58 @@ mod tests {
     #[test]
     fn test_build_spawn_command_no_context() {
         let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, None);
-        assert_eq!(cmd, "claude --dangerously-skip-permissions");
+        let cmd = build_spawn_command(adapter, None, &[]);
+        assert_eq!(
+            cmd,
+            "claude --dangerously-skip-permissions \
+             --disallowedTools \"Bash(gh pr create:*),Bash(gh pr merge:*)\""
+        );
     }
 
     #[test]
     fn test_build_spawn_command_with_context() {
         let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, Some("hello world"));
-        assert_eq!(cmd, "claude 'hello world' --dangerously-skip-permissions");
+        let cmd = build_spawn_command(adapter, Some("hello world"), &[]);
+        assert_eq!(
+            cmd,
+            "claude 'hello world' --dangerously-skip-permissions \
+             --disallowedTools \"Bash(gh pr create:*),Bash(gh pr merge:*)\""
+        );
     }
 
     #[test]
     fn test_build_spawn_command_escapes_quotes() {
         let adapter = &CLAUDE_CODE;
-        let cmd = build_spawn_command(adapter, Some("it's a test"));
+        let cmd = build_spawn_command(adapter, Some("it's a test"), &[]);
         assert_eq!(
             cmd,
-            "claude 'it'\\''s a test' --dangerously-skip-permissions"
+            "claude 'it'\\''s a test' --dangerously-skip-permissions \
+             --disallowedTools \"Bash(gh pr create:*),Bash(gh pr merge:*)\""
+        );
+    }
+
+    #[test]
+    fn test_build_spawn_command_with_extra_disallowed_tools() {
+        let adapter = &CLAUDE_CODE;
+        let disallowed = vec!["Bash(rm -rf:*)".to_string()];
+        let cmd = build_spawn_command(adapter, Some("do work"), &disallowed);
+        assert_eq!(
+            cmd,
+            "claude 'do work' --dangerously-skip-permissions \
+             --disallowedTools \"Bash(gh pr create:*),Bash(gh pr merge:*),Bash(rm -rf:*)\""
+        );
+    }
+
+    #[test]
+    fn test_build_spawn_command_deduplicates_disallowed_tools() {
+        let adapter = &CLAUDE_CODE;
+        // Config duplicates a default — should not appear twice
+        let disallowed = vec!["Bash(gh pr create:*)".to_string()];
+        let cmd = build_spawn_command(adapter, Some("work"), &disallowed);
+        assert_eq!(
+            cmd,
+            "claude 'work' --dangerously-skip-permissions \
+             --disallowedTools \"Bash(gh pr create:*),Bash(gh pr merge:*)\""
         );
     }
 
@@ -310,7 +370,7 @@ mod tests {
         let argv = build_triage_argv(
             &CLAUDE_CODE,
             "sonnet",
-            &["Read", "Glob", "Grep", "Bash(jig *)", "mcp__linear*"],
+            &["Read", "Glob", "Grep", "Bash(jig *)"],
         );
         assert_eq!(
             argv,
@@ -322,7 +382,7 @@ mod tests {
                 "--model",
                 "sonnet",
                 "--allowed-tools",
-                "Read,Glob,Grep,Bash(jig *),mcp__linear*",
+                "Read,Glob,Grep,Bash(jig *)",
             ]
         );
     }
