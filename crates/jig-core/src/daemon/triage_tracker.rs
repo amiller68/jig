@@ -2,6 +2,9 @@
 //! and detect stuck workers.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 /// Tracks issues currently being triaged by lightweight read-only agents.
 pub struct TriageTracker {
@@ -10,6 +13,7 @@ pub struct TriageTracker {
 }
 
 /// A single in-flight triage operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriageEntry {
     /// Worker name handling this triage (e.g. "triage-jig-38-add-statuses").
     pub worker_name: String,
@@ -19,6 +23,12 @@ pub struct TriageEntry {
     pub issue_id: String,
     /// Repo name this triage belongs to.
     pub repo_name: String,
+}
+
+/// Serializable wrapper for persisting tracker state.
+#[derive(Serialize, Deserialize)]
+struct PersistedTriages {
+    entries: Vec<TriageEntry>,
 }
 
 impl TriageTracker {
@@ -58,6 +68,60 @@ impl TriageTracker {
     /// Get all active entries (for per-repo timeout checking).
     pub fn stuck_entries(&self) -> Vec<&TriageEntry> {
         self.active.values().collect()
+    }
+
+    /// Get all active entries as a slice-like view for display purposes.
+    pub fn active_entries(&self) -> Vec<&TriageEntry> {
+        self.active.values().collect()
+    }
+
+    /// Default persistence path: `~/.config/jig/state/triages.json`.
+    fn default_path() -> Option<PathBuf> {
+        crate::global::global_state_dir()
+            .ok()
+            .map(|d| d.join("triages.json"))
+    }
+
+    /// Persist current state to disk.
+    pub fn persist(&self) -> std::result::Result<(), String> {
+        let path = Self::default_path().ok_or("cannot resolve state dir")?;
+        self.persist_to(&path)
+    }
+
+    /// Persist to a specific path.
+    pub fn persist_to(&self, path: &Path) -> std::result::Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let data = PersistedTriages {
+            entries: self.active.values().cloned().collect(),
+        };
+        let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+        std::fs::write(path, json).map_err(|e| e.to_string())
+    }
+
+    /// Load from default path. Returns empty tracker if file is missing.
+    pub fn load() -> Self {
+        Self::default_path()
+            .map(|p| Self::load_from(&p))
+            .unwrap_or_default()
+    }
+
+    /// Load from a specific path. Returns empty tracker if file is missing or invalid.
+    pub fn load_from(path: &Path) -> Self {
+        let data = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => return Self::new(),
+        };
+        let persisted: PersistedTriages = match serde_json::from_str(&data) {
+            Ok(p) => p,
+            Err(_) => return Self::new(),
+        };
+        let mut tracker = Self::new();
+        for entry in persisted.entries {
+            tracker.active.insert(entry.issue_id.clone(), entry);
+        }
+        tracker
     }
 
     /// Rebuild tracker from active workers whose names start with "triage-"
@@ -180,5 +244,57 @@ mod tests {
     fn default_creates_empty_tracker() {
         let tracker = TriageTracker::default();
         assert!(!tracker.is_active("anything"));
+    }
+
+    #[test]
+    fn persist_and_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("triages.json");
+
+        let mut tracker = TriageTracker::new();
+        tracker.register(
+            "JIG-77".to_string(),
+            make_entry("triage-jig-77", "JIG-77", "my-repo", 1000),
+        );
+        tracker.register(
+            "JIG-81".to_string(),
+            make_entry("triage-jig-81", "JIG-81", "other-repo", 2000),
+        );
+        tracker.persist_to(&path).unwrap();
+
+        let loaded = TriageTracker::load_from(&path);
+        assert!(loaded.is_active("JIG-77"));
+        assert!(loaded.is_active("JIG-81"));
+        assert!(!loaded.is_active("JIG-99"));
+        assert_eq!(loaded.active_entries().len(), 2);
+    }
+
+    #[test]
+    fn load_from_missing_file_returns_empty() {
+        let tracker = TriageTracker::load_from(Path::new("/nonexistent/triages.json"));
+        assert_eq!(tracker.active_entries().len(), 0);
+    }
+
+    #[test]
+    fn load_from_invalid_json_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("triages.json");
+        std::fs::write(&path, "not valid json").unwrap();
+        let tracker = TriageTracker::load_from(&path);
+        assert_eq!(tracker.active_entries().len(), 0);
+    }
+
+    #[test]
+    fn active_entries_returns_all() {
+        let mut tracker = TriageTracker::new();
+        tracker.register(
+            "JIG-1".to_string(),
+            make_entry("triage-jig-1", "JIG-1", "repo", 100),
+        );
+        tracker.register(
+            "JIG-2".to_string(),
+            make_entry("triage-jig-2", "JIG-2", "repo", 200),
+        );
+        assert_eq!(tracker.active_entries().len(), 2);
     }
 }
