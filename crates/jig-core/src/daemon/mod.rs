@@ -91,6 +91,19 @@ pub struct WorkerDisplayInfo {
     pub nudge_cooldown_remaining: Option<u64>,
 }
 
+/// Pre-computed display data for an in-flight triage subprocess.
+#[derive(Debug, Clone)]
+pub struct TriageDisplayInfo {
+    /// Linear issue identifier (e.g. "JIG-77").
+    pub issue_id: String,
+    /// Triage model name (e.g. "sonnet").
+    pub model: String,
+    /// Seconds elapsed since the triage was spawned.
+    pub elapsed_secs: u64,
+    /// Repo name this triage belongs to.
+    pub repo_name: String,
+}
+
 /// Per-worker PR health info collected during a tick.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerTickInfo {
@@ -147,6 +160,8 @@ pub struct TickResult {
     pub pruned: Vec<String>,
     /// Pre-computed display data for the render callback (zero I/O).
     pub worker_display: Vec<WorkerDisplayInfo>,
+    /// Pre-computed display data for in-flight triages.
+    pub triage_display: Vec<TriageDisplayInfo>,
     /// Nudge messages delivered this tick: (worker_name, nudge_type, message_text).
     pub nudge_messages: Vec<(String, String, String)>,
     /// Timer info for the daemon's sync and poll intervals.
@@ -451,56 +466,6 @@ impl<'a> Daemon<'a> {
         }
     }
 
-    /// Check if a triage worker has exited with its issue still in Triage status.
-    ///
-    /// Only fires on the transition from non-exited to exited (comparing old and
-    /// new tmux status via old_state) to avoid emitting repeated notifications.
-    /// Returns a `NeedsIntervention` action if the issue is still in Triage.
-    fn check_triage_completion(
-        &self,
-        repo_name: &str,
-        worker_name: &str,
-        key: &str,
-        old_state: &WorkerState,
-        new_state: &WorkerState,
-        registry: &RepoRegistry,
-    ) -> Option<Action> {
-        // Only check workers that have an issue reference
-        let issue_id = new_state.issue_ref.as_deref()?;
-
-        // Transition guard: only fire when the worker wasn't already exited on the
-        // previous tick. Workers in a terminal old_state were already handled.
-        let tmux_status = self.get_tmux_status(repo_name, worker_name);
-        let tmux_exited = matches!(tmux_status, TaskStatus::Exited | TaskStatus::NoWindow);
-        if !tmux_exited || old_state.status.is_terminal() {
-            return None;
-        }
-
-        let entry = Self::find_repo_path(registry, repo_name)?;
-        let jig_toml = JigToml::load(&entry.path).ok().flatten()?;
-        let global_config = GlobalConfig::load().unwrap_or_default();
-        let provider = crate::issues::make_provider(&entry.path, &jig_toml, &global_config).ok()?;
-        let issue = provider.get(issue_id).ok().flatten()?;
-
-        if issue.status == crate::issues::IssueStatus::Triage {
-            tracing::warn!(
-                worker = key,
-                issue = %issue_id,
-                "triage worker exited but issue is still in Triage status"
-            );
-            Some(Action::Notify {
-                worker_id: worker_name.to_string(),
-                message: format!(
-                    "Triage worker exited but issue {} is still in Triage status",
-                    issue_id
-                ),
-                kind: NotifyKind::NeedsIntervention,
-            })
-        } else {
-            None
-        }
-    }
-
     /// Execute a single tick of the daemon using actor-based runtime.
     /// If `quit` is set, the tick will bail early between workers.
     pub fn tick(&self, runtime: &mut DaemonRuntime, quit: &AtomicBool) -> Result<TickResult> {
@@ -673,11 +638,10 @@ impl<'a> Daemon<'a> {
                     );
                 }
 
-                // Kill the worker's tmux window
-                let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                let target = TmuxTarget::new(&session, worker_name);
-                let _ = self.tmux.kill_window(&target);
-
+                // Triage subprocesses have no tmux window to kill — the
+                // tracker entry is cleared so a fresh triage can be dispatched
+                // on a later tick. In-flight subprocess is owned by the
+                // triage_actor and will be reported via drain_triage().
                 runtime.triage_tracker_mut().remove(issue_id);
             }
 
@@ -1090,6 +1054,27 @@ impl<'a> Daemon<'a> {
         });
         result.worker_display.sort_by(|a, b| a.name.cmp(&b.name));
 
+        // Build triage display from tracker
+        {
+            let now = chrono::Utc::now().timestamp();
+            for entry in runtime.triage_tracker().active_entries() {
+                let model = Self::find_repo_path(&registry, &entry.repo_name)
+                    .and_then(|re| JigToml::load(&re.path).ok().flatten())
+                    .map(|toml| toml.triage.model.clone())
+                    .unwrap_or_else(|| "sonnet".to_string());
+                let elapsed = (now - entry.spawned_at).max(0) as u64;
+                result.triage_display.push(TriageDisplayInfo {
+                    issue_id: entry.issue_id.clone(),
+                    model,
+                    elapsed_secs: elapsed,
+                    repo_name: entry.repo_name.clone(),
+                });
+            }
+            result
+                .triage_display
+                .sort_by(|a, b| a.issue_id.cmp(&b.issue_id));
+        }
+
         // Save updated state
         workers_state.save().unwrap_or_else(|e| {
             tracing::warn!("failed to save workers state: {}", e);
@@ -1461,20 +1446,6 @@ impl<'a> Daemon<'a> {
             }
         }
 
-        // Triage completion verification: when a worker with an issue_ref has just
-        // exited (tmux window gone, wasn't already exited last tick), check if the
-        // issue is still in Triage status. If so, the triage worker failed silently.
-        if let Some(action) = self.check_triage_completion(
-            repo_name,
-            worker_name,
-            key,
-            &old_state,
-            &new_state,
-            registry,
-        ) {
-            actions.push(action);
-        }
-
         // Track review feedback count for nudge reset logic
         let mut current_review_feedback_count: Option<u32> = None;
 
@@ -1826,19 +1797,6 @@ impl<'a> Daemon<'a> {
         );
 
         let mut actions = dispatch_actions(worker_name, &old_state, &new_state, &resolve);
-
-        // Triage completion verification (blocking path — mirrors the async
-        // path in process_worker; both code paths need this check).
-        if let Some(action) = self.check_triage_completion(
-            repo_name,
-            worker_name,
-            key,
-            &old_state,
-            &new_state,
-            registry,
-        ) {
-            actions.push(action);
-        }
 
         // Check PR lifecycle
         let mut worker_tick_info = WorkerTickInfo::default();

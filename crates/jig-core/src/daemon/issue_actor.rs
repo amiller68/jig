@@ -195,7 +195,9 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         let provider_kind = provider.kind();
         let mut remaining_budget = budget;
 
-        // Triage path: collect triage-eligible issues first (they share the budget)
+        // Triage path: collect triage-eligible issues first. Triage runs as
+        // direct subprocesses with no worker/worktree, so it doesn't consume
+        // the worker budget.
         if ctx.jig_toml.triage.enabled {
             let triage_issues = collect_triageable(
                 provider.as_ref(),
@@ -204,7 +206,6 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
                 &repo_name,
                 remaining_budget,
             );
-            remaining_budget = remaining_budget.saturating_sub(triage_issues.len());
             all_triageable.extend(triage_issues);
         }
 
