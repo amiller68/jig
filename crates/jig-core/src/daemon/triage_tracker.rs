@@ -228,19 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_from_workers_populates_tracker() {
-        let workers = vec![
-            ("repo".to_string(), "triage-jig-38".to_string()),
-            ("repo".to_string(), "al/jig-39-normal-worker".to_string()),
-            ("repo".to_string(), "triage-eng-100".to_string()),
-        ];
-        let tracker = TriageTracker::rebuild_from_workers(&workers, 5000);
-        assert!(tracker.is_active("JIG-38"));
-        assert!(tracker.is_active("ENG-100"));
-        assert!(!tracker.is_active("JIG-39"));
-    }
-
-    #[test]
     fn default_creates_empty_tracker() {
         let tracker = TriageTracker::default();
         assert!(!tracker.is_active("anything"));

@@ -16,7 +16,9 @@ use crate::issues::types::{Issue, IssueFilter, IssueStatus};
 use crate::issues::ProviderKind;
 use crate::spawn::SpawnKind;
 
-use super::messages::{IssueRequest, IssueResponse, ParentBranchResult, SpawnableIssue};
+use super::messages::{
+    IssueRequest, IssueResponse, ParentBranchResult, SpawnableIssue, TriageIssue,
+};
 
 /// Spawn the issue actor thread. Returns immediately.
 pub fn spawn(
@@ -85,15 +87,19 @@ fn collect_spawnable(
     result
 }
 
-/// Collect triageable issues from a provider, skipping workers that already exist.
+/// Collect triageable issues from a provider.
+///
+/// Returns [`TriageIssue`]s directly — triage no longer creates workers, so
+/// there's no worker-name collision check against `existing_workers`. The
+/// `TriageTracker` (keyed by issue id) is used in the daemon tick to avoid
+/// re-dispatching an in-flight triage.
 fn collect_triageable(
     provider: &dyn IssueProvider,
     provider_kind: ProviderKind,
     repo_root: &Path,
     repo_name: &str,
     budget: usize,
-    existing_workers: &[(String, String)],
-) -> Vec<SpawnableIssue> {
+) -> Vec<TriageIssue> {
     let triageable = match provider.list_triageable() {
         Ok(issues) => issues,
         Err(e) => {
@@ -102,28 +108,19 @@ fn collect_triageable(
         }
     };
 
-    let mut result = Vec::new();
-    let mut count = 0;
-
-    for issue in triageable {
-        if count >= budget {
-            break;
-        }
-        let worker_name = format!("triage-{}", issue.id.to_lowercase());
-        if existing_workers.iter().any(|(_, wn)| wn == &worker_name) {
-            continue;
-        }
-        result.push(SpawnableIssue {
-            repo_root: repo_root.to_path_buf(),
-            issue,
-            worker_name,
-            provider_kind,
-            kind: SpawnKind::Triage,
-        });
-        count += 1;
-    }
-
-    result
+    triageable
+        .into_iter()
+        .take(budget)
+        .map(|issue| {
+            let worker_name = format!("triage-{}", issue.id.to_lowercase());
+            TriageIssue {
+                repo_root: repo_root.to_path_buf(),
+                issue,
+                worker_name,
+                provider_kind,
+            }
+        })
+        .collect()
 }
 
 /// Process an issue request synchronously. Used by both the actor thread and
@@ -195,7 +192,9 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         let provider_kind = provider.kind();
         let mut remaining_budget = budget;
 
-        // Triage path: collect triage-eligible issues first (they share the budget)
+        // Triage path: collect triage-eligible issues first. Triage runs as
+        // direct subprocesses with no worker/worktree, so it doesn't consume
+        // the worker budget.
         if ctx.jig_toml.triage.enabled {
             let triage_issues = collect_triageable(
                 provider.as_ref(),
@@ -203,9 +202,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
                 repo_root,
                 &repo_name,
                 remaining_budget,
-                &req.existing_workers,
             );
-            remaining_budget = remaining_budget.saturating_sub(triage_issues.len());
             all_triageable.extend(triage_issues);
         }
 
