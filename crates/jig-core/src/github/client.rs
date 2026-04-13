@@ -9,14 +9,6 @@ use super::types::{
     CheckRun, CheckStatus, PrCommit, PrInfo, PrState, PrStateInfo, ReviewComment, ReviewState,
 };
 
-/// Internal commit struct with timestamp for feedback filtering.
-struct PrCommitFull {
-    sha: String,
-    #[allow(dead_code)]
-    message: String,
-    committed_at: Option<String>,
-}
-
 /// GitHub API client using `gh` CLI.
 ///
 /// Auth is delegated entirely to `gh` — it uses `GITHUB_TOKEN`,
@@ -187,8 +179,6 @@ impl GitHubClient {
                     line: None,
                     state,
                     author: r["user"]["login"].as_str().unwrap_or("").to_string(),
-                    commit_id: r["commit_id"].as_str().map(|s| s.chars().take(7).collect()),
-                    submitted_at: r["submitted_at"].as_str().map(|s| s.to_string()),
                 })
             })
             .collect())
@@ -219,8 +209,6 @@ impl GitHubClient {
                 line: c["line"].as_u64().or_else(|| c["original_line"].as_u64()),
                 state: ReviewState::Commented,
                 author: c["user"]["login"].as_str().unwrap_or("").to_string(),
-                commit_id: c["commit_id"].as_str().map(|s| s.chars().take(7).collect()),
-                submitted_at: c["created_at"].as_str().map(|s| s.to_string()),
             })
             .collect())
     }
@@ -279,101 +267,6 @@ impl GitHubClient {
             is_draft,
             head_sha,
         })
-    }
-
-    /// Get aggregated PR feedback: reviews + inline comments with commit context.
-    ///
-    /// If `between` is `Some((start_sha, end_sha))`, only returns feedback
-    /// submitted between the timestamps of those two commits. If `None`,
-    /// returns feedback submitted after the most recent commit (unaddressed).
-    pub fn get_pr_feedback(
-        &self,
-        pr_number: u64,
-        between: Option<(&str, &str)>,
-    ) -> Result<super::types::PrFeedback> {
-        let state_info = self.get_pr_state(pr_number)?;
-        let pr_info = self.gh_api(&format!("repos/{}/pulls/{}", self.repo, pr_number))?;
-        let pr_json: serde_json::Value = serde_json::from_str(&pr_info)?;
-        let title = pr_json["title"].as_str().unwrap_or("").to_string();
-
-        let commits = self.get_pr_commits_full(pr_number)?;
-        let reviews = self.get_reviews(pr_number)?;
-        let inline = self.get_review_comments(pr_number)?;
-
-        // Determine the time window for filtering
-        let (after, before) = match between {
-            Some((start, end)) => {
-                let start_ts = commits
-                    .iter()
-                    .find(|c| c.sha.starts_with(start) || start.starts_with(&c.sha))
-                    .and_then(|c| c.committed_at.as_deref());
-                let end_ts = commits
-                    .iter()
-                    .find(|c| c.sha.starts_with(end) || end.starts_with(&c.sha))
-                    .and_then(|c| c.committed_at.as_deref());
-                (
-                    start_ts.map(|s| s.to_string()),
-                    end_ts.map(|s| s.to_string()),
-                )
-            }
-            None => {
-                // Default: feedback after the last commit
-                let last_commit_ts = commits
-                    .last()
-                    .and_then(|c| c.committed_at.as_deref())
-                    .map(|s| s.to_string());
-                (last_commit_ts, None)
-            }
-        };
-
-        let filter = |c: &ReviewComment| -> bool {
-            let Some(ts) = c.submitted_at.as_deref() else {
-                return true; // keep comments without timestamps
-            };
-            if let Some(ref a) = after {
-                if ts < a.as_str() {
-                    return false;
-                }
-            }
-            if let Some(ref b) = before {
-                if ts > b.as_str() {
-                    return false;
-                }
-            }
-            true
-        };
-
-        Ok(super::types::PrFeedback {
-            pr_number,
-            pr_title: title,
-            pr_state: state_info.state,
-            is_draft: state_info.is_draft,
-            head_sha: state_info.head_sha,
-            reviews: reviews.into_iter().filter(&filter).collect(),
-            inline_comments: inline.into_iter().filter(filter).collect(),
-        })
-    }
-
-    /// Get commits on a PR with full metadata (including timestamps).
-    fn get_pr_commits_full(&self, pr_number: u64) -> Result<Vec<PrCommitFull>> {
-        let output = self.gh_api(&format!("repos/{}/pulls/{}/commits", self.repo, pr_number))?;
-        let commits: Vec<serde_json::Value> = serde_json::from_str(&output)?;
-        Ok(commits
-            .iter()
-            .map(|c| PrCommitFull {
-                sha: c["sha"].as_str().unwrap_or("").chars().take(7).collect(),
-                message: c["commit"]["message"]
-                    .as_str()
-                    .unwrap_or("")
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .to_string(),
-                committed_at: c["commit"]["committer"]["date"]
-                    .as_str()
-                    .map(|s| s.to_string()),
-            })
-            .collect())
     }
 
     /// Check if `gh` CLI is available and authenticated.
@@ -550,8 +443,6 @@ impl GitHubClient {
                           body
                           path
                           line: originalLine
-                          createdAt
-                          commit {{ abbreviatedOid }}
                           author {{ login }}
                         }}
                       }}
@@ -586,10 +477,6 @@ impl GitHubClient {
                     line: first["line"].as_u64(),
                     state: ReviewState::Commented,
                     author: first["author"]["login"].as_str().unwrap_or("").to_string(),
-                    commit_id: first["commit"]["abbreviatedOid"]
-                        .as_str()
-                        .map(|s| s.to_string()),
-                    submitted_at: first["createdAt"].as_str().map(|s| s.to_string()),
                 });
             }
         }

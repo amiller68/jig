@@ -29,8 +29,6 @@ IF YOU GET STUCK:
 - If unsure about an approach, pick the simplest one and go
 - If truly blocked, explain what's blocking you so the nudge system can relay it
 
-PR REVIEW COMMENTS: If you receive a nudge about review comments, run `jig pr comments` to see unresolved human feedback anchored to specific commits. Address each comment, commit, and push.
-
 AUTOMATED REVIEW: After you create a draft PR, an automated review agent may review your code. If it requests changes, you'll receive a nudge with the path to a review file (e.g. .jig/reviews/001.md). When that happens:
 
 1. Read the review file to see the findings
@@ -88,8 +86,6 @@ IF YOU GET STUCK:
 - If tests fail, debug and fix them
 - If unsure about an approach, pick the simplest one and go
 - If truly blocked, explain what's blocking you so the nudge system can relay it
-
-PR REVIEW COMMENTS: If you receive a nudge about review comments, run `jig pr comments` to see unresolved human feedback anchored to specific commits. Address each comment, commit, and push.
 
 AUTOMATED REVIEW: After you create a PR, an automated review agent may review your code. If it requests changes, you'll receive a nudge with the path to a review file (e.g. .jig/reviews/001.md). When that happens:
 
@@ -217,7 +213,7 @@ Resolve them:
 
 const NUDGE_REVIEW: &str = r#"Your PR has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
 
-Run `jig pr comments` to see the feedback. Address each comment, commit, push, and call /review.
+Address all feedback, commit, push, and call /review.
 "#;
 
 const NUDGE_AUTO_REVIEW: &str = r#"AUTOMATED REVIEW: Your code has been reviewed (round {{review_round}}).

@@ -68,12 +68,6 @@ pub struct ReviewComment {
     pub line: Option<u64>,
     pub state: ReviewState,
     pub author: String,
-    /// Short commit SHA this review/comment was made against.
-    #[serde(default)]
-    pub commit_id: Option<String>,
-    /// ISO 8601 timestamp when the review/comment was submitted.
-    #[serde(default)]
-    pub submitted_at: Option<String>,
 }
 
 /// Review state.
@@ -92,20 +86,6 @@ pub enum ReviewState {
 pub struct PrCommit {
     pub sha: String,
     pub message: String,
-}
-
-/// Aggregated PR feedback: reviews + inline comments with commit context.
-#[derive(Debug, Clone)]
-pub struct PrFeedback {
-    pub pr_number: u64,
-    pub pr_title: String,
-    pub pr_state: PrState,
-    pub is_draft: bool,
-    pub head_sha: Option<String>,
-    /// Top-level reviews (approvals, changes_requested, etc.)
-    pub reviews: Vec<ReviewComment>,
-    /// Unresolved inline comments.
-    pub inline_comments: Vec<ReviewComment>,
 }
 
 #[cfg(test)]

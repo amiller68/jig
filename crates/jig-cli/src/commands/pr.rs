@@ -1,23 +1,19 @@
-//! Pr command — push current branch and create a draft PR, or view PR feedback.
+//! Pr command — push current branch and create a draft PR with automatic base resolution
 
 use std::process::Command;
 
-use clap::{Args, Subcommand};
+use clap::Args;
 
 use jig_core::git;
-use jig_core::github::{GitHubClient, PrFeedback, ReviewState};
 use jig_core::state::OrchestratorState;
 use jig_core::Error;
 
 use crate::op::{Op, RepoCtx};
 use crate::ui;
 
-/// Push current branch and create a draft PR, or view PR feedback
+/// Push current branch and create a draft PR
 #[derive(Args, Debug, Clone)]
 pub struct Pr {
-    #[command(subcommand)]
-    pub command: Option<PrCommand>,
-
     /// PR title (defaults to --fill behavior)
     #[arg(short, long)]
     pub title: Option<String>,
@@ -25,20 +21,6 @@ pub struct Pr {
     /// PR body/description
     #[arg(short, long)]
     pub body: Option<String>,
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum PrCommand {
-    /// View review comments on the current branch's PR
-    Comments {
-        /// Explicit PR number (auto-detected from branch if omitted)
-        #[arg(long)]
-        pr: Option<u64>,
-
-        /// Show comments between two commit SHAs (comma-separated: abc1234,def5678)
-        #[arg(long, value_name = "SHA1,SHA2")]
-        between: Option<String>,
-    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -51,10 +33,6 @@ pub enum PrError {
     GhFailed(String),
     #[error("could not determine current branch")]
     NoBranch,
-    #[error("no open PR found for branch '{0}'")]
-    NoPr(String),
-    #[error("invalid --between format: expected SHA1,SHA2")]
-    InvalidBetween,
 }
 
 #[derive(Debug)]
@@ -71,15 +49,6 @@ impl Op for Pr {
     type Output = PrOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        match &self.command {
-            Some(PrCommand::Comments { pr, between }) => run_comments(ctx, *pr, between.as_deref()),
-            None => self.run_create(ctx),
-        }
-    }
-}
-
-impl Pr {
-    fn run_create(&self, ctx: &RepoCtx) -> Result<PrOutput, PrError> {
         let repo = ctx.repo()?;
 
         // 1. Get current branch
@@ -147,120 +116,6 @@ impl Pr {
 
         Ok(PrOutput(url))
     }
-}
-
-fn run_comments(
-    _ctx: &RepoCtx,
-    pr_number: Option<u64>,
-    between: Option<&str>,
-) -> Result<PrOutput, PrError> {
-    let client = GitHubClient::from_remote()?;
-
-    // Resolve PR number
-    let pr_num = match pr_number {
-        Some(n) => n,
-        None => {
-            let git_repo = jig_core::git::Repo::discover()?;
-            let branch = git_repo.current_branch().map_err(|_| PrError::NoBranch)?;
-            let pr = client
-                .get_pr_for_branch(&branch)?
-                .ok_or_else(|| PrError::NoPr(branch))?;
-            pr.number
-        }
-    };
-
-    // Parse --between
-    let between_shas = match between {
-        Some(s) => {
-            let parts: Vec<&str> = s.split(',').collect();
-            if parts.len() != 2 {
-                return Err(PrError::InvalidBetween);
-            }
-            Some((parts[0], parts[1]))
-        }
-        None => None,
-    };
-
-    let feedback = client.get_pr_feedback(pr_num, between_shas)?;
-    let rendered = render_feedback(&feedback);
-    Ok(PrOutput(rendered))
-}
-
-fn render_feedback(fb: &PrFeedback) -> String {
-    let mut out = String::new();
-
-    // Header
-    let draft = if fb.is_draft { ", draft" } else { "" };
-    let state = match fb.pr_state {
-        jig_core::github::PrState::Open => "OPEN",
-        jig_core::github::PrState::Closed => "CLOSED",
-        jig_core::github::PrState::Merged => "MERGED",
-    };
-    out.push_str(&format!(
-        "PR #{}: {} ({}{})\n",
-        fb.pr_number, fb.pr_title, state, draft
-    ));
-    if let Some(ref sha) = fb.head_sha {
-        out.push_str(&format!("Head: {}\n", &sha[..7.min(sha.len())]));
-    }
-
-    if fb.reviews.is_empty() && fb.inline_comments.is_empty() {
-        out.push_str("\nNo unaddressed feedback.\n");
-        return out;
-    }
-
-    // Reviews
-    if !fb.reviews.is_empty() {
-        out.push_str("\n--- Reviews ---\n\n");
-        for r in &fb.reviews {
-            let state_str = match r.state {
-                ReviewState::Approved => "APPROVED",
-                ReviewState::ChangesRequested => "CHANGES_REQUESTED",
-                ReviewState::Commented => "COMMENTED",
-                ReviewState::Dismissed => "DISMISSED",
-                ReviewState::Pending => "PENDING",
-            };
-            let at = r
-                .commit_id
-                .as_deref()
-                .map(|s| format!(" (at {})", s))
-                .unwrap_or_default();
-            out.push_str(&format!("@{} {}{}", r.author, state_str, at));
-
-            if !r.body.is_empty() {
-                out.push('\n');
-                for line in r.body.lines() {
-                    out.push_str(&format!("> {}\n", line));
-                }
-            }
-            out.push('\n');
-        }
-    }
-
-    // Inline comments
-    if !fb.inline_comments.is_empty() {
-        out.push_str("\n--- Inline Comments (unresolved) ---\n\n");
-        for c in &fb.inline_comments {
-            let loc = match (&c.path, c.line) {
-                (Some(p), Some(l)) => format!("{}:{}", p, l),
-                (Some(p), None) => p.clone(),
-                _ => "unknown".to_string(),
-            };
-            let at = c
-                .commit_id
-                .as_deref()
-                .map(|s| format!(" (at {})", s))
-                .unwrap_or_default();
-            out.push_str(&format!("{} — @{}{}", loc, c.author, at));
-            out.push('\n');
-            for line in c.body.lines() {
-                out.push_str(&format!("> {}\n", line));
-            }
-            out.push('\n');
-        }
-    }
-
-    out
 }
 
 /// Resolve the PR base branch.

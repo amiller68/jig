@@ -10,6 +10,5 @@ mod types;
 pub use client::GitHubClient;
 pub use detect::{check_ci, check_commits, check_conflicts, check_reviews, PrCheck};
 pub use types::{
-    CheckRun, CheckStatus, PrCommit, PrFeedback, PrInfo, PrState, PrStateInfo, ReviewComment,
-    ReviewState,
+    CheckRun, CheckStatus, PrCommit, PrInfo, PrState, PrStateInfo, ReviewComment, ReviewState,
 };
