@@ -251,6 +251,19 @@ The `auto_spawn_labels` field in `[issues]` controls auto-spawning:
 
 The issue actor polls at the configured interval and the spawn actor creates worktrees + launches agents for eligible issues (status: planned, has required labels, dependencies satisfied).
 
+### Tool restrictions
+
+Spawned workers are blocked from using `gh pr create` and `gh pr merge` directly — they must use `jig pr` instead. This is enforced via `--disallowedTools` and is not configurable; workers that bypass `jig pr` miss parent-branch targeting, issue linking, and other orchestration hooks.
+
+Additional tools can be blocked per-repo:
+
+```toml
+[agent]
+disallowed_tools = ["Bash(gh issue create:*)"]
+```
+
+Triage workers use a stricter allowlist: `Read`, `Glob`, `Grep`, and `Bash(jig *)` only — no code modification, no general shell access.
+
 ## Triage auto-spawn and tracking
 
 The daemon can automatically spawn lightweight triage workers for issues in **Triage** status. Enable this per-repo:

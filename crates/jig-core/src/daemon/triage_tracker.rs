@@ -123,27 +123,6 @@ impl TriageTracker {
         }
         tracker
     }
-
-    /// Rebuild tracker from active workers whose names start with "triage-"
-    /// and whose associated issue still has Triage status.
-    pub fn rebuild_from_workers(workers: &[(String, String)], now: i64) -> Self {
-        let mut tracker = Self::new();
-        for (repo_name, worker_name) in workers {
-            if let Some(issue_id) = worker_name.strip_prefix("triage-") {
-                let issue_id = issue_id.to_uppercase();
-                tracker.register(
-                    issue_id.clone(),
-                    TriageEntry {
-                        worker_name: worker_name.clone(),
-                        spawned_at: now,
-                        issue_id: issue_id.clone(),
-                        repo_name: repo_name.clone(),
-                    },
-                );
-            }
-        }
-        tracker
-    }
 }
 
 impl Default for TriageTracker {
