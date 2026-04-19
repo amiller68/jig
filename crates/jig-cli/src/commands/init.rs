@@ -6,7 +6,8 @@ use std::path::Path;
 
 use jig_core::config::{JIG_DIR, JIG_LOCAL_TOML};
 use jig_core::git::Repo;
-use jig_core::{adapter, session, terminal, Error, JigToml};
+use jig_core::host::tmux::TmuxWindow;
+use jig_core::{adapter, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -66,6 +67,8 @@ pub struct Init {
 pub enum InitError {
     #[error(transparent)]
     Core(#[from] Error),
+    #[error(transparent)]
+    Tmux(#[from] jig_core::host::tmux::TmuxError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("Unknown agent: '{0}'. Supported agents: {1}")]
@@ -412,8 +415,9 @@ fn launch_audit(
         .and_then(|n| n.to_str())
         .unwrap_or("init");
 
-    session::create_window(session_name, window_name, repo_root)?;
-    session::send_keys(session_name, window_name, &cmd)?;
+    let window = TmuxWindow::new(session_name, window_name);
+    window.create(repo_root)?;
+    window.send_keys(&[&cmd, "Enter"])?;
 
     eprintln!();
     ui::progress(&format!(

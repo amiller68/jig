@@ -5,13 +5,13 @@
 
 use super::messages::{NudgeComplete, NudgeRequest};
 use crate::events::{Event, EventLog, EventType};
-use crate::tmux::{TmuxClient, TmuxTarget};
+use crate::host::tmux::TmuxWindow;
 
 /// Spawn the nudge actor thread. Returns immediately.
 ///
 /// The actor blocks on `rx.recv()` waiting for nudge requests, delivers each
-/// nudge via its own `TmuxClient` (with timeouts), appends to the event log,
-/// and sends `NudgeComplete` back.
+/// nudge via tmux (with timeouts), appends to the event log, and sends
+/// `NudgeComplete` back.
 pub fn spawn(
     rx: flume::Receiver<NudgeRequest>,
     tx: flume::Sender<NudgeComplete>,
@@ -19,11 +19,9 @@ pub fn spawn(
     std::thread::Builder::new()
         .name("jig-nudge".into())
         .spawn(move || {
-            let tmux = TmuxClient::new();
-
             while let Ok(req) = rx.recv() {
-                let target = TmuxTarget::new(&req.session, &req.window);
-                let error = deliver_nudge(&tmux, &target, &req);
+                let window = TmuxWindow::new(&req.session, &req.window);
+                let error = deliver_nudge(&window, &req);
 
                 if let Some(ref err) = error {
                     tracing::warn!(
@@ -54,23 +52,11 @@ pub fn spawn(
         .expect("failed to spawn nudge actor thread")
 }
 
-/// Deliver a single nudge, returning an error string on failure.
-fn deliver_nudge(tmux: &TmuxClient, target: &TmuxTarget, req: &NudgeRequest) -> Option<String> {
-    let result = if req.is_stuck {
-        // For stuck prompts, auto-approve then send the context message
-        tmux.auto_approve(target).and_then(|()| {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            tmux.send_message(target, &req.message)
-        })
-    } else {
-        tmux.send_message(target, &req.message)
-    };
-
-    if let Err(e) = &result {
+fn deliver_nudge(window: &TmuxWindow, req: &NudgeRequest) -> Option<String> {
+    if let Err(e) = window.send_message(&req.message) {
         return Some(e.to_string());
     }
 
-    // Append event log entry
     let event_log = match EventLog::for_worker(&req.repo_name, &req.worker_name) {
         Ok(log) => log,
         Err(e) => return Some(format!("failed to open event log: {}", e)),

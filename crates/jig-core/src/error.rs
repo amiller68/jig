@@ -41,8 +41,8 @@ pub enum Error {
     #[error("Missing dependency: {0}")]
     MissingDependency(String),
 
-    #[error("Tmux session not found: {0}")]
-    TmuxSessionNotFound(String),
+    #[error(transparent)]
+    Tmux(#[from] crate::host::tmux::TmuxError),
 
     #[error("On-create hook failed")]
     OnCreateHookFailed,

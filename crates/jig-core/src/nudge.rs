@@ -7,7 +7,7 @@ use crate::config::ResolvedNudgeConfig;
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::templates::{TemplateContext, TemplateEngine};
-use crate::tmux::{TmuxClient, TmuxTarget};
+use crate::host::tmux::TmuxWindow;
 use crate::worker::WorkerStatus;
 
 /// The kind of nudge to send, determines which template to use.
@@ -172,35 +172,24 @@ pub fn build_nudge_context(
 
 /// Execute a nudge: render the template, send via tmux, emit event.
 pub fn execute_nudge(
-    target: &TmuxTarget,
+    window: &TmuxWindow,
     nudge_type: NudgeType,
     state: &WorkerState,
     resolved: ResolvedNudgeConfig,
     engine: &TemplateEngine<'_>,
-    tmux: &TmuxClient,
     event_log: &EventLog,
 ) -> Result<()> {
     let ctx = build_nudge_context(nudge_type, state, resolved, None);
     let message = engine.render(nudge_type.template_name(), &ctx)?;
 
     tracing::info!(
-        target = ?target,
+        window = ?window,
         nudge_type = nudge_type.count_key(),
         template = nudge_type.template_name(),
         "executing nudge"
     );
 
-    match nudge_type {
-        NudgeType::Stuck => {
-            // For stuck prompts, auto-approve then send the context message
-            tmux.auto_approve(target)?;
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            tmux.send_message(target, &message)?;
-        }
-        _ => {
-            tmux.send_message(target, &message)?;
-        }
-    }
+    window.send_message(&message)?;
 
     // Emit nudge event
     let event = Event::new(EventType::Nudge)

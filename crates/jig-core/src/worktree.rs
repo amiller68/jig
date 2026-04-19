@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, EventLog, EventType};
 use crate::git::{self, Repo};
 use crate::global::GlobalConfig;
-use crate::session;
+use crate::host::tmux::TmuxWindow;
 use crate::state::OrchestratorState;
 use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker};
@@ -166,12 +166,12 @@ impl Worktree {
 
     /// Check if this worktree has a tmux window.
     pub fn has_tmux_window(&self) -> bool {
-        session::window_exists(&self.session_name, &self.name)
+        self.tmux_window().exists()
     }
 
     /// Check if the agent is running in the tmux pane.
     pub fn is_agent_running(&self) -> bool {
-        session::pane_is_running(&self.session_name, &self.name)
+        self.tmux_window().is_running()
     }
 
     /// Launch a tmux window for this worktree using the wrap-up preamble.
@@ -203,20 +203,20 @@ impl Worktree {
         let agent_adapter =
             adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
 
-        session::create_window(&self.session_name, &self.name, &self.path)?;
+        let window = self.tmux_window();
+        window.create(&self.path)?;
         let cmd = adapter::build_spawn_command(
             agent_adapter,
             Some(&effective_context),
             &config.agent.disallowed_tools,
         );
-        session::send_keys(&self.session_name, &self.name, &cmd)?;
+        window.send_keys(&[&cmd, "Enter"])?;
 
         Ok(())
     }
 
     /// Launch a tmux window for this worktree (always uses auto mode).
     pub fn launch(&self, context: Option<&str>) -> Result<()> {
-        // Always render preamble
         let engine = TemplateEngine::new().with_repo(&self.repo_root);
         let global_config = GlobalConfig::load()?;
         let mut tpl_ctx = TemplateContext::new();
@@ -229,23 +229,19 @@ impl Worktree {
         );
         let effective_context = engine.render("spawn-preamble", &tpl_ctx)?;
 
-        // Get adapter from config
         let config = JigToml::load(&self.repo_root)?.unwrap_or_default();
         let agent_adapter =
             adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
 
-        // Create window in tmux
-        session::create_window(&self.session_name, &self.name, &self.path)?;
+        let window = self.tmux_window();
+        window.create(&self.path)?;
 
-        // Build spawn command using adapter (always auto)
         let cmd = adapter::build_spawn_command(
             agent_adapter,
             Some(&effective_context),
             &config.agent.disallowed_tools,
         );
-
-        // Send command to window
-        session::send_keys(&self.session_name, &self.name, &cmd)?;
+        window.send_keys(&[&cmd, "Enter"])?;
 
         Ok(())
     }
@@ -277,10 +273,10 @@ impl Worktree {
             return self.launch(context);
         }
 
-        // Continue the prior session via the adapter's continue flag
-        session::create_window(&self.session_name, &self.name, &self.path)?;
+        let window = self.tmux_window();
+        window.create(&self.path)?;
         let cmd = adapter::build_resume_command(agent_adapter);
-        session::send_keys(&self.session_name, &self.name, &cmd)?;
+        window.send_keys(&[&cmd, "Enter"])?;
 
         Ok(())
     }
@@ -490,6 +486,10 @@ impl Worktree {
         }
 
         Ok(())
+    }
+
+    fn tmux_window(&self) -> TmuxWindow {
+        TmuxWindow::new(&self.session_name, &self.name)
     }
 
     fn repo_name(&self) -> String {

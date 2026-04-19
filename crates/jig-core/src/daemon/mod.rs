@@ -42,7 +42,7 @@ use crate::registry::{RepoEntry, RepoRegistry};
 use crate::review::{latest_verdict, review_count, ReviewVerdict};
 use crate::spawn::TaskStatus;
 use crate::templates::TemplateEngine;
-use crate::tmux::{TmuxClient, TmuxTarget};
+use crate::host::tmux::{TmuxSession, TmuxWindow};
 use crate::worker::WorkerStatus;
 
 use discovery::discover_workers;
@@ -171,7 +171,6 @@ pub struct TickResult {
 /// The daemon orchestrator — holds references to shared infrastructure.
 pub struct Daemon<'a> {
     config: &'a GlobalConfig,
-    tmux: &'a TmuxClient,
     engine: &'a TemplateEngine<'a>,
     notifier: &'a Notifier,
     daemon_config: &'a DaemonConfig,
@@ -180,14 +179,12 @@ pub struct Daemon<'a> {
 impl<'a> Daemon<'a> {
     pub fn new(
         config: &'a GlobalConfig,
-        tmux: &'a TmuxClient,
         engine: &'a TemplateEngine<'a>,
         notifier: &'a Notifier,
         daemon_config: &'a DaemonConfig,
     ) -> Self {
         Self {
             config,
-            tmux,
             engine,
             notifier,
             daemon_config,
@@ -235,15 +232,15 @@ impl<'a> Daemon<'a> {
 
     /// Get tmux status for a worker (session:window alive check).
     fn get_tmux_status(&self, repo_name: &str, worker_name: &str) -> TaskStatus {
-        let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-        let target = TmuxTarget::new(&session, worker_name);
-        if !self.tmux.has_session(&session) {
+        let session = TmuxSession::new(format!("{}{}", self.daemon_config.session_prefix, repo_name));
+        if !session.exists() {
             return TaskStatus::NoSession;
         }
-        if !self.tmux.has_window(&target) {
+        let window = session.window(worker_name);
+        if !window.exists() {
             return TaskStatus::NoWindow;
         }
-        if self.tmux.pane_is_running(&target) {
+        if window.is_running() {
             TaskStatus::Running
         } else {
             TaskStatus::Exited
@@ -372,10 +369,10 @@ impl<'a> Daemon<'a> {
                         );
 
                         // Nudge the parent worker to let it know about new commits
-                        let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                        let target = TmuxTarget::new(&session, &worker_name);
+                        let session_name = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                        let window = TmuxWindow::new(&session_name, &worker_name);
 
-                        if self.tmux.has_window(&target) {
+                        if window.exists() {
                             let key = format!("{}/{}", repo_name, worker_name);
                             let message = "Child work has been merged into your branch. \
                                            New commits are available. Run `git log --oneline -5` \
@@ -383,7 +380,7 @@ impl<'a> Daemon<'a> {
                                 .to_string();
 
                             runtime.send_nudge(messages::NudgeRequest {
-                                session,
+                                session: session_name,
                                 window: branch_name,
                                 message,
                                 nudge_type_key: "parent_update".to_string(),
@@ -784,14 +781,14 @@ impl<'a> Daemon<'a> {
                 }
                 Some(ReviewVerdict::ChangesRequested) => {
                     // Dispatch AutoReview nudge to the implementation agent
-                    let session = format!("{}{}", self.daemon_config.session_prefix, rname);
+                    let session_name = format!("{}{}", self.daemon_config.session_prefix, rname);
                     let branch = workers_state
                         .get_worker(worker_key)
                         .map(|e| e.branch.clone())
                         .unwrap_or_else(|| wname.to_string());
-                    let target = TmuxTarget::new(&session, &branch);
+                    let window = TmuxWindow::new(&session_name, &branch);
 
-                    if self.tmux.has_window(&target) {
+                    if window.exists() {
                         // Load review config to get max_rounds
                         let review_cfg = Self::find_repo_path(&registry, rname)
                             .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
@@ -851,7 +848,7 @@ impl<'a> Daemon<'a> {
                                 };
 
                                 runtime.send_nudge(messages::NudgeRequest {
-                                    session,
+                                    session: session_name,
                                     window: branch,
                                     message,
                                     nudge_type_key: NudgeType::AutoReview.count_key().to_string(),
@@ -1414,9 +1411,11 @@ impl<'a> Daemon<'a> {
         // resume instead of sending nudges to a dead window.
         // Skip Initializing workers — they're still running on-create hooks.
         if !new_state.status.is_terminal() && new_state.status != WorkerStatus::Initializing {
-            let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-            let target = TmuxTarget::new(&session, worker_name);
-            if !self.tmux.has_window(&target) {
+            let window = TmuxWindow::new(
+                format!("{}{}", self.daemon_config.session_prefix, repo_name),
+                worker_name,
+            );
+            if !window.exists() {
                 tracing::info!(
                     worker = key,
                     status = new_state.status.as_str(),
@@ -1911,14 +1910,10 @@ impl<'a> Daemon<'a> {
                     worker_id: _,
                     nudge_type,
                 } => {
-                    let session = format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                    let target = TmuxTarget::new(&session, branch_name.to_string());
+                    let session_name = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                    let window = TmuxWindow::new(&session_name, branch_name.to_string());
 
-                    if self.tmux.has_window(&target) {
-                        // PR nudges (review, ci, conflict, bad commits) should always
-                        // be delivered — the agent may be at its idle prompt, which
-                        // tmux reports as a shell/version string (pane_is_running=false).
-                        // Only skip idle/stuck nudges when the pane has no running command.
+                    if window.exists() {
                         let is_pr_nudge = matches!(
                             nudge_type,
                             NudgeType::Review
@@ -1926,7 +1921,7 @@ impl<'a> Daemon<'a> {
                                 | NudgeType::Conflict
                                 | NudgeType::BadCommits
                         );
-                        if !is_pr_nudge && !self.tmux.pane_is_running(&target) {
+                        if !is_pr_nudge && !window.is_running() {
                             tracing::debug!(
                                 worker = key,
                                 "no command running in pane, skipping nudge"
@@ -1951,7 +1946,7 @@ impl<'a> Daemon<'a> {
                             nudge_messages
                                 .push((nudge_type.count_key().to_string(), message.clone()));
                             rt.send_nudge(messages::NudgeRequest {
-                                session,
+                                session: session_name,
                                 window: branch_name.to_string(),
                                 message,
                                 nudge_type_key: nudge_type.count_key().to_string(),
@@ -1962,15 +1957,7 @@ impl<'a> Daemon<'a> {
                             });
                             nudge_count += 1;
                         } else {
-                            // Blocking path (tick_once): deliver synchronously
-                            let delivery = if *nudge_type == NudgeType::Stuck {
-                                self.tmux.auto_approve(&target).and_then(|()| {
-                                    std::thread::sleep(std::time::Duration::from_millis(500));
-                                    self.tmux.send_message(&target, &message)
-                                })
-                            } else {
-                                self.tmux.send_message(&target, &message)
-                            };
+                            let delivery = window.send_message(&message);
 
                             match delivery {
                                 Ok(()) => {
@@ -2080,13 +2067,13 @@ impl<'a> Daemon<'a> {
                     }
                 }
                 Action::Cleanup { worker_id } => {
-                    let tmux_target = TmuxTarget::new(
+                    let tmux_window = TmuxWindow::new(
                         format!("{}{}", self.daemon_config.session_prefix, repo_name),
                         branch_name.to_string(),
                     );
 
-                    if self.tmux.has_window(&tmux_target) {
-                        if let Err(e) = self.tmux.kill_window(&tmux_target) {
+                    if tmux_window.exists() {
+                        if let Err(e) = tmux_window.kill() {
                             tracing::warn!("failed to kill window for {}: {}", worker_id, e);
                         }
                     }
@@ -2356,10 +2343,9 @@ where
     // Startup: lifecycle logging + recovery
     startup_recovery(&global_config);
 
-    let tmux = TmuxClient::new();
     let engine = TemplateEngine::new();
     let notifier = make_notifier(&global_config)?;
-    let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
+    let daemon = Daemon::new(&global_config, &engine, &notifier, daemon_config);
 
     let mut runtime = DaemonRuntime::new(runtime_config);
     let quit = Arc::new(AtomicBool::new(false));
@@ -2418,10 +2404,9 @@ pub fn run(daemon_config: &DaemonConfig) -> Result<()> {
     // Startup: lifecycle logging + recovery
     startup_recovery(&global_config);
 
-    let tmux = TmuxClient::new();
     let engine = TemplateEngine::new();
     let notifier = make_notifier(&global_config)?;
-    let daemon = Daemon::new(&global_config, &tmux, &engine, &notifier, daemon_config);
+    let daemon = Daemon::new(&global_config, &engine, &notifier, daemon_config);
 
     let quit = Arc::new(AtomicBool::new(false));
     install_signal_handler(&quit);

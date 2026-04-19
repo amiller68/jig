@@ -1,7 +1,7 @@
 //! Nuke command — kill all workers, remove worktrees, clear state
 
 use jig_core::git::Repo;
-use jig_core::{git, global_state_dir, OrchestratorState, TmuxClient, WorkersState};
+use jig_core::{git, global_state_dir, OrchestratorState, TmuxSession, WorkersState};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -14,6 +14,8 @@ pub struct Nuke;
 pub enum NukeError {
     #[error(transparent)]
     Core(#[from] jig_core::Error),
+    #[error(transparent)]
+    Tmux(#[from] jig_core::host::tmux::TmuxError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -56,9 +58,9 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
         .unwrap_or_else(|| "unknown".to_string());
 
     // 1. Kill tmux session for this repo (takes out all windows at once)
-    let tmux = TmuxClient::new();
-    if tmux.has_session(&repo.session_name) {
-        tmux.kill_session(&repo.session_name)?;
+    let session = TmuxSession::new(&repo.session_name);
+    if session.exists() {
+        session.kill()?;
         ui::success(&format!(
             "Killed tmux session '{}'",
             ui::highlight(&repo.session_name)
