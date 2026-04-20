@@ -1,5 +1,5 @@
-//! Triage tracker — tracks in-flight triage workers to prevent duplicate spawns
-//! and detect stuck workers.
+//! Triage tracker — tracks in-flight triage subprocesses to prevent duplicate
+//! spawns and detect stuck subprocesses.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,9 +15,7 @@ pub struct TriageTracker {
 /// A single in-flight triage operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriageEntry {
-    /// Worker name handling this triage (e.g. "triage-jig-38-add-statuses").
-    pub worker_name: String,
-    /// Unix timestamp when the triage worker was spawned.
+    /// Unix timestamp when the triage subprocess was spawned.
     pub spawned_at: i64,
     /// Linear issue identifier.
     pub issue_id: String,
@@ -135,9 +133,8 @@ impl Default for TriageTracker {
 mod tests {
     use super::*;
 
-    fn make_entry(worker: &str, issue: &str, repo: &str, spawned_at: i64) -> TriageEntry {
+    fn make_entry(issue: &str, repo: &str, spawned_at: i64) -> TriageEntry {
         TriageEntry {
-            worker_name: worker.to_string(),
             spawned_at,
             issue_id: issue.to_string(),
             repo_name: repo.to_string(),
@@ -147,7 +144,7 @@ mod tests {
     #[test]
     fn register_and_is_active() {
         let mut tracker = TriageTracker::new();
-        let entry = make_entry("triage-jig-38", "JIG-38", "my-repo", 1000);
+        let entry = make_entry("JIG-38", "my-repo", 1000);
         assert!(tracker.register("JIG-38".to_string(), entry));
         assert!(tracker.is_active("JIG-38"));
         assert!(!tracker.is_active("JIG-99"));
@@ -156,8 +153,8 @@ mod tests {
     #[test]
     fn register_returns_false_for_duplicate() {
         let mut tracker = TriageTracker::new();
-        let entry1 = make_entry("triage-jig-38", "JIG-38", "my-repo", 1000);
-        let entry2 = make_entry("triage-jig-38-v2", "JIG-38", "my-repo", 2000);
+        let entry1 = make_entry("JIG-38", "my-repo", 1000);
+        let entry2 = make_entry("JIG-38", "my-repo", 2000);
         assert!(tracker.register("JIG-38".to_string(), entry1));
         assert!(!tracker.register("JIG-38".to_string(), entry2));
     }
@@ -165,11 +162,11 @@ mod tests {
     #[test]
     fn remove_returns_entry() {
         let mut tracker = TriageTracker::new();
-        let entry = make_entry("triage-jig-38", "JIG-38", "my-repo", 1000);
+        let entry = make_entry("JIG-38", "my-repo", 1000);
         tracker.register("JIG-38".to_string(), entry);
         let removed = tracker.remove("JIG-38");
         assert!(removed.is_some());
-        assert_eq!(removed.unwrap().worker_name, "triage-jig-38");
+        assert_eq!(removed.unwrap().issue_id, "JIG-38");
         assert!(!tracker.is_active("JIG-38"));
     }
 
@@ -182,9 +179,9 @@ mod tests {
     #[test]
     fn stuck_triages_filters_by_timeout() {
         let mut tracker = TriageTracker::new();
-        let entry1 = make_entry("triage-jig-1", "JIG-1", "repo", 100);
-        let entry2 = make_entry("triage-jig-2", "JIG-2", "repo", 500);
-        let entry3 = make_entry("triage-jig-3", "JIG-3", "repo", 900);
+        let entry1 = make_entry("JIG-1", "repo", 100);
+        let entry2 = make_entry("JIG-2", "repo", 500);
+        let entry3 = make_entry("JIG-3", "repo", 900);
         tracker.register("JIG-1".to_string(), entry1);
         tracker.register("JIG-2".to_string(), entry2);
         tracker.register("JIG-3".to_string(), entry3);
@@ -199,7 +196,7 @@ mod tests {
     #[test]
     fn stuck_triages_empty_when_none_stuck() {
         let mut tracker = TriageTracker::new();
-        let entry = make_entry("triage-jig-1", "JIG-1", "repo", 900);
+        let entry = make_entry("JIG-1", "repo", 900);
         tracker.register("JIG-1".to_string(), entry);
 
         let stuck = tracker.stuck_triages(600, 1000);
@@ -218,13 +215,10 @@ mod tests {
         let path = dir.path().join("triages.json");
 
         let mut tracker = TriageTracker::new();
-        tracker.register(
-            "JIG-77".to_string(),
-            make_entry("triage-jig-77", "JIG-77", "my-repo", 1000),
-        );
+        tracker.register("JIG-77".to_string(), make_entry("JIG-77", "my-repo", 1000));
         tracker.register(
             "JIG-81".to_string(),
-            make_entry("triage-jig-81", "JIG-81", "other-repo", 2000),
+            make_entry("JIG-81", "other-repo", 2000),
         );
         tracker.persist_to(&path).unwrap();
 
@@ -253,14 +247,8 @@ mod tests {
     #[test]
     fn active_entries_returns_all() {
         let mut tracker = TriageTracker::new();
-        tracker.register(
-            "JIG-1".to_string(),
-            make_entry("triage-jig-1", "JIG-1", "repo", 100),
-        );
-        tracker.register(
-            "JIG-2".to_string(),
-            make_entry("triage-jig-2", "JIG-2", "repo", 200),
-        );
+        tracker.register("JIG-1".to_string(), make_entry("JIG-1", "repo", 100));
+        tracker.register("JIG-2".to_string(), make_entry("JIG-2", "repo", 200));
         assert_eq!(tracker.active_entries().len(), 2);
     }
 }

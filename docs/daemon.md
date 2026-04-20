@@ -282,7 +282,7 @@ Triage runs as direct subprocesses via the triage actor — no tmux window, no w
 1. **Discovery**: Issue actor returns triageable issues (status=Triage) separately from spawnable ones
 2. **Dedup**: `TriageTracker` (in-memory, on `DaemonRuntime`) filters out issues already being triaged (`is_active`)
 3. **Dispatch**: Triage issues are sent to the triage actor, which runs each as a subprocess with restricted tool access (`Read`, `Glob`, `Grep`, `Bash(jig *)`)
-4. **Registration**: The tracker records the issue ID, worker name, and timestamp
+4. **Registration**: The tracker records the issue ID, repo, and spawn timestamp
 5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention` and the tracker entry is cleared so a fresh triage can be dispatched on a later tick
 6. **Completion**: When the triage actor reports a subprocess has finished, the tracker removes the entry
 

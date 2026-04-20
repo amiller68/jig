@@ -101,7 +101,7 @@ pub struct SpawnableIssue {
     pub worker_name: String,
     /// Provider kind for completion instructions.
     pub provider_kind: ProviderKind,
-    /// Whether this is a normal or triage spawn.
+    /// Whether this is a normal (interactive) spawn or a wrap-up spawn.
     pub kind: SpawnKind,
 }
 
@@ -166,8 +166,6 @@ pub struct TriageIssue {
     pub repo_root: PathBuf,
     /// The parsed issue.
     pub issue: Issue,
-    /// Derived worker name (e.g., "triage-jig-38").
-    pub worker_name: String,
     /// Provider kind for status updates.
     pub provider_kind: ProviderKind,
 }
@@ -179,11 +177,9 @@ pub struct TriageRequest {
 
 /// Result of a single triage subprocess.
 pub struct TriageResult {
-    /// Worker name (e.g., "triage-jig-38").
-    pub worker_name: String,
     /// Repo name for notifications.
     pub repo_name: String,
-    /// Issue ID for tracker cleanup.
+    /// Issue ID for tracker cleanup and notifications.
     pub issue_id: String,
     /// Error message if the triage failed, None on success.
     pub error: Option<String>,

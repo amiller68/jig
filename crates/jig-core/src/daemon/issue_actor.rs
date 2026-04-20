@@ -112,16 +112,10 @@ fn collect_triageable(
     triageable
         .into_iter()
         .take(budget)
-        .map(|issue| {
-            // Synthetic display name for logging/notifications; there is no
-            // worktree or tmux window behind it.
-            let worker_name = format!("triage-{}", issue.id.to_lowercase());
-            TriageIssue {
-                repo_root: repo_root.to_path_buf(),
-                issue,
-                worker_name,
-                provider_kind,
-            }
+        .map(|issue| TriageIssue {
+            repo_root: repo_root.to_path_buf(),
+            issue,
+            provider_kind,
         })
         .collect()
 }
