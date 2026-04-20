@@ -1,7 +1,7 @@
 //! Prune actor — removes worktrees for merged/closed PRs in a background thread.
 
 use super::messages::{PruneComplete, PruneRequest, PruneResult};
-use crate::git::Repo;
+use crate::git::{Repo, Worktree};
 
 /// Spawn the prune actor thread. Returns immediately.
 ///
@@ -47,21 +47,14 @@ pub fn spawn(
 fn prune_single(target: &super::messages::PruneTarget) -> std::result::Result<(), String> {
     let worktree_path = crate::config::worktree_path(&target.repo_path, &target.worker_name);
 
-    let repo = Repo::open(&target.repo_path).map_err(|e| format!("failed to open repo: {}", e))?;
-
     if worktree_path.exists() {
-        let wt_name = repo
-            .find_worktree_name_for_path(&worktree_path)
-            .map_err(|e| format!("failed to find worktree: {}", e))?;
-
-        repo.prune_worktree(&wt_name)
+        let wt = Worktree::open(&worktree_path)
+            .map_err(|e| format!("failed to open worktree: {}", e))?;
+        wt.remove(false)
             .map_err(|e| format!("git worktree prune failed: {}", e))?;
-
-        // Clean up empty parent dirs (for nested paths like feature/foo)
-        let worktrees_dir = target.repo_path.join(crate::config::JIG_DIR);
-        cleanup_empty_parents(&worktree_path, &worktrees_dir);
     } else {
-        // Directory already gone but git may still have a stale registration.
+        let repo =
+            Repo::open(&target.repo_path).map_err(|e| format!("failed to open repo: {}", e))?;
         repo.prune_stale_worktrees();
     }
 
@@ -90,30 +83,6 @@ fn prune_single(target: &super::messages::PruneTarget) -> std::result::Result<()
     });
 
     Ok(())
-}
-
-/// Remove empty parent directories up to (but not including) the stop directory.
-fn cleanup_empty_parents(path: &std::path::Path, stop_at: &std::path::Path) {
-    let mut parent = path.parent();
-    while let Some(p) = parent {
-        if p == stop_at
-            || p.file_name()
-                .map(|n| n == crate::config::JIG_DIR)
-                .unwrap_or(false)
-        {
-            break;
-        }
-        match p.read_dir() {
-            Ok(mut entries) => {
-                if entries.next().is_some() {
-                    break;
-                }
-                let _ = std::fs::remove_dir(p);
-            }
-            Err(_) => break,
-        }
-        parent = p.parent();
-    }
 }
 
 #[cfg(test)]

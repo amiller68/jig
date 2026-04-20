@@ -30,7 +30,7 @@ impl GlobalCtx {
         name: &str,
     ) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
         for repo in &self.repos {
-            let path = repo.worktrees_dir.join(name);
+            let path = repo.worktrees_path.join(name);
             if path.exists() {
                 return Ok(repo);
             }

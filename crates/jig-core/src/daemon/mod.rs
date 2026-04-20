@@ -36,13 +36,13 @@ use crate::dispatch::{dispatch_actions, Action, NotifyKind};
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
 use crate::global::{GlobalConfig, HealthConfig, WorkerEntry, WorkersState};
+use crate::host::tmux::{TmuxSession, TmuxWindow};
 use crate::notify::{NotificationEvent, Notifier};
 use crate::nudge::{build_nudge_context, NudgeType};
 use crate::registry::{RepoEntry, RepoRegistry};
 use crate::review::{latest_verdict, review_count, ReviewVerdict};
 use crate::spawn::TaskStatus;
 use crate::templates::TemplateEngine;
-use crate::host::tmux::{TmuxSession, TmuxWindow};
 use crate::worker::WorkerStatus;
 
 use discovery::discover_workers;
@@ -54,8 +54,9 @@ pub use runtime::{DaemonRuntime, RuntimeConfig, TimerInfo};
 /// Get the HEAD SHA for a worktree path via the project's git module.
 fn head_sha_for(worktree_path: &std::path::Path) -> Option<String> {
     crate::git::Repo::open(worktree_path)
-        .and_then(|r| r.head_sha())
+        .and_then(|r| r.head_oid())
         .ok()
+        .map(|oid| oid.to_string())
 }
 
 /// Extract the branch name from a worker's event log (looks for Spawn event),
@@ -232,7 +233,10 @@ impl<'a> Daemon<'a> {
 
     /// Get tmux status for a worker (session:window alive check).
     fn get_tmux_status(&self, repo_name: &str, worker_name: &str) -> TaskStatus {
-        let session = TmuxSession::new(format!("{}{}", self.daemon_config.session_prefix, repo_name));
+        let session = TmuxSession::new(format!(
+            "{}{}",
+            self.daemon_config.session_prefix, repo_name
+        ));
         if !session.exists() {
             return TaskStatus::NoSession;
         }
@@ -359,7 +363,7 @@ impl<'a> Daemon<'a> {
                     }
                 };
 
-                match repo.fast_forward_to_remote(parent_branch) {
+                match repo.fast_forward_branch(&parent_branch.as_str().into(), true) {
                     Ok(true) => {
                         tracing::info!(
                             worker = %worker_name,
@@ -369,7 +373,8 @@ impl<'a> Daemon<'a> {
                         );
 
                         // Nudge the parent worker to let it know about new commits
-                        let session_name = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                        let session_name =
+                            format!("{}{}", self.daemon_config.session_prefix, repo_name);
                         let window = TmuxWindow::new(&session_name, &worker_name);
 
                         if window.exists() {
@@ -423,7 +428,7 @@ impl<'a> Daemon<'a> {
                     }
                 };
 
-                match repo.fast_forward_branch_ref(parent_branch) {
+                match repo.fast_forward_branch(&parent_branch.as_str().into(), false) {
                     Ok(true) => {
                         tracing::info!(
                             repo = %repo_name,
@@ -432,9 +437,7 @@ impl<'a> Daemon<'a> {
                         );
 
                         // Push to origin so remote stays in sync
-                        if let Err(e) =
-                            crate::git::Repo::push_branch(&repo_entry.path, parent_branch)
-                        {
+                        if let Err(e) = repo.push_branch(&parent_branch.as_str().into()) {
                             tracing::warn!(
                                 repo = %repo_name,
                                 branch = %parent_branch,
@@ -1678,11 +1681,13 @@ impl<'a> Daemon<'a> {
                 if worktree_path.exists() {
                     let base = RepoContext::resolve_base_branch_for(&entry.path)
                         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_BRANCH.to_string());
-                    let ahead = crate::git::Repo::commits_ahead(&worktree_path, &base)
+                    let ahead = crate::git::Repo::open(&worktree_path)
+                        .and_then(|r| r.commits_ahead(&crate::git::Branch::new(&base)))
                         .unwrap_or_default()
                         .len();
-                    let dirty =
-                        crate::git::Repo::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+                    let dirty = crate::git::Repo::open(&worktree_path)
+                        .and_then(|r| r.has_uncommitted_changes())
+                        .unwrap_or(false);
                     (ahead, dirty)
                 } else {
                     (0, false)
@@ -1910,7 +1915,8 @@ impl<'a> Daemon<'a> {
                     worker_id: _,
                     nudge_type,
                 } => {
-                    let session_name = format!("{}{}", self.daemon_config.session_prefix, repo_name);
+                    let session_name =
+                        format!("{}{}", self.daemon_config.session_prefix, repo_name);
                     let window = TmuxWindow::new(&session_name, branch_name.to_string());
 
                     if window.exists() {
@@ -2101,17 +2107,13 @@ impl<'a> Daemon<'a> {
                     if let Some(entry) = Self::find_repo_path(registry, repo_name) {
                         match RepoContext::from_path(&entry.path) {
                             Ok(ctx) => {
-                                let base = RepoContext::resolve_base_branch_for(&entry.path)
-                                    .unwrap_or_else(|_| {
-                                        crate::config::DEFAULT_BASE_BRANCH.to_string()
-                                    });
-                                match ctx.issue_provider_with_ref(&base) {
+                                match ctx.issue_provider() {
                                     Ok(provider) => {
                                         // Check current status — skip if already terminal
                                         let should_update = match provider.get(issue_id) {
                                             Ok(Some(issue)) => !matches!(
                                                 issue.status,
-                                                crate::issues::types::IssueStatus::Complete
+                                                crate::issues::issue::IssueStatus::Complete
                                             ),
                                             Ok(None) => {
                                                 tracing::warn!(
@@ -2134,7 +2136,7 @@ impl<'a> Daemon<'a> {
                                         if should_update {
                                             match provider.update_status(
                                                 issue_id,
-                                                &crate::issues::types::IssueStatus::Complete,
+                                                &crate::issues::issue::IssueStatus::Complete,
                                             ) {
                                                 Ok(()) => {
                                                     tracing::info!(
@@ -2832,28 +2834,28 @@ mod tests {
 
     /// Helper: mirrors the status check in the UpdateIssueStatus handler.
     /// Returns true if the issue should be updated to Complete.
-    fn should_update_issue_status(current_status: crate::issues::types::IssueStatus) -> bool {
-        !matches!(current_status, crate::issues::types::IssueStatus::Complete)
+    fn should_update_issue_status(current_status: crate::issues::issue::IssueStatus) -> bool {
+        !matches!(current_status, crate::issues::issue::IssueStatus::Complete)
     }
 
     #[test]
     fn auto_complete_updates_in_progress_issue() {
         assert!(should_update_issue_status(
-            crate::issues::types::IssueStatus::InProgress
+            crate::issues::issue::IssueStatus::InProgress
         ));
     }
 
     #[test]
     fn auto_complete_skips_already_complete_issue() {
         assert!(!should_update_issue_status(
-            crate::issues::types::IssueStatus::Complete
+            crate::issues::issue::IssueStatus::Complete
         ));
     }
 
     #[test]
     fn auto_complete_updates_planned_issue() {
         assert!(should_update_issue_status(
-            crate::issues::types::IssueStatus::Planned
+            crate::issues::issue::IssueStatus::Planned
         ));
     }
 

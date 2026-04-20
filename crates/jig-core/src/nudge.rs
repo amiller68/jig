@@ -6,8 +6,8 @@
 use crate::config::ResolvedNudgeConfig;
 use crate::error::Result;
 use crate::events::{Event, EventLog, EventType, WorkerState};
-use crate::templates::{TemplateContext, TemplateEngine};
 use crate::host::tmux::TmuxWindow;
+use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::WorkerStatus;
 
 /// The kind of nudge to send, determines which template to use.

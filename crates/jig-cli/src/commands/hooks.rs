@@ -116,10 +116,10 @@ impl Op for Hooks {
 
                 // Install agent-specific hooks based on config
                 let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
-                let adapter = jig_core::adapter::get_adapter(&jig_toml.agent.agent_type);
+                let agent = jig_core::agents::Agent::from_name(&jig_toml.agent.agent_type);
 
-                if let Some(adapter) = adapter {
-                    if matches!(adapter.agent_type, jig_core::adapter::AgentType::Claude) {
+                if let Some(agent) = agent {
+                    if agent.kind() == jig_core::agents::AgentKind::Claude {
                         eprintln!();
                         ui::progress("Installing Claude Code hooks...");
                         match jig_core::hooks::install_claude_hooks() {

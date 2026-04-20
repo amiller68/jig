@@ -4,7 +4,8 @@ use clap::Args;
 use std::path::PathBuf;
 
 use jig_core::events::{Event, EventLog, EventType};
-use jig_core::worktree::Worktree;
+use jig_core::git::Branch;
+use jig_core::Worker;
 use jig_core::{config, Error};
 
 use crate::op::{Op, RepoCtx};
@@ -55,6 +56,8 @@ pub enum CreateError {
     #[error(transparent)]
     Core(#[from] Error),
     #[error(transparent)]
+    Git(#[from] jig_core::GitError),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
@@ -73,19 +76,17 @@ impl Op for Create {
             config::get_on_create_hook(&repo.repo_root)?
         };
 
-        let wt = Worktree::create(
-            &repo.repo_root,
-            &repo.worktrees_dir,
-            &repo.git_common_dir,
-            &self.name,
-            self.branch.as_deref(),
-            base,
+        let git_repo = jig_core::Repo::open(&repo.repo_root)?;
+        let branch = Branch::new(self.branch.as_deref().unwrap_or(&self.name));
+        let base_branch = Branch::new(base);
+        let wt = Worker::create(
+            &git_repo,
+            &branch,
+            &base_branch,
             on_create_hook.as_deref(),
             &copy_files,
             false,
         )?;
-
-        let branch = self.branch.as_deref().unwrap_or(&self.name);
 
         // Emit Create event so the daemon knows this is a bare worktree
         let repo_name = repo
@@ -94,7 +95,7 @@ impl Op for Create {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
-            let event = Event::new(EventType::Create).with_field("branch", branch);
+            let event = Event::new(EventType::Create).with_field("branch", &*branch);
             if let Err(e) = event_log.append(&event) {
                 tracing::warn!(worker = %self.name, error = %e, "failed to emit Create event");
             }
@@ -103,7 +104,7 @@ impl Op for Create {
         ui::success(&format!(
             "Created worktree '{}' on branch '{}'",
             ui::highlight(&self.name),
-            ui::highlight(branch)
+            ui::highlight(&branch)
         ));
 
         // Log copied files
@@ -115,7 +116,7 @@ impl Op for Create {
 
         // Output cd command if -o flag
         if self.open {
-            let canonical = wt.path.canonicalize()?;
+            let canonical = wt.path().canonicalize()?;
             Ok(CreateOutput::Cd(canonical))
         } else {
             Ok(CreateOutput::None)

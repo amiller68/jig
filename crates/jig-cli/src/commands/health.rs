@@ -84,7 +84,7 @@ impl Op for Health {
                 eprintln!("  {} Base branch: {}", ui::SYM_OK, branch);
 
                 // Jig worktrees directory
-                if repo.worktrees_dir.is_dir() {
+                if repo.worktrees_path.is_dir() {
                     check_ok(&format!("{} directory", jig_core::config::JIG_DIR));
                 } else {
                     check_fail(

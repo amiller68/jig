@@ -113,14 +113,14 @@ impl TestRepo {
         cwd.join(JIG_DIR).join(REVIEWS_DIR)
     }
 
-    fn worktrees_dir(&self) -> PathBuf {
+    fn worktrees_path(&self) -> PathBuf {
         self.path().join(JIG_DIR)
     }
 
     /// Create a worktree and return its path.
     fn create_worktree(&self, name: &str) -> PathBuf {
         self.jig().args(["create", name]).assert().success();
-        self.worktrees_dir().join(name)
+        self.worktrees_path().join(name)
     }
 }
 

@@ -3,13 +3,15 @@
 //! Fetches issues from the Linear GraphQL API, mapping them to jig's
 //! `Issue` type. Auth comes from a named profile in the global config.
 
+pub mod client;
+mod provider;
+
 use crate::config::LinearIssuesConfig;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::global::GlobalConfig;
 
-use super::linear_client::LinearClient;
-use super::provider::IssueProvider;
-use super::types::{Issue, IssueFilter, IssueStatus};
+use crate::issues::issue::{Issue, IssueFilter, IssueStatus};
+use client::{LinearClient, LinearError};
 
 /// Issue provider backed by the Linear API.
 pub struct LinearProvider {
@@ -22,7 +24,7 @@ pub struct LinearProvider {
 
 impl LinearProvider {
     /// The provider kind for Linear issues.
-    pub const PROVIDER_KIND: super::provider::ProviderKind = super::provider::ProviderKind::Linear;
+    pub const PROVIDER_KIND: super::ProviderKind = super::ProviderKind::Linear;
 
     /// Build a provider from repo and global config.
     ///
@@ -37,7 +39,7 @@ impl LinearProvider {
             .profiles
             .get(&linear_config.profile)
             .ok_or_else(|| {
-                Error::Linear(format!(
+                LinearError::Other(format!(
                     "Linear profile '{}' not found in global config (~/.config/jig/config.toml)",
                     linear_config.profile,
                 ))
@@ -49,7 +51,7 @@ impl LinearProvider {
             .clone()
             .or_else(|| profile.team.clone())
             .ok_or_else(|| {
-                Error::Linear(
+                LinearError::Other(
                     "Linear team key is required — set 'team' in [issues.linear] in jig.toml or in the profile in ~/.config/jig/config.toml"
                         .to_string(),
                 )
@@ -96,8 +98,9 @@ impl LinearProvider {
 impl LinearProvider {
     /// Update the workflow state of a Linear issue.
     pub fn update_status(&self, identifier: &str, new_status: &IssueStatus) -> Result<()> {
-        self.client
-            .update_issue_status(identifier, &self.team, new_status)
+        Ok(self
+            .client
+            .update_issue_status(identifier, &self.team, new_status)?)
     }
 
     /// Update an existing issue's fields in Linear.
@@ -111,7 +114,7 @@ impl LinearProvider {
         identifier: &str,
         title: Option<&str>,
         body: Option<&str>,
-        priority: Option<&super::types::IssuePriority>,
+        priority: Option<&crate::issues::issue::IssuePriority>,
         labels: &[String],
         category: Option<&str>,
         assignee: Option<&str>,
@@ -123,7 +126,7 @@ impl LinearProvider {
             other => other.map(|s| s.to_string()),
         };
 
-        self.client.update_issue(
+        Ok(self.client.update_issue(
             identifier,
             &self.team,
             title,
@@ -134,21 +137,23 @@ impl LinearProvider {
             resolved_assignee.as_deref(),
             parent,
             remove_parent,
-        )
+        )?)
     }
 
     /// Add a "blocked by" dependency relation.
     ///
     /// `identifier` is blocked by `blocker_identifier`.
     pub fn add_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<()> {
-        self.client
-            .create_blocked_by_relation(identifier, blocker_identifier)
+        Ok(self
+            .client
+            .create_blocked_by_relation(identifier, blocker_identifier)?)
     }
 
     /// Remove a "blocked by" dependency relation.
     pub fn remove_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<()> {
-        self.client
-            .remove_blocked_by_relation(identifier, blocker_identifier)
+        Ok(self
+            .client
+            .remove_blocked_by_relation(identifier, blocker_identifier)?)
     }
 
     /// Create a new issue in Linear.
@@ -160,7 +165,7 @@ impl LinearProvider {
         &self,
         title: &str,
         body: Option<&str>,
-        priority: Option<&super::types::IssuePriority>,
+        priority: Option<&crate::issues::issue::IssuePriority>,
         labels: &[String],
         category: Option<&str>,
         parent: Option<&str>,
@@ -176,7 +181,7 @@ impl LinearProvider {
         // Category maps to Linear project; explicit overrides config
         let project = category.or_else(|| self.projects.first().map(|s| s.as_str()));
 
-        self.client.create_issue(
+        Ok(self.client.create_issue(
             &self.team,
             title,
             body,
@@ -186,25 +191,12 @@ impl LinearProvider {
             self.assignee.as_deref(),
             parent,
             initial_status,
-        )
+        )?)
     }
 }
 
-impl IssueProvider for LinearProvider {
-    fn name(&self) -> &str {
-        "linear"
-    }
-
-    fn kind(&self) -> super::provider::ProviderKind {
-        Self::PROVIDER_KIND
-    }
-
-    fn update_status(&self, id: &str, new_status: &IssueStatus) -> Result<()> {
-        self.update_status(id, new_status)
-    }
-
-    fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
-        // Use project filter from IssueFilter if provided, else fall back to config.
+impl LinearProvider {
+    pub(crate) fn list_issues(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
         let projects = if let Some(ref cat) = filter.category {
             vec![cat.clone()]
         } else {
@@ -219,8 +211,6 @@ impl IssueProvider for LinearProvider {
             self.assignee.as_deref(),
         )?;
 
-        // Client-side label filtering: merge config labels with filter labels.
-        // All specified labels must match.
         let effective_labels: Vec<String> = if !filter.labels.is_empty() {
             filter.labels.clone()
         } else {
@@ -235,7 +225,6 @@ impl IssueProvider for LinearProvider {
             issues.retain(|i| i.matches(&label_filter));
         }
 
-        // Sort by priority then id, consistent with FileProvider.
         issues.sort_by(|a, b| {
             let pa = a.priority.as_ref().map(|p| p.clone() as u8).unwrap_or(99);
             let pb = b.priority.as_ref().map(|p| p.clone() as u8).unwrap_or(99);
@@ -245,7 +234,7 @@ impl IssueProvider for LinearProvider {
         Ok(issues)
     }
 
-    fn get(&self, id: &str) -> Result<Option<Issue>> {
-        self.client.get_issue(id)
+    pub(crate) fn get_issue(&self, id: &str) -> Result<Option<Issue>> {
+        Ok(self.client.get_issue(id)?)
     }
 }

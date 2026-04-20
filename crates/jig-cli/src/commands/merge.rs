@@ -19,6 +19,8 @@ pub struct Merge {
 pub enum MergeError {
     #[error(transparent)]
     Core(#[from] Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for Merge {
@@ -27,19 +29,19 @@ impl Op for Merge {
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         let repo = ctx.repo()?;
-        let worktree_path = repo.worktrees_dir.join(&self.name);
+        let worktree_path = repo.worktrees_path.join(&self.name);
 
         if !worktree_path.exists() {
             return Err(Error::WorktreeNotFound(self.name.clone()).into());
         }
 
         // Check for uncommitted changes
-        if Repo::has_uncommitted_changes(&worktree_path)? {
+        if Repo::open(&worktree_path)?.has_uncommitted_changes()? {
             return Err(Error::UncommittedChanges.into());
         }
 
         // Get branch name
-        let branch = Repo::worktree_branch(&worktree_path)?;
+        let branch = Repo::open(&worktree_path)?.current_branch()?;
 
         // Merge the branch
         let git_repo = Repo::discover()?;

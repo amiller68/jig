@@ -1,13 +1,12 @@
-//! Detection functions — check GitHub state and classify nudge types.
+//! Health checks — check GitHub/PR state and classify nudge types.
 
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::error::Result;
-use crate::nudge::NudgeType;
-
 use super::client::GitHubClient;
+use super::error::Result;
+use crate::nudge::NudgeType;
 
 /// Default conventional commit pattern (compiled once).
 static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {

@@ -6,7 +6,7 @@ use clap::Args;
 use comfy_table::{Cell, CellAlignment, Color};
 
 use jig_core::events::{EventLog, WorkerState};
-use jig_core::git::{self, Repo};
+use jig_core::git::{Branch, Repo};
 use jig_core::global::GlobalConfig;
 use jig_core::worker::WorkerStatus;
 
@@ -39,6 +39,8 @@ impl std::fmt::Display for ListOutput {
 pub enum ListError {
     #[error(transparent)]
     Core(#[from] jig_core::Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for List {
@@ -51,22 +53,21 @@ impl Op for List {
         }
 
         let repo = ctx.repo()?;
-        let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
-        if worktrees.is_empty() {
+        let git_repo = Repo::open(&repo.repo_root)?;
+        let worktrees = git_repo.list_worktrees()?;
+        let names: Vec<String> = worktrees.iter().map(|wt| wt.name()).collect();
+        if names.is_empty() {
             eprintln!("No worktrees found");
         }
 
         if self.plain || ui::is_plain() {
-            let out = worktrees
-                .iter()
-                .map(|w| format!("{w}\n"))
-                .collect::<String>();
+            let out = names.iter().map(|w| format!("{w}\n")).collect::<String>();
             return Ok(ListOutput(out));
         }
 
         let table = build_worktree_table(
-            &worktrees,
-            &repo.worktrees_dir,
+            &names,
+            &repo.worktrees_path,
             &repo.base_branch,
             &repo.repo_root,
         );
@@ -90,14 +91,13 @@ impl Op for List {
 impl List {
     fn list_all_git_worktrees(&self) -> Result<ListOutput, ListError> {
         let repo = Repo::discover()?;
-        let worktrees = repo.list_all_worktrees()?;
-        for (path, branch) in &worktrees {
-            let branch_display = if branch.is_empty() {
-                ui::dim("(detached)")
-            } else {
-                ui::highlight(branch)
+        let worktrees = repo.list_worktrees()?;
+        for wt in &worktrees {
+            let branch_display = match wt.branch() {
+                Ok(b) => ui::highlight(&b),
+                Err(_) => ui::dim("(detached)"),
             };
-            eprintln!("{} {}", path.display(), branch_display);
+            eprintln!("{} {}", wt.path().display(), branch_display);
         }
         Ok(ListOutput(String::new()))
     }
@@ -106,7 +106,8 @@ impl List {
         let mut out = String::new();
         let mut first = true;
         for repo in &ctx.repos {
-            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
+            let git_repo = Repo::open(&repo.repo_root)?;
+            let worktrees = git_repo.list_worktrees()?;
             if worktrees.is_empty() {
                 continue;
             }
@@ -121,7 +122,7 @@ impl List {
             first = false;
             out.push_str(&format!("{}:\n", ui::bold(&repo_name)));
             for wt in &worktrees {
-                out.push_str(&format!("  {wt}\n"));
+                out.push_str(&format!("  {}\n", wt.name()));
             }
         }
         Ok(ListOutput(out))
@@ -130,10 +131,12 @@ impl List {
     fn run_global_table(&self, ctx: &GlobalCtx) -> Result<ListOutput, ListError> {
         let mut first = true;
         for repo in &ctx.repos {
-            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
-            if worktrees.is_empty() {
+            let git_repo = Repo::open(&repo.repo_root)?;
+            let wts = git_repo.list_worktrees()?;
+            if wts.is_empty() {
                 continue;
             }
+            let worktrees: Vec<String> = wts.iter().map(|wt| wt.name()).collect();
             let repo_name = repo
                 .repo_root
                 .file_name()
@@ -146,7 +149,7 @@ impl List {
             ui::header(&repo_name);
             let table = build_worktree_table(
                 &worktrees,
-                &repo.worktrees_dir,
+                &repo.worktrees_path,
                 &repo.base_branch,
                 &repo.repo_root,
             );
@@ -173,19 +176,22 @@ fn worktree_event_status(repo_root: &Path, name: &str) -> Option<WorkerStatus> {
 
 fn build_worktree_table(
     names: &[String],
-    worktrees_dir: &Path,
+    worktrees_path: &Path,
     base_branch: &str,
     repo_root: &Path,
 ) -> comfy_table::Table {
     let mut table = ui::new_table(&["NAME", "BRANCH", "COMMITS"]);
 
     for name in names {
-        let wt_path = worktrees_dir.join(name);
+        let wt_path = worktrees_path.join(name);
 
         // Check if worker is initializing or failed
         let worker_status = worktree_event_status(repo_root, name);
 
-        let branch = Repo::worktree_branch(&wt_path).unwrap_or_else(|_| "?".to_string());
+        let branch = Repo::open(&wt_path)
+            .and_then(|r| r.current_branch())
+            .map(|b| b.to_string())
+            .unwrap_or_else(|_| "?".to_string());
 
         // Show status hint for initializing/failed workers
         let (branch_display, branch_color) = match worker_status {
@@ -203,10 +209,13 @@ fn build_worktree_table(
             }
         };
 
-        let commits_ahead = Repo::commits_ahead(&wt_path, base_branch)
+        let commits_ahead = Repo::open(&wt_path)
+            .and_then(|r| r.commits_ahead(&Branch::new(base_branch)))
             .map(|c| c.len())
             .unwrap_or(0);
-        let dirty = Repo::has_uncommitted_changes(&wt_path).unwrap_or(false);
+        let dirty = Repo::open(&wt_path)
+            .and_then(|r| r.has_uncommitted_changes())
+            .unwrap_or(false);
 
         let dirty_marker = if dirty { "*" } else { "" };
         let commits_str = if commits_ahead > 0 || dirty {

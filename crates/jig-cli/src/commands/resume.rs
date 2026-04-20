@@ -2,8 +2,8 @@
 
 use clap::Args;
 
-use jig_core::worktree::Worktree;
 use jig_core::Error;
+use jig_core::Worker;
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -33,7 +33,7 @@ impl Op for Resume {
         let repo = ctx.repo()?;
 
         // Open existing worktree
-        let wt = Worktree::open(&repo.repo_root, &repo.worktrees_dir, &self.name)?;
+        let wt = Worker::open(&repo.repo_root, &repo.worktrees_path, &self.name)?;
 
         // Error if tmux window already exists
         if wt.has_tmux_window() {

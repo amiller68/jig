@@ -6,13 +6,12 @@
 //! InProgress — without spawning a worker.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::context::RepoContext;
+use crate::git::Branch;
 use crate::git::Repo;
-use crate::issues::naming::derive_worker_name;
-use crate::issues::provider::IssueProvider;
-use crate::issues::types::{Issue, IssueFilter, IssueStatus};
+use crate::issues::issue::{Issue, IssueFilter, IssueStatus};
+use crate::issues::providers::IssueProvider;
 use crate::issues::ProviderKind;
 use crate::spawn::SpawnKind;
 
@@ -41,7 +40,7 @@ pub fn spawn(
 /// Collect spawnable issues from a provider, respecting the budget and skipping
 /// workers that already exist.
 fn collect_spawnable(
-    provider: &dyn IssueProvider,
+    provider: &IssueProvider,
     labels: &[String],
     repo_root: &Path,
     repo_name: &str,
@@ -70,7 +69,11 @@ fn collect_spawnable(
         if repo_spawned >= budget {
             break;
         }
-        let worker_name = derive_worker_name(&issue.id, issue.branch_name.as_deref());
+        let worker_name = issue
+            .branch_name
+            .as_deref()
+            .map(|b| Branch::new(b).to_string())
+            .unwrap_or_else(|| issue.id.to_lowercase());
         if existing_workers.iter().any(|(_, wn)| wn == &worker_name) {
             continue;
         }
@@ -95,7 +98,7 @@ fn collect_spawnable(
 /// in-flight triages is handled by `TriageTracker::is_active` in the daemon
 /// tick loop, not by checking worker names here.
 fn collect_triageable(
-    provider: &dyn IssueProvider,
+    provider: &IssueProvider,
     provider_kind: ProviderKind,
     repo_root: &Path,
     repo_name: &str,
@@ -154,7 +157,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let provider = match ctx.issue_provider_with_ref(base_branch) {
+        let provider = match ctx.issue_provider() {
             Ok(p) => p,
             Err(e) => {
                 tracing::debug!(repo = %repo_name, error = %e, "failed to create issue provider");
@@ -166,8 +169,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         // their integration branches on origin idempotently. This runs
         // before spawn collection so that children can see the parent
         // branch on the next tick.
-        let parent_results =
-            ensure_parent_branches(provider.as_ref(), repo_root, &repo_name, base_branch);
+        let parent_results = ensure_parent_branches(&provider, repo_root, &repo_name, base_branch);
         all_parent_branches.extend(parent_results);
 
         // Count existing workers for this repo (shared budget for spawn + triage)
@@ -200,7 +202,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         // the worker budget.
         if ctx.jig_toml.triage.enabled {
             let triage_issues = collect_triageable(
-                provider.as_ref(),
+                &provider,
                 provider_kind,
                 repo_root,
                 &repo_name,
@@ -214,7 +216,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         // should not get a worker until all children are complete (wrap-up).
         if let Some(labels) = &ctx.jig_toml.issues.auto_spawn_labels {
             let mut spawnable = collect_spawnable(
-                provider.as_ref(),
+                &provider,
                 labels,
                 repo_root,
                 &repo_name,
@@ -230,7 +232,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
         // and merged into the parent integration branch. A wrap-up worker runs
         // against the parent branch to finalize integration and open the PR.
         let wrapup = collect_wrapup_parents(
-            provider.as_ref(),
+            &provider,
             provider_kind,
             repo_root,
             &repo_name,
@@ -309,7 +311,7 @@ fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
 /// - It has ≥1 child and every child is Complete.
 /// - Every child's branch is merged into (reachable from) the parent's branch.
 fn collect_wrapup_parents(
-    provider: &dyn IssueProvider,
+    provider: &IssueProvider,
     provider_kind: ProviderKind,
     repo_root: &Path,
     repo_name: &str,
@@ -339,7 +341,11 @@ fn collect_wrapup_parents(
             continue;
         }
         // Skip if a worker already exists for this parent.
-        let worker_name = derive_worker_name(&issue.id, issue.branch_name.as_deref());
+        let worker_name = issue
+            .branch_name
+            .as_deref()
+            .map(|b| Branch::new(b).to_string())
+            .unwrap_or_else(|| issue.id.to_lowercase());
         if existing_workers.iter().any(|(_, wn)| wn == &worker_name) {
             continue;
         }
@@ -391,8 +397,8 @@ pub fn is_parent_ready_for_wrapup(parent: &Issue, repo_root: &Path) -> bool {
             return false;
         }
         let branch = match &child.branch_name {
-            Some(b) => b.clone(),
-            None => derive_worker_name(&child.id, None),
+            Some(b) => Branch::new(b).to_string(),
+            None => child.id.to_lowercase(),
         };
         child_branches.push((child.id.clone(), branch));
     }
@@ -497,7 +503,7 @@ fn is_active_parent(issue: &Issue) -> bool {
 /// 3. Flip the parent issue to InProgress if not already.
 /// 4. Do NOT spawn a worker.
 fn ensure_parent_branches(
-    provider: &dyn IssueProvider,
+    provider: &IssueProvider,
     repo_root: &Path,
     repo_name: &str,
     base_branch: &str,
@@ -508,7 +514,11 @@ fn ensure_parent_branches(
     let candidates = collect_parent_candidates(provider);
 
     for issue in candidates {
-        let branch = derive_worker_name(&issue.id, issue.branch_name.as_deref());
+        let branch = issue
+            .branch_name
+            .as_deref()
+            .map(|b| Branch::new(b).to_string())
+            .unwrap_or_else(|| issue.id.to_lowercase());
         if branch.is_empty() {
             continue;
         }
@@ -589,7 +599,7 @@ fn ensure_parent_branches(
 
 /// Collect parent issue candidates: issues in Planned or InProgress status that
 /// have ≥1 child in Backlog or InProgress.
-fn collect_parent_candidates(provider: &dyn IssueProvider) -> Vec<Issue> {
+fn collect_parent_candidates(provider: &IssueProvider) -> Vec<Issue> {
     let mut candidates = Vec::new();
 
     // Query Planned issues (Todo maps to Planned in jig's model)
@@ -662,20 +672,9 @@ fn create_and_push_branch(repo_root: &Path, branch: &str, base_branch: &str) -> 
         }
     }
 
-    // Push to origin via subprocess (git2 push requires credential setup).
-    // A successful push also populates the local tracking ref
-    // (refs/remotes/origin/{branch}), closing the remote_branch_exists gap.
-    let output = Command::new("git")
-        .args(["push", "origin", &format!("{branch}:{branch}")])
-        .current_dir(repo_root)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| format!("failed to run git push: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("git push failed: {}", stderr));
-    }
+    let branch_ref: Branch = branch.into();
+    repo.push_branch(&branch_ref)
+        .map_err(|e| format!("push failed: {}", e))?;
 
     Ok(())
 }
@@ -683,7 +682,7 @@ fn create_and_push_branch(repo_root: &Path, branch: &str, base_branch: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::issues::types::{ChildIssue, Issue, IssueStatus, ParentIssue};
+    use crate::issues::issue::{ChildIssue, Issue, IssueStatus, ParentIssue};
 
     /// A mock provider for testing parent detection logic.
     struct MockProvider {
@@ -691,18 +690,18 @@ mod tests {
     }
 
     impl MockProvider {
-        fn new(issues: Vec<Issue>) -> Self {
-            Self { issues }
+        fn into_provider(self) -> IssueProvider {
+            IssueProvider::new(Box::new(self))
         }
     }
 
-    impl IssueProvider for MockProvider {
+    impl crate::issues::providers::IssueBackend for MockProvider {
         fn name(&self) -> &str {
             "mock"
         }
 
         fn kind(&self) -> ProviderKind {
-            ProviderKind::File
+            ProviderKind::Linear
         }
 
         fn list(&self, filter: &IssueFilter) -> crate::error::Result<Vec<Issue>> {
@@ -815,7 +814,10 @@ mod tests {
             vec![child_ref("ENG-101", IssueStatus::Backlog)],
         );
         let child = make_issue("ENG-101", IssueStatus::Backlog, vec![]);
-        let provider = MockProvider::new(vec![parent, child]);
+        let provider = MockProvider {
+            issues: vec![parent, child],
+        }
+        .into_provider();
 
         let candidates = collect_parent_candidates(&provider);
         assert_eq!(candidates.len(), 1);
@@ -830,7 +832,10 @@ mod tests {
             vec![child_ref("ENG-101", IssueStatus::InProgress)],
         );
         let child = make_issue("ENG-101", IssueStatus::InProgress, vec![]);
-        let provider = MockProvider::new(vec![parent, child]);
+        let provider = MockProvider {
+            issues: vec![parent, child],
+        }
+        .into_provider();
 
         let candidates = collect_parent_candidates(&provider);
         assert_eq!(candidates.len(), 1);
@@ -845,7 +850,10 @@ mod tests {
             vec![child_ref("ENG-101", IssueStatus::Complete)],
         );
         let child = make_issue("ENG-101", IssueStatus::Complete, vec![]);
-        let provider = MockProvider::new(vec![parent, child]);
+        let provider = MockProvider {
+            issues: vec![parent, child],
+        }
+        .into_provider();
 
         let candidates = collect_parent_candidates(&provider);
         assert!(candidates.is_empty());
@@ -859,7 +867,10 @@ mod tests {
             vec![child_ref("ENG-101", IssueStatus::Complete)],
         );
         let child = make_issue("ENG-101", IssueStatus::Complete, vec![]);
-        let provider = MockProvider::new(vec![parent, child]);
+        let provider = MockProvider {
+            issues: vec![parent, child],
+        }
+        .into_provider();
 
         let candidates = collect_parent_candidates(&provider);
         assert!(candidates.is_empty());
@@ -964,7 +975,10 @@ mod tests {
         };
 
         // --- Tick 1: A=Planned, B=Planned(blocked by A), C=Planned(blocked by B) ---
-        let provider = MockProvider::new(vec![child_a.clone(), child_b.clone(), child_c.clone()]);
+        let provider = MockProvider {
+            issues: vec![child_a.clone(), child_b.clone(), child_c.clone()],
+        }
+        .into_provider();
         let labels = vec!["auto".to_string()];
         let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
         let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
@@ -977,8 +991,10 @@ mod tests {
             status: IssueStatus::Complete,
             ..child_a.clone()
         };
-        let provider =
-            MockProvider::new(vec![child_a_done.clone(), child_b.clone(), child_c.clone()]);
+        let provider = MockProvider {
+            issues: vec![child_a_done.clone(), child_b.clone(), child_c.clone()],
+        }
+        .into_provider();
         let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
         let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
         assert!(!ids.contains(&"ENG-101"), "tick 2: A already Complete");
@@ -990,11 +1006,10 @@ mod tests {
             status: IssueStatus::Complete,
             ..child_b.clone()
         };
-        let provider = MockProvider::new(vec![
-            child_a_done.clone(),
-            child_b_done.clone(),
-            child_c.clone(),
-        ]);
+        let provider = MockProvider {
+            issues: vec![child_a_done.clone(), child_b_done.clone(), child_c.clone()],
+        }
+        .into_provider();
         let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
         let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
         assert!(ids.contains(&"ENG-103"), "tick 3: C spawnable");
@@ -1005,7 +1020,10 @@ mod tests {
             status: IssueStatus::Complete,
             ..child_c.clone()
         };
-        let provider = MockProvider::new(vec![child_a_done, child_b_done, child_c_done]);
+        let provider = MockProvider {
+            issues: vec![child_a_done, child_b_done, child_c_done],
+        }
+        .into_provider();
         let spawnable = collect_spawnable(&provider, &labels, repo_root, "test", 10, &[]);
         assert!(spawnable.is_empty(), "tick 4: no children left");
     }
@@ -1070,7 +1088,10 @@ mod tests {
             ..step_a.clone()
         };
 
-        let provider = MockProvider::new(vec![step_a.clone(), step_b.clone()]);
+        let provider = MockProvider {
+            issues: vec![step_a.clone(), step_b.clone()],
+        }
+        .into_provider();
         let labels = vec!["auto".to_string()];
         let spawnable = collect_spawnable(&provider, &labels, tmp.path(), "test", 10, &[]);
         let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
@@ -1082,7 +1103,10 @@ mod tests {
             status: IssueStatus::Complete,
             ..step_a
         };
-        let provider = MockProvider::new(vec![step_a_done, step_b]);
+        let provider = MockProvider {
+            issues: vec![step_a_done, step_b],
+        }
+        .into_provider();
         let spawnable = collect_spawnable(&provider, &labels, tmp.path(), "test", 10, &[]);
         let ids: Vec<&str> = spawnable.iter().map(|s| s.issue.id.as_str()).collect();
         assert!(ids.contains(&"ENG-202"), "B now spawnable");
@@ -1279,20 +1303,27 @@ mod tests {
                 branch_name: Some("child-1".into()),
             }],
         );
-        let provider = MockProvider::new(vec![parent.clone()]);
+        let provider = MockProvider {
+            issues: vec![parent.clone()],
+        }
+        .into_provider();
 
         // First call: should find wrap-up candidate.
         let wrapup1 =
-            collect_wrapup_parents(&provider, ProviderKind::File, tmp.path(), "r", 10, &[]);
+            collect_wrapup_parents(&provider, ProviderKind::Linear, tmp.path(), "r", 10, &[]);
         assert_eq!(wrapup1.len(), 1);
         assert_eq!(wrapup1[0].kind, SpawnKind::Wrapup);
 
         // Second call: existing worker → skip.
-        let worker_name = derive_worker_name(&parent.id, parent.branch_name.as_deref());
+        let worker_name = parent
+            .branch_name
+            .as_deref()
+            .map(|b| Branch::new(b).to_string())
+            .unwrap_or_else(|| parent.id.to_lowercase());
         let existing = vec![("r".to_string(), worker_name)];
         let wrapup2 = collect_wrapup_parents(
             &provider,
-            ProviderKind::File,
+            ProviderKind::Linear,
             tmp.path(),
             "r",
             10,
@@ -1303,45 +1334,40 @@ mod tests {
 
     // -- create_and_push_branch / ensure_parent_branches deadlock fix tests ---
 
-    /// Helper: set up a self-referencing git repo (origin points at itself)
-    /// with an initial commit and `git fetch origin` so tracking refs exist.
     fn setup_self_remote_repo() -> (tempfile::TempDir, std::path::PathBuf) {
-        use std::process::Command as StdCommand;
-
         let tmp = tempfile::tempdir().unwrap();
-        let repo_root = tmp.path().to_path_buf();
+        let bare_path = tmp.path().join("bare.git");
+        let repo_path = tmp.path().join("work");
 
-        let git = |args: &[&str]| {
-            let out = StdCommand::new("git")
-                .args(args)
-                .current_dir(&repo_root)
-                .env("GIT_AUTHOR_NAME", "test")
-                .env("GIT_AUTHOR_EMAIL", "test@test.com")
-                .env("GIT_COMMITTER_NAME", "test")
-                .env("GIT_COMMITTER_EMAIL", "test@test.com")
-                .output()
-                .expect("git command failed");
-            assert!(
-                out.status.success(),
-                "git {:?} failed: {}",
-                args,
-                String::from_utf8_lossy(&out.stderr)
-            );
-        };
+        let bare = git2::Repository::init_bare(&bare_path).unwrap();
 
-        git(&["init", "-q", "-b", "main"]);
-        git(&[
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--allow-empty",
-            "-m",
-            "init",
-        ]);
-        git(&["remote", "add", "origin", repo_root.to_str().unwrap()]);
-        git(&["fetch", "origin"]);
+        let work = git2::Repository::init(&repo_path).unwrap();
+        {
+            let sig = git2::Signature::now("test", "test@test.com").unwrap();
+            let tree_id = work.index().unwrap().write_tree().unwrap();
+            let tree = work.find_tree(tree_id).unwrap();
+            work.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
+            work.set_head("refs/heads/main").unwrap();
+        }
 
-        (tmp, repo_root)
+        work.remote("origin", bare_path.to_str().unwrap()).unwrap();
+
+        // Push main to bare so tracking refs exist
+        {
+            let mut remote = work.find_remote("origin").unwrap();
+            remote
+                .push(&["refs/heads/main:refs/heads/main"], None)
+                .unwrap();
+        }
+        // Fetch so origin/main tracking ref exists locally
+        {
+            let mut remote = work.find_remote("origin").unwrap();
+            remote.fetch(&["main"], None, None).unwrap();
+        }
+
+        drop(bare);
+        (tmp, repo_path)
     }
 
     /// When a local branch exists but the tracking ref does not,
@@ -1441,7 +1467,10 @@ mod tests {
             branch_name: Some(parent_branch.to_string()),
             parent: None,
         };
-        let provider = MockProvider::new(vec![parent]);
+        let provider = MockProvider {
+            issues: vec![parent],
+        }
+        .into_provider();
 
         let results = ensure_parent_branches(&provider, &repo_root, "test", "main");
 

@@ -26,7 +26,7 @@ impl ReviewSubmit {
         // Parse and validate
         let review_data = Review::from_markdown(&input)?;
 
-        // Resolve worktree from cwd — use the worktrees_dir as the reviews root
+        // Resolve worktree from cwd — use the worktrees_path as the reviews root
         // Reviews are stored in the current working directory's .jig/reviews/
         let cwd = std::env::current_dir()?;
 

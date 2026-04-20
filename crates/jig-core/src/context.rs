@@ -6,7 +6,7 @@ use crate::config::{Config, JigToml, JIG_DIR};
 use crate::error::Result;
 use crate::git::Repo;
 use crate::global::GlobalConfig;
-use crate::issues::{self, FileProvider, IssueProvider, LinearProvider};
+use crate::issues::{self, IssueProvider, LinearProvider};
 
 /// All repo-derived state needed by jig operations.
 /// Created once at startup to avoid redundant git subprocess calls.
@@ -14,7 +14,7 @@ pub struct RepoContext {
     /// Base repository root (even when invoked from a worktree)
     pub repo_root: PathBuf,
     /// Directory containing jig-managed worktrees (<repo_root>/.jig)
-    pub worktrees_dir: PathBuf,
+    pub worktrees_path: PathBuf,
     /// The .git common directory (for exclude file, etc.)
     pub git_common_dir: PathBuf,
     /// Effective base branch (jig.toml > repo config > global config > fallback)
@@ -51,7 +51,7 @@ impl RepoContext {
     }
 
     fn build(repo_root: PathBuf, git_common_dir: PathBuf) -> Result<Self> {
-        let worktrees_dir = repo_root.join(JIG_DIR);
+        let worktrees_path = repo_root.join(JIG_DIR);
 
         // Load configs once — reused for base branch resolution and issue providers.
         let jig_toml = JigToml::load(&repo_root)?.unwrap_or_default();
@@ -67,7 +67,7 @@ impl RepoContext {
 
         Ok(Self {
             repo_root,
-            worktrees_dir,
+            worktrees_path,
             git_common_dir,
             base_branch,
             session_name,
@@ -108,27 +108,8 @@ impl RepoContext {
     // -- Issue provider convenience methods ----------------------------------
 
     /// Create an issue provider based on repo and global configuration.
-    ///
-    /// Reads file-based issues from the working tree. For reading from a git
-    /// ref (e.g. `"origin/main"`), use [`issue_provider_with_ref`](Self::issue_provider_with_ref).
-    pub fn issue_provider(&self) -> Result<Box<dyn IssueProvider>> {
-        issues::make_provider(&self.repo_root, &self.jig_toml, &self.global_config)
-    }
-
-    /// Like [`issue_provider`](Self::issue_provider), but reads file-based
-    /// issues from the given git ref instead of the working tree.
-    pub fn issue_provider_with_ref(&self, git_ref: &str) -> Result<Box<dyn IssueProvider>> {
-        issues::make_provider_with_ref(
-            &self.repo_root,
-            &self.jig_toml,
-            &self.global_config,
-            git_ref,
-        )
-    }
-
-    /// Create a file-based provider (for mutation operations).
-    pub fn file_provider(&self) -> FileProvider {
-        issues::make_file_provider(&self.repo_root, &self.jig_toml)
+    pub fn issue_provider(&self) -> Result<IssueProvider> {
+        issues::make_provider(&self.jig_toml, &self.global_config)
     }
 
     /// Create a Linear provider (for mutation operations).
@@ -195,7 +176,7 @@ mod tests {
             ctx.repo_root.canonicalize().unwrap(),
             dir.path().canonicalize().unwrap()
         );
-        assert!(ctx.worktrees_dir.ends_with(JIG_DIR));
+        assert!(ctx.worktrees_path.ends_with(JIG_DIR));
         assert!(ctx.session_name.starts_with("jig-"));
         // Default fallback base branch
         assert_eq!(ctx.base_branch, "origin/main");

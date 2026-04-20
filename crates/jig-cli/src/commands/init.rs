@@ -7,7 +7,7 @@ use std::path::Path;
 use jig_core::config::{JIG_DIR, JIG_LOCAL_TOML};
 use jig_core::git::Repo;
 use jig_core::host::tmux::TmuxWindow;
-use jig_core::{adapter, terminal, Error, JigToml};
+use jig_core::{agents, terminal, Error, JigToml};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -39,10 +39,6 @@ const SKILL_SPAWN: &str = include_str!("../../../../templates/skills/spawn/SKILL
 const SKILL_REVIEW_RESPOND: &str =
     include_str!("../../../../templates/skills/review-respond/SKILL.md");
 
-// Agent-specific templates
-const CLAUDE_SETTINGS_JSON: &str =
-    include_str!("../../../../templates/adapters/claude-code/settings.json");
-
 /// Initialize repository for jig
 #[derive(Args, Debug, Clone)]
 pub struct Init {
@@ -73,6 +69,8 @@ pub enum InitError {
     Io(#[from] std::io::Error),
     #[error("Unknown agent: '{0}'. Supported agents: {1}")]
     UnknownAgent(String, String),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for Init {
@@ -85,7 +83,11 @@ impl Op for Init {
                 String::new(),
                 format!(
                     "agent argument required. Supported: {}",
-                    adapter::supported_agents().join(", ")
+                    agents::AgentKind::ALL
+                        .iter()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             )
         })?;
@@ -96,30 +98,34 @@ impl Op for Init {
             Ok(repo) => repo.repo_root.clone(),
             Err(_) => {
                 let git_repo = Repo::discover()?;
-                git_repo.base_repo_dir()
+                git_repo.clone_path()
             }
         };
 
         // Validate agent argument
-        let adapter = adapter::get_adapter(agent_name).ok_or_else(|| {
+        let agent = agents::Agent::from_name(agent_name).ok_or_else(|| {
             InitError::UnknownAgent(
                 agent_name.to_string(),
-                adapter::supported_agents().join(", "),
+                agents::AgentKind::ALL
+                    .iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
             )
         })?;
 
         // Check if agent is installed
-        if !terminal::command_exists(adapter.command) {
+        if !terminal::command_exists(agent.command()) {
             ui::warning(&format!(
                 "'{}' not found in PATH. Install it before running agents.",
-                adapter.command
+                agent.command()
             ));
         }
 
         // If already initialized, just ensure hooks are set up
         if JigToml::exists(&repo_root) && !self.force {
             ui::progress("Already initialized, ensuring hooks are set up...");
-            install_hooks(&repo_root, adapter, false);
+            install_hooks(&repo_root, &agent, false);
             eprintln!();
             ui::success("Hooks up to date");
             return Ok(NoOutput);
@@ -127,7 +133,7 @@ impl Op for Init {
 
         ui::progress(&format!(
             "Initializing jig for {} in {}",
-            adapter.name,
+            agent.name(),
             repo_root.display()
         ));
 
@@ -172,10 +178,15 @@ impl Op for Init {
             "spawn",
         ];
         for skill in skill_names {
-            let dir = repo_root.join(adapter.skills_dir).join(skill);
+            let dir = repo_root.join(agent.skills_dir()).join(skill);
             if !dir.exists() {
                 fs::create_dir_all(&dir)?;
-                eprintln!("  {} Created {}/{}/", ui::SYM_OK, adapter.skills_dir, skill);
+                eprintln!(
+                    "  {} Created {}/{}/",
+                    ui::SYM_OK,
+                    agent.skills_dir().display(),
+                    skill
+                );
             }
         }
 
@@ -272,18 +283,18 @@ type = "{}"
         // Write adapter-specific project file (CLAUDE.md, .cursorrules, etc.)
         write_file(
             &repo_root,
-            adapter.project_file,
+            &agent.project_file().to_string_lossy(),
             PROJECT_MD_TEMPLATE,
             self.force,
             backup_dir_opt,
         )?;
 
         // Write adapter-specific settings file if applicable
-        if let Some(settings_path) = adapter.settings_file {
-            let settings_content = get_settings_content(adapter);
+        if let Some(settings_path) = agent.settings_file() {
+            let settings_content = get_settings_content(&agent);
             write_file(
                 &repo_root,
-                settings_path,
+                &settings_path.to_string_lossy(),
                 settings_content,
                 self.force,
                 backup_dir_opt,
@@ -302,12 +313,14 @@ type = "{}"
         for (skill_name, content) in skills {
             let path = format!(
                 "{}/{}/{}",
-                adapter.skills_dir, skill_name, adapter.skill_file
+                agent.skills_dir().display(),
+                skill_name,
+                agent.skill_file().display()
             );
             write_file(&repo_root, &path, content, self.force, backup_dir_opt)?;
         }
 
-        install_hooks(&repo_root, adapter, self.force);
+        install_hooks(&repo_root, &agent, self.force);
 
         eprintln!();
         ui::success(&ui::bold("Initialization complete"));
@@ -318,7 +331,7 @@ type = "{}"
             } else {
                 Some(extra.as_str())
             };
-            launch_audit(&repo_root, adapter, self.backup, extra)?;
+            launch_audit(&repo_root, &agent, self.backup, extra)?;
         }
 
         Ok(NoOutput)
@@ -332,7 +345,7 @@ type = "{}"
 /// Generate audit prompt with adapter-specific file paths.
 /// When `has_backup` is true, adds instructions to reference `.backup/` files.
 /// When `extra` is provided, appends it as additional instructions.
-fn audit_prompt(adapter: &adapter::AgentAdapter, has_backup: bool, extra: Option<&str>) -> String {
+fn audit_prompt(agent: &agents::Agent, has_backup: bool, extra: Option<&str>) -> String {
     let backup_section = if has_backup {
         "\n\n## Reference material\n\n\
          Existing files were backed up to `.backup/` before this initialization. \
@@ -387,27 +400,24 @@ fn audit_prompt(adapter: &adapter::AgentAdapter, has_backup: bool, extra: Option
    - /review — Ensure review criteria match project conventions
 
 Remove HTML comment placeholders as you fill in actual content. Commit when done.{extra_section}"#,
-        project_file = adapter.project_file,
-        skills_dir = adapter.skills_dir,
+        project_file = agent.project_file().display(),
+        skills_dir = agent.skills_dir().display(),
     )
 }
 
-/// Get settings file content for an adapter
-fn get_settings_content(adapter: &adapter::AgentAdapter) -> &'static str {
-    match adapter.agent_type {
-        adapter::AgentType::Claude => CLAUDE_SETTINGS_JSON,
-    }
+fn get_settings_content(agent: &agents::Agent) -> &str {
+    agent.settings_content().unwrap_or("{}")
 }
 
 /// Launch the agent with the audit prompt in a tmux session.
 fn launch_audit(
     repo_root: &Path,
-    adapter: &adapter::AgentAdapter,
+    agent: &agents::Agent,
     has_backup: bool,
     extra: Option<&str>,
 ) -> Result<(), InitError> {
-    let prompt = audit_prompt(adapter, has_backup, extra);
-    let cmd = adapter::build_spawn_command(adapter, Some(&prompt), &[]);
+    let prompt = audit_prompt(agent, has_backup, extra);
+    let cmd = agent.spawn_command(Some(&prompt), &[]);
 
     let session_name = "jig-init";
     let window_name = repo_root
@@ -485,7 +495,7 @@ auto_spawn_interval = 120        # seconds between issue polls
 }
 
 /// Install git hooks and agent-specific hooks (idempotent).
-fn install_hooks(repo_root: &Path, adapter: &adapter::AgentAdapter, force: bool) {
+fn install_hooks(repo_root: &Path, agent: &agents::Agent, force: bool) {
     eprintln!();
     ui::progress("Installing git hooks...");
     match jig_core::hooks::init_hooks(repo_root, force) {
@@ -512,7 +522,7 @@ fn install_hooks(repo_root: &Path, adapter: &adapter::AgentAdapter, force: bool)
         }
     }
 
-    if matches!(adapter.agent_type, jig_core::adapter::AgentType::Claude) {
+    if agent.kind() == agents::AgentKind::Claude {
         ui::progress("Installing Claude Code hooks...");
         match jig_core::hooks::install_claude_hooks() {
             Ok(result) => {

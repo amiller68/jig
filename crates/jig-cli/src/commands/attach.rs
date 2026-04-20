@@ -41,7 +41,7 @@ impl Op for Attach {
                     .collect();
                 let repo = repos
                     .iter()
-                    .find(|r| r.worktrees_dir.join(name).exists())
+                    .find(|r| r.worktrees_path.join(name).exists())
                     .ok_or(jig_core::Error::WorktreeNotFound(name.to_string()))?;
                 spawn::attach(repo, Some(name))?;
                 Ok(NoOutput)

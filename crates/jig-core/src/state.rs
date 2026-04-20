@@ -4,10 +4,12 @@
 
 use crate::config::{self, RepoConfig};
 use crate::error::Result;
-use crate::worker::{Worker, WorkerId};
+use crate::git::WorktreeRef;
+use crate::worker::Worker;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
 /// Current state file version for migrations
 const STATE_VERSION: u32 = 1;
@@ -20,7 +22,7 @@ pub struct OrchestratorState {
     /// Root of the git repository
     pub repo_root: PathBuf,
     /// All workers (active and archived)
-    pub workers: HashMap<WorkerId, Worker>,
+    pub workers: HashMap<Uuid, Worker>,
     /// Shared tmux session for all workers
     pub tmux_session: String,
     /// Repository configuration
@@ -114,10 +116,9 @@ impl OrchestratorState {
             for worker in state.workers.values_mut() {
                 let old_prefix = old_dir.to_string_lossy().to_string();
                 let new_prefix = new_dir.to_string_lossy().to_string();
-                let path_str = worker.worktree_path.to_string_lossy().to_string();
+                let path_str = worker.path.to_string_lossy().to_string();
                 if path_str.starts_with(&old_prefix) {
-                    worker.worktree_path =
-                        PathBuf::from(path_str.replacen(&old_prefix, &new_prefix, 1));
+                    worker.path = WorktreeRef::new(path_str.replacen(&old_prefix, &new_prefix, 1));
                 }
             }
             let content = serde_json::to_string_pretty(&state)?;
@@ -173,7 +174,7 @@ impl OrchestratorState {
     }
 
     /// Get a worker by ID
-    pub fn get_worker(&self, id: &WorkerId) -> Option<&Worker> {
+    pub fn get_worker(&self, id: &Uuid) -> Option<&Worker> {
         self.workers.get(id)
     }
 
@@ -183,23 +184,13 @@ impl OrchestratorState {
     }
 
     /// Remove a worker
-    pub fn remove_worker(&mut self, id: &WorkerId) -> Option<Worker> {
+    pub fn remove_worker(&mut self, id: &Uuid) -> Option<Worker> {
         self.workers.remove(id)
-    }
-
-    /// Get all active (non-terminal) workers
-    pub fn active_workers(&self) -> impl Iterator<Item = &Worker> {
-        self.workers.values().filter(|w| w.is_active())
     }
 
     /// Get all workers
     pub fn all_workers(&self) -> impl Iterator<Item = &Worker> {
         self.workers.values()
-    }
-
-    /// Count of active workers
-    pub fn active_count(&self) -> usize {
-        self.active_workers().count()
     }
 }
 
@@ -227,13 +218,7 @@ mod tests {
         std::fs::create_dir_all(&old_dir).unwrap();
 
         let mut state = OrchestratorState::new(repo_root.to_path_buf(), RepoConfig::default());
-        let worker = Worker::new(
-            "test-worker".to_string(),
-            old_dir.join("test-worker"),
-            "test-worker".to_string(),
-            "main".to_string(),
-            "jig-project".to_string(),
-        );
+        let worker = test_worker("test-worker", old_dir.join("test-worker"));
         state.add_worker(worker);
 
         // Write state to legacy location
@@ -269,12 +254,9 @@ mod tests {
         let worker = loaded.get_worker_by_name("test-worker").unwrap();
         let expected_fragment = format!("{}/test-worker", config::JIG_DIR);
         assert!(
-            worker
-                .worktree_path
-                .to_string_lossy()
-                .contains(&expected_fragment),
+            worker.path().to_string_lossy().contains(&expected_fragment),
             "worker path should reference new dir, got: {}",
-            worker.worktree_path.display()
+            worker.path().display()
         );
     }
 
@@ -283,15 +265,11 @@ mod tests {
         let mut state =
             OrchestratorState::new(PathBuf::from("/home/user/project"), RepoConfig::default());
 
-        let worktree_path = PathBuf::from("/home/user/project")
-            .join(config::JIG_DIR)
-            .join("test-worker");
-        let worker = Worker::new(
-            "test-worker".to_string(),
-            worktree_path,
-            "test-worker".to_string(),
-            "main".to_string(),
-            "jig-project".to_string(),
+        let worker = test_worker(
+            "test-worker",
+            PathBuf::from("/home/user/project")
+                .join(config::JIG_DIR)
+                .join("test-worker"),
         );
 
         let id = worker.id;
@@ -299,5 +277,15 @@ mod tests {
 
         assert!(state.get_worker(&id).is_some());
         assert!(state.get_worker_by_name("test-worker").is_some());
+    }
+
+    fn test_worker(name: &str, path: PathBuf) -> Worker {
+        Worker {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            path: WorktreeRef::new(path),
+            issue_ref: None,
+            auto_spawned: false,
+        }
     }
 }

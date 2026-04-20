@@ -3,7 +3,8 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use jig_core::{git, terminal, Error, RepoContext, RepoRegistry};
+use jig_core::git::Repo;
+use jig_core::{terminal, Error, RepoContext, RepoRegistry};
 
 use crate::op::{Op, RepoCtx};
 use crate::ui;
@@ -43,6 +44,8 @@ pub enum OpenError {
     Core(#[from] Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for Open {
@@ -64,7 +67,7 @@ impl Op for Open {
                 let repo = if let Some(name) = self.name.as_deref() {
                     repos
                         .iter()
-                        .find(|r| r.worktrees_dir.join(name).exists())
+                        .find(|r| r.worktrees_path.join(name).exists())
                         .ok_or(Error::WorktreeNotFound(name.to_string()))?
                 } else {
                     repos.first().ok_or(Error::NotInGitRepo)?
@@ -79,20 +82,21 @@ impl Open {
     fn open_in_repo(&self, repo: &RepoContext) -> Result<OpenOutput, OpenError> {
         if self.all {
             // Open all worktrees in new tabs
-            let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
+            let git_repo = Repo::open(&repo.repo_root)?;
+            let worktrees = git_repo.list_worktrees()?;
 
             if worktrees.is_empty() {
                 eprintln!("No worktrees to open");
                 return Ok(OpenOutput::None);
             }
 
-            for wt_name in worktrees {
-                let path = repo.worktrees_dir.join(&wt_name);
-                if path.exists() {
-                    let opened = terminal::open_tab(&path)?;
-                    if opened {
-                        ui::success(&format!("Opened '{}' in new tab", ui::highlight(&wt_name)));
-                    }
+            for wt in worktrees {
+                let opened = terminal::open_tab(&wt.path())?;
+                if opened {
+                    ui::success(&format!(
+                        "Opened '{}' in new tab",
+                        ui::highlight(&wt.name())
+                    ));
                 }
             }
 
@@ -101,7 +105,7 @@ impl Open {
         } else {
             // Open specific worktree
             let name = self.name.as_deref().ok_or(Error::NameRequired)?;
-            let worktree_path = repo.worktrees_dir.join(name);
+            let worktree_path = repo.worktrees_path.join(name);
 
             if !worktree_path.exists() {
                 return Err(Error::WorktreeNotFound(name.to_string()).into());

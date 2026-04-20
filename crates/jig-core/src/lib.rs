@@ -8,7 +8,7 @@
 //! - Orchestrator state persistence
 //! - Agent adapters for different AI assistants
 
-pub mod adapter;
+pub mod agents;
 pub mod commits;
 pub mod config;
 pub mod context;
@@ -23,19 +23,18 @@ pub mod hooks;
 pub mod host;
 pub mod issues;
 pub mod notify;
-pub mod templates;
 pub mod nudge;
 pub mod registry;
 pub mod review;
 pub mod spawn;
 pub mod state;
+pub mod templates;
 pub mod worker;
-pub mod worktree;
 
 /// Deprecated: use `host` directly
 pub mod terminal {
-    pub use crate::host::{check_dependencies, command_exists, DependencyStatus, Terminal};
     pub use crate::host::terminal::TerminalError;
+    pub use crate::host::{check_dependencies, command_exists, DependencyStatus, Terminal};
 
     pub fn open_tab(dir: &std::path::Path) -> crate::error::Result<bool> {
         let terminal = Terminal::detect();
@@ -48,11 +47,12 @@ pub mod terminal {
     }
 }
 
-pub use adapter::{get_adapter, AgentAdapter, AgentType, CLAUDE_CODE};
+pub use agents::Agent;
 pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig, ReviewConfig};
 pub use context::RepoContext;
 pub use error::{Error, Result};
 pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
+pub use git::{Branch, DiffStats, FileDiff, GitError, Repo, Worktree, WorktreeRef};
 pub use github::GitHubClient;
 pub use global::{
     ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
@@ -60,12 +60,11 @@ pub use global::{
 };
 pub use host::tmux::{TmuxError, TmuxSession, TmuxWindow};
 pub use issues::{
-    make_file_provider, make_linear_provider, make_provider, make_provider_with_ref, FileProvider,
-    Issue, IssueFilter, IssuePriority, IssueProvider, IssueStatus, LinearProvider,
+    make_linear_provider, make_provider, Issue, IssueFilter, IssuePriority, IssueProvider,
+    IssueStatus, LinearProvider,
 };
 pub use nudge::{classify_nudge, execute_nudge, NudgeType};
 pub use registry::RepoRegistry;
 pub use state::OrchestratorState;
 pub use templates::{TemplateContext, TemplateEngine};
-pub use worker::{DiffStats, FileDiff, TaskContext, Worker, WorkerId, WorkerStatus};
-pub use worktree::Worktree;
+pub use worker::{IssueRef, ParentInfo, Worker, WorkerStatus};

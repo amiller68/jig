@@ -5,7 +5,7 @@
 
 use std::process::{Command, Stdio};
 
-use crate::adapter::get_adapter;
+use crate::agents;
 use crate::review;
 
 use super::messages::{ReviewComplete, ReviewRequest};
@@ -128,8 +128,8 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
     );
 
     // Build the ephemeral command
-    let adapter = get_adapter("claude").ok_or("claude adapter not found")?;
-    let cmd = adapter.build_ephemeral_command(
+    let agent = agents::Agent::from_name("claude").ok_or("claude agent not found")?;
+    let cmd = agent.ephemeral_command(
         &prompt,
         &[
             "Read",

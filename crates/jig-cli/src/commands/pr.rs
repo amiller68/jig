@@ -4,9 +4,8 @@ use std::process::Command;
 
 use clap::Args;
 
-use jig_core::git;
 use jig_core::state::OrchestratorState;
-use jig_core::Error;
+use jig_core::{Error, Worktree};
 
 use crate::op::{Op, RepoCtx};
 use crate::ui;
@@ -33,6 +32,8 @@ pub enum PrError {
     GhFailed(String),
     #[error("could not determine current branch")]
     NoBranch,
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 #[derive(Debug)]
@@ -56,7 +57,7 @@ impl Op for Pr {
         let branch = git_repo.current_branch().map_err(|_| PrError::NoBranch)?;
 
         // 2. Resolve base branch
-        let base = resolve_base(&repo.worktrees_dir, &repo.repo_root, repo)?;
+        let base = resolve_base(&repo.repo_root, repo)?;
         let base_for_gh = base.strip_prefix("origin/").unwrap_or(&base);
 
         ui::detail(&format!(
@@ -123,14 +124,13 @@ impl Op for Pr {
 /// If running inside a jig worktree with an associated issue that has a parent,
 /// use the parent issue's branch name. Otherwise fall back to the repo base branch.
 fn resolve_base(
-    worktrees_dir: &std::path::Path,
     repo_root: &std::path::Path,
     repo: &jig_core::RepoContext,
 ) -> Result<String, PrError> {
     // Try to detect if we're in a jig worktree
-    let worktree_name = match git::get_current_worktree_name(worktrees_dir)? {
-        Some(name) => name,
-        None => return Ok(repo.base_branch.clone()),
+    let worktree_name = match Worktree::current() {
+        Ok(wt) => wt.name(),
+        Err(_) => return Ok(repo.base_branch.clone()),
     };
 
     // Load orchestrator state and find our worker
@@ -144,9 +144,9 @@ fn resolve_base(
         None => return Ok(repo.base_branch.clone()),
     };
 
-    // Get issue ref from the worker's task
-    let issue_ref = match worker.task.as_ref().and_then(|t| t.issue_ref.as_ref()) {
-        Some(r) => r.clone(),
+    // Get issue ref from the worker
+    let issue_ref = match worker.issue_ref() {
+        Some(r) => r.to_string(),
         None => return Ok(repo.base_branch.clone()),
     };
 

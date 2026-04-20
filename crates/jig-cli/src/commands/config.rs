@@ -296,10 +296,10 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     eprintln!(
         "  {} {} {}",
         ui::dim("Provider:"),
-        ui::highlight(&display.issues_provider),
+        ui::highlight(&display.issues_provider.to_string()),
         src(&display.issues_source)
     );
-    if display.issues_provider == "linear" {
+    if display.issues_provider == jig_core::issues::ProviderKind::Linear {
         if let Some(ref linear) = display.linear {
             eprintln!(
                 "  {} {} {}",

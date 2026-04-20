@@ -9,19 +9,19 @@
 
 use std::path::Path;
 
-use crate::adapter;
+use crate::agents;
 use crate::config::{self, JigToml, RepoConfig};
 use crate::context::RepoContext;
 use crate::error::{Error, Result};
 use crate::events::{Event, EventLog, EventType, WorkerState};
-use crate::git::Repo;
+use crate::git::WorktreeRef;
+use crate::git::{Branch, Repo};
 use crate::global::GlobalConfig;
-use crate::issues::{Issue, IssueStatus, ProviderKind};
 use crate::host::tmux::{TmuxSession, TmuxWindow};
+use crate::issues::{Issue, IssueStatus, ProviderKind};
 use crate::state::OrchestratorState;
 use crate::templates::{TemplateContext, TemplateEngine};
-use crate::worker::{TaskContext, Worker, WorkerStatus};
-use crate::worktree::Worktree;
+use crate::worker::{IssueRef, ParentInfo, Worker, WorkerStatus};
 
 /// Distinguishes normal (interactive) worker spawns from wrap-up spawns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -74,7 +74,6 @@ pub struct SpawnIssueInput<'a> {
 /// Both `tick_once` (blocking) and `tick` (watch-mode spawn actor) call this.
 pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Result<(), String> {
     let repo_root = input.repo_root;
-    let worktrees_dir = repo_root.join(config::JIG_DIR);
     let worktree_path = config::worktree_path(repo_root, input.worker_name);
 
     if worktree_path.exists() {
@@ -104,47 +103,44 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
 
     let copy_files = config::get_copy_files(repo_root).map_err(|e| e.to_string())?;
     let on_create_hook = config::get_on_create_hook(repo_root).map_err(|e| e.to_string())?;
-    let git_common_dir = Repo::open(repo_root)
-        .map_err(|e| e.to_string())?
-        .common_dir();
+    let repo = Repo::open(repo_root).map_err(|e| e.to_string())?;
 
     // Create worktree WITHOUT running on-create hook — we handle it after registration
-    let mut wt = Worktree::create(
-        repo_root,
-        &worktrees_dir,
-        &git_common_dir,
-        input.worker_name,
-        input.issue.branch_name.as_deref(),
-        &base_branch,
+    let branch = Branch::new(
+        input
+            .issue
+            .branch_name
+            .as_deref()
+            .unwrap_or(input.worker_name),
+    );
+    let base = Branch::new(&base_branch);
+    let wt = Worker::create(
+        &repo,
+        &branch,
+        &base,
         None, // defer on-create hook
         &copy_files,
         true, // auto_spawned
     )
     .map_err(|e| e.to_string())?;
 
-    // Set parent info on the worktree so it's included in event data.
-    // This allows the daemon to identify parent-child relationships at tick time.
-    if let Some(ref parent) = input.issue.parent {
-        wt.parent_issue = Some(parent.id.clone());
-        if let Some(ref branch) = parent.branch_name {
-            wt.parent_branch = Some(branch.clone());
-        }
-    }
+    let parent_info = input.issue.parent.as_ref().map(|p| ParentInfo {
+        issue: &p.id,
+        branch: p.branch_name.as_deref(),
+    });
 
     let context = input.issue.to_spawn_context(input.provider_kind);
 
-    // Register as Initializing so jig ps/ls show the worker immediately,
-    // injecting the issue title into the event data for later retrieval.
     wt.register_initializing_with_issue_text(
-        Some(&context),
         Some(&input.issue.id),
         &input.issue.title,
+        parent_info,
     )
     .map_err(|e| e.to_string())?;
 
     // Run on-create hook now that the worker is visible
     if let Some(hook) = on_create_hook.as_deref() {
-        let success = config::run_on_create_hook(hook, &wt.path).map_err(|e| e.to_string())?;
+        let success = config::run_on_create_hook(hook, wt.path()).map_err(|e| e.to_string())?;
         if !success {
             wt.emit_setup_failed("on-create hook failed");
             return Err("on-create hook failed".to_string());
@@ -240,10 +236,10 @@ pub fn run_triage_subprocess(repo_root: &Path, issue: &Issue) -> std::result::Re
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
     let model = &jig_toml.triage.model;
-    let agent_adapter =
-        adapter::get_adapter(&jig_toml.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+    let agent = agents::Agent::from_name(&jig_toml.agent.agent_type)
+        .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude));
 
-    let argv = adapter::build_triage_argv(agent_adapter, model, TRIAGE_ALLOWED_TOOLS);
+    let argv = agent.triage_argv(model, TRIAGE_ALLOWED_TOOLS);
 
     // argv[0] is the command, rest are args
     let (cmd, args) = argv.split_first().ok_or("empty triage argv")?;
@@ -294,10 +290,9 @@ pub fn register(
     repo: &RepoContext,
     name: &str,
     branch: &str,
-    context: Option<&str>,
     issue_ref: Option<&str>,
 ) -> Result<()> {
-    let worktree_path = repo.worktrees_dir.join(name);
+    let worktree_path = repo.worktrees_path.join(name);
 
     let config = RepoConfig {
         base_branch: repo.base_branch.clone(),
@@ -306,26 +301,13 @@ pub fn register(
 
     let mut state = OrchestratorState::load_or_create(repo.repo_root.clone(), config)?;
 
-    let mut worker = Worker::new(
-        name.to_string(),
-        worktree_path,
-        branch.to_string(),
-        repo.base_branch.clone(),
-        repo.session_name.clone(),
-    );
-
-    // Set task context if provided
-    if let Some(ctx) = context {
-        let mut task = TaskContext::new(ctx.to_string());
-        if let Some(issue) = issue_ref {
-            task = task.with_issue(issue.to_string());
-        }
-        worker.set_task(task);
-    } else if let Some(issue) = issue_ref {
-        worker.set_task(TaskContext::new(String::new()).with_issue(issue.to_string()));
-    }
-
-    worker.tmux_window = Some(name.to_string());
+    let worker = Worker {
+        id: uuid::Uuid::new_v4(),
+        name: name.to_string(),
+        path: WorktreeRef::new(worktree_path),
+        issue_ref: issue_ref.map(IssueRef::new),
+        auto_spawned: false,
+    };
     state.add_worker(worker);
     state.save()?;
 
@@ -373,17 +355,13 @@ pub fn launch_tmux_window(
 
     // Get adapter from config (fallback to claude-code if not configured)
     let config = JigToml::load(&repo.repo_root)?.unwrap_or_default();
-    let agent_adapter =
-        adapter::get_adapter(&config.agent.agent_type).unwrap_or(&adapter::CLAUDE_CODE);
+    let agent = agents::Agent::from_name(&config.agent.agent_type)
+        .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude));
 
     let window = TmuxWindow::new(&repo.session_name, name);
     window.create(worktree_path)?;
 
-    let cmd = adapter::build_spawn_command(
-        agent_adapter,
-        Some(&effective_context),
-        &config.agent.disallowed_tools,
-    );
+    let cmd = agent.spawn_command(Some(&effective_context), &config.agent.disallowed_tools);
     window.send_keys(&[&cmd, "Enter"])?;
 
     Ok(())
@@ -400,24 +378,30 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
     if let Some(state) = state {
         for worker in state.workers.values() {
             let status = get_worker_status(&repo.session_name, &worker.name);
-            let worktree_path = repo.worktrees_dir.join(&worker.name);
+            let worktree_path = repo.worktrees_path.join(&worker.name);
 
             let (commits_ahead, is_dirty) = if worktree_path.exists() {
-                let commits = Repo::commits_ahead(&worktree_path, &repo.base_branch)
+                let commits = Repo::open(&worktree_path)
+                    .and_then(|r| r.commits_ahead(&Branch::new(&repo.base_branch)))
                     .unwrap_or_default()
                     .len();
-                let dirty = Repo::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+                let dirty = Repo::open(&worktree_path)
+                    .and_then(|r| r.has_uncommitted_changes())
+                    .unwrap_or(false);
                 (commits, dirty)
             } else {
                 (0, false)
             };
 
-            let issue_ref = worker.task.as_ref().and_then(|t| t.issue_ref.clone());
+            let issue_ref = worker.issue_ref.as_ref().map(|r| r.0.clone());
 
             tasks.push(TaskInfo {
                 name: worker.name.clone(),
                 status,
-                branch: worker.branch.clone(),
+                branch: Repo::open(&worktree_path)?
+                    .current_branch()
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|_| worker.name.clone()),
                 commits_ahead,
                 is_dirty,
                 issue_ref,
@@ -429,18 +413,24 @@ pub fn list_tasks(repo: &RepoContext) -> Result<Vec<TaskInfo>> {
         let windows = session.window_names()?;
 
         for window_name in windows {
-            let worktree_path = repo.worktrees_dir.join(&window_name);
+            let worktree_path = repo.worktrees_path.join(&window_name);
             if !worktree_path.exists() {
                 continue;
             }
 
             let status = get_worker_status(&repo.session_name, &window_name);
-            let branch = Repo::worktree_branch(&worktree_path).unwrap_or_default();
+            let branch = Repo::open(&worktree_path)?
+                .current_branch()
+                .map(|b| b.to_string())
+                .unwrap_or_default();
 
-            let commits_ahead = Repo::commits_ahead(&worktree_path, &repo.base_branch)
+            let commits_ahead = Repo::open(&worktree_path)
+                .and_then(|r| r.commits_ahead(&Branch::new(&repo.base_branch)))
                 .unwrap_or_default()
                 .len();
-            let is_dirty = Repo::has_uncommitted_changes(&worktree_path).unwrap_or(false);
+            let is_dirty = Repo::open(&worktree_path)
+                .and_then(|r| r.has_uncommitted_changes())
+                .unwrap_or(false);
 
             tasks.push(TaskInfo {
                 name: window_name,
@@ -480,7 +470,7 @@ pub fn attach(repo: &RepoContext, name: Option<&str>) -> Result<()> {
     if let Some(window_name) = name {
         let window = session.window(window_name);
         if !window.exists() {
-            let worktree_path = repo.worktrees_dir.join(window_name);
+            let worktree_path = repo.worktrees_path.join(window_name);
             if worktree_path.exists() {
                 if let Some(status) = get_worker_event_status(repo, window_name) {
                     match status {

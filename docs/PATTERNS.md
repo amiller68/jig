@@ -177,7 +177,7 @@ Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `pru
   - Check repo config first, fall back to global, then hardcoded default
 
 - **Context threading**: Derive repo context once, thread through all operations
-  - `RepoContext::from_cwd()` resolves repo_root, worktrees_dir, base_branch, session_name once
+  - `RepoContext::from_cwd()` resolves repo_root, worktrees_path, base_branch, session_name once
   - `OpContext` holds `repo: Option<RepoContext>` (None when not in a git repo)
   - Commands call `ctx.repo()?` to get `&RepoContext`, pass it to jig-core functions
   - jig-core functions accept `&RepoContext` instead of re-deriving paths from cwd

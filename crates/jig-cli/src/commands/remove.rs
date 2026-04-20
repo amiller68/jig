@@ -3,8 +3,8 @@
 use clap::Args;
 use glob::Pattern;
 
-use jig_core::worktree::Worktree;
-use jig_core::{git, Error, RepoContext};
+use jig_core::git::Repo;
+use jig_core::{Error, RepoContext, Worker};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -28,6 +28,8 @@ pub enum RemoveError {
     InvalidPattern(#[from] glob::PatternError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for Remove {
@@ -47,22 +49,24 @@ impl Op for Remove {
 
 impl Remove {
     fn remove_from_repo(&self, repo: &RepoContext) -> Result<NoOutput, RemoveError> {
-        let worktrees = git::list_worktree_names(&repo.worktrees_dir)?;
+        let git_repo = Repo::open(&repo.repo_root)?;
+        let worktrees = git_repo.list_worktrees()?;
+        let names: Vec<String> = worktrees.iter().map(|wt| wt.name()).collect();
 
         // Find matching worktrees
         let pattern = Pattern::new(&self.pattern)?;
 
-        let matching: Vec<_> = worktrees
+        let matching: Vec<_> = names
             .iter()
-            .filter(|name| pattern.matches(name) || *name == pattern.as_str())
+            .filter(|name| pattern.matches(name.as_str()) || name.as_str() == pattern.as_str())
             .cloned()
             .collect();
 
         if matching.is_empty() {
             // If not a pattern match, try exact match
-            let exact_path = repo.worktrees_dir.join(pattern.as_str());
+            let exact_path = repo.worktrees_path.join(pattern.as_str());
             if exact_path.exists() {
-                let wt = Worktree::open(&repo.repo_root, &repo.worktrees_dir, pattern.as_str())?;
+                let wt = Worker::open(&repo.repo_root, &repo.worktrees_path, pattern.as_str())?;
                 wt.remove(self.force)?;
                 ui::success(&format!(
                     "Removed worktree '{}'",
@@ -75,7 +79,7 @@ impl Remove {
 
         // Remove each matching worktree
         for name in matching {
-            let wt = Worktree::open(&repo.repo_root, &repo.worktrees_dir, &name)?;
+            let wt = Worker::open(&repo.repo_root, &repo.worktrees_path, &name)?;
             wt.remove(self.force)?;
             ui::success(&format!("Removed worktree '{}'", ui::highlight(&name)));
         }

@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::provider::ProviderKind;
+use super::providers::ProviderKind;
 
 /// Issue status values matching the convention in `issues/README.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,13 +172,6 @@ impl Issue {
     /// into a single string ready for the spawn preamble.
     pub fn to_spawn_context(&self, provider_kind: ProviderKind) -> String {
         let completion_instructions = match provider_kind {
-            ProviderKind::File => format!(
-                "\n\nISSUE COMPLETION: This issue is tracked by the file provider. \
-                 After your PR is created, mark the issue as done by changing \
-                 `**Status:** Planned` to `**Status:** Complete` in the issue file \
-                 (`issues/{}.md`) and committing the change.",
-                self.id
-            ),
             ProviderKind::Linear => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
                  Status sync is handled automatically — no manual status update is needed."
                 .to_string(),
@@ -386,30 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn to_spawn_context_file_provider() {
-        let issue = Issue {
-            id: "features/my-feature".into(),
-            title: "Add my feature".into(),
-            status: IssueStatus::Planned,
-            priority: None,
-            category: None,
-            depends_on: vec![],
-            body: "Some body text".into(),
-            source: String::new(),
-            children: vec![],
-            labels: vec![],
-            branch_name: None,
-            parent: None,
-        };
-
-        let context = issue.to_spawn_context(ProviderKind::File);
-        assert!(context.contains("Add my feature"));
-        assert!(context.contains("Some body text"));
-        assert!(context.contains("issues/features/my-feature.md"));
-        assert!(context.contains("file provider"));
-    }
-
-    #[test]
     fn from_str_loose_triage() {
         assert_eq!(
             IssueStatus::from_str_loose("triage"),
@@ -561,7 +530,7 @@ mod tests {
             }),
         };
 
-        let context = issue.to_spawn_context(ProviderKind::File);
+        let context = issue.to_spawn_context(ProviderKind::Linear);
         assert!(context.contains("PARENT ISSUE (ENG-100): Epic feature"));
         assert!(context.contains("SUB-TASK:"));
         assert!(context.contains("Another subtask"));

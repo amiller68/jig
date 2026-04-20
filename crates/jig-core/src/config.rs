@@ -426,9 +426,9 @@ impl RepoHealthConfig {
 /// Issue tracking configuration in jig.toml
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssuesConfig {
-    /// Provider type ("file" or "linear").
+    /// Provider type.
     #[serde(default = "default_issues_provider")]
-    pub provider: String,
+    pub provider: crate::issues::ProviderKind,
     /// Directory containing issue files (relative to repo root).
     #[serde(default = "default_issues_directory")]
     pub directory: String,
@@ -468,8 +468,8 @@ pub struct LinearIssuesConfig {
     pub labels: Vec<String>,
 }
 
-fn default_issues_provider() -> String {
-    "file".to_string()
+fn default_issues_provider() -> crate::issues::ProviderKind {
+    crate::issues::ProviderKind::Linear
 }
 
 fn default_issues_directory() -> String {
@@ -479,7 +479,7 @@ fn default_issues_directory() -> String {
 impl Default for IssuesConfig {
     fn default() -> Self {
         Self {
-            provider: default_issues_provider(),
+            provider: crate::issues::ProviderKind::Linear,
             directory: default_issues_directory(),
             linear: None,
             auto_spawn_labels: None,
@@ -743,7 +743,7 @@ pub struct ConfigDisplay {
     pub agent_type: String,
     pub agent_source: String,
     // Issues config
-    pub issues_provider: String,
+    pub issues_provider: crate::issues::ProviderKind,
     pub issues_directory: String,
     pub issues_source: String,
     /// Linear config (populated when provider = "linear")

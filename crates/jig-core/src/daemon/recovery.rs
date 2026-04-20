@@ -1,7 +1,7 @@
 //! Startup recovery — detect and resume orphaned workers after a daemon crash.
 //!
-//! Uses `Worktree::list()` + event log replay to find workers that were active
-//! when the daemon died, then calls `Worktree::resume()` to relaunch them.
+//! Uses `Worker::list()` + event log replay to find workers that were active
+//! when the daemon died, then calls `Worker::resume()` to relaunch them.
 
 use std::path::Path;
 
@@ -10,16 +10,14 @@ use crate::error::Result;
 use crate::events::{EventLog, EventType, WorkerState};
 use crate::global::HealthConfig;
 use crate::registry::RepoRegistry;
-use crate::worker::WorkerStatus;
-use crate::worktree::Worktree;
+use crate::worker::{Worker, WorkerStatus};
 
 /// Information about an orphaned worker found during recovery scan.
-#[derive(Debug)]
 pub struct OrphanedWorker {
     pub repo_name: String,
     pub worker_name: String,
     pub status: WorkerStatus,
-    pub worktree: Worktree,
+    pub worker: Worker,
 }
 
 /// Scans for and recovers orphaned workers across registered repos.
@@ -28,7 +26,6 @@ pub struct OrphanedWorker {
 /// - Worktree exists on disk
 /// - Event log shows a non-terminal, active state (Spawned/Running/Stalled/Initializing)
 /// - Tmux window is gone (no live agent process)
-#[derive(Debug)]
 pub struct RecoveryScanner<'a> {
     registry: &'a RepoRegistry,
     health: HealthConfig,
@@ -56,14 +53,14 @@ impl<'a> RecoveryScanner<'a> {
                 None => continue,
             };
 
-            let worktrees_dir = entry.path.join(JIG_DIR);
-            let worktrees = match Worktree::list(&entry.path, &worktrees_dir) {
-                Ok(wts) => wts,
+            let worktrees_path = entry.path.join(JIG_DIR);
+            let workers = match Worker::list(&entry.path, &worktrees_path) {
+                Ok(ws) => ws,
                 Err(_) => continue,
             };
 
-            for wt in worktrees {
-                if let Some(orphan) = self.check_worker_orphaned(&repo_name, &wt) {
+            for w in workers {
+                if let Some(orphan) = self.check_worker_orphaned(&repo_name, &w) {
                     orphans.push(orphan);
                 }
             }
@@ -89,7 +86,7 @@ impl<'a> RecoveryScanner<'a> {
 
             let context = Self::read_spawn_context(&orphan.repo_name, &orphan.worker_name);
 
-            match orphan.worktree.resume(context.as_deref()) {
+            match orphan.worker.resume(context.as_deref()) {
                 Ok(()) => {
                     tracing::info!(
                         repo = %orphan.repo_name,
@@ -127,15 +124,15 @@ impl<'a> RecoveryScanner<'a> {
     ///
     /// Used by the daemon during steady-state ticks when it detects a dead tmux window.
     pub fn try_resume_worker(repo_root: &Path, repo_name: &str, worker_name: &str) -> Result<bool> {
-        let worktrees_dir = repo_root.join(JIG_DIR);
-        let wt = Worktree::open(repo_root, &worktrees_dir, worker_name)?;
+        let worktrees_path = repo_root.join(JIG_DIR);
+        let w = Worker::open(repo_root, &worktrees_path, worker_name)?;
 
-        if wt.has_tmux_window() {
+        if w.has_tmux_window() {
             return Ok(false);
         }
 
         let context = Self::read_spawn_context(repo_name, worker_name);
-        wt.resume(context.as_deref())?;
+        w.resume(context.as_deref())?;
 
         tracing::info!(
             repo = repo_name,
@@ -147,14 +144,12 @@ impl<'a> RecoveryScanner<'a> {
     }
 
     /// Check if a single worker is orphaned and eligible for recovery.
-    fn check_worker_orphaned(&self, repo_name: &str, wt: &Worktree) -> Option<OrphanedWorker> {
-        // Must have no tmux window
-        if wt.has_tmux_window() {
+    fn check_worker_orphaned(&self, repo_name: &str, w: &Worker) -> Option<OrphanedWorker> {
+        if w.has_tmux_window() {
             return None;
         }
 
-        // Must have event log with non-terminal state
-        let event_log = EventLog::for_worker(repo_name, &wt.name).ok()?;
+        let event_log = EventLog::for_worker(repo_name, w.name()).ok()?;
         let events = event_log.read_all().ok()?;
         if events.is_empty() {
             return None;
@@ -162,13 +157,12 @@ impl<'a> RecoveryScanner<'a> {
 
         let state = WorkerState::reduce(&events, &self.health);
 
-        // Only recover active workers — skip terminal and "done" states
         if Self::should_recover(state.status) {
             Some(OrphanedWorker {
                 repo_name: repo_name.to_string(),
-                worker_name: wt.name.clone(),
+                worker_name: w.name().to_string(),
                 status: state.status,
-                worktree: wt.clone(),
+                worker: w.clone(),
             })
         } else {
             None
@@ -176,13 +170,6 @@ impl<'a> RecoveryScanner<'a> {
     }
 
     /// Whether a worker in this status should be auto-recovered.
-    ///
-    /// Any non-terminal worker with a dead tmux window should be resumed —
-    /// including WaitingReview (needs to respond to feedback), WaitingInput,
-    /// and Idle (needs nudging back to work).
-    ///
-    /// Initializing workers are excluded — they're still running their
-    /// on-create hook and haven't launched a tmux window yet.
     fn should_recover(status: WorkerStatus) -> bool {
         !status.is_terminal()
             && status != WorkerStatus::Initializing

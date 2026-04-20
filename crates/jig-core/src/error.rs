@@ -56,6 +56,9 @@ pub enum Error {
     #[error("Merge conflict with branch '{0}'")]
     MergeConflict(String),
 
+    #[error(transparent)]
+    Git(#[from] crate::git::GitError),
+
     #[error("Git error: {0}")]
     Git2(#[from] git2::Error),
 
@@ -77,8 +80,11 @@ pub enum Error {
     #[error("State error: {0}")]
     State(String),
 
-    #[error("Linear API error: {0}")]
-    Linear(String),
+    #[error(transparent)]
+    Linear(#[from] crate::issues::providers::linear::client::LinearError),
+
+    #[error(transparent)]
+    GitHub(#[from] crate::github::GitHubError),
 
     #[error("{0}")]
     Custom(String),

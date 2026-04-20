@@ -121,10 +121,7 @@ impl TmuxSession {
                 &["set-option", "-t", &self.0, "prefix", "C-a"],
                 TMUX_TIMEOUT,
             );
-            let _ = run_tmux(
-                &["set-option", "-t", &self.0, "mouse", "on"],
-                TMUX_TIMEOUT,
-            );
+            let _ = run_tmux(&["set-option", "-t", &self.0, "mouse", "on"], TMUX_TIMEOUT);
         }
         Ok(())
     }
@@ -145,10 +142,7 @@ impl TmuxSession {
             TMUX_TIMEOUT,
         )?;
         let text = String::from_utf8_lossy(&output.stdout);
-        Ok(text
-            .lines()
-            .map(|name| self.window(name))
-            .collect())
+        Ok(text.lines().map(|name| self.window(name)).collect())
     }
 
     pub fn window_names(&self) -> Result<Vec<String>> {
@@ -238,13 +232,7 @@ impl TmuxWindow {
             return false;
         }
         let output = run_tmux(
-            &[
-                "list-windows",
-                "-t",
-                &self.session,
-                "-F",
-                "#{window_name}",
-            ],
+            &["list-windows", "-t", &self.session, "-F", "#{window_name}"],
             TMUX_TIMEOUT,
         );
         match output {
@@ -355,13 +343,7 @@ impl TmuxWindow {
         }
         let target = self.target_str();
         let output = run_tmux(
-            &[
-                "list-panes",
-                "-t",
-                &target,
-                "-F",
-                "#{pane_current_command}",
-            ],
+            &["list-panes", "-t", &target, "-F", "#{pane_current_command}"],
             TMUX_TIMEOUT,
         )
         .ok()?;

@@ -1,7 +1,7 @@
 //! Nuke command — kill all workers, remove worktrees, clear state
 
 use jig_core::git::Repo;
-use jig_core::{git, global_state_dir, OrchestratorState, TmuxSession, WorkersState};
+use jig_core::{global_state_dir, OrchestratorState, TmuxSession, WorkersState};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -86,14 +86,14 @@ fn nuke_repo(repo: &jig_core::RepoContext) -> Result<(), NukeError> {
     }
 
     // 3. Remove git worktrees
-    let worktree_names = git::list_worktree_names(&repo.worktrees_dir).unwrap_or_default();
-    for name in &worktree_names {
-        let path = repo.worktrees_dir.join(name);
-        if Repo::remove_worktree(&path, true, Some(&repo.repo_root)).is_err() {
-            // Stale directory — git doesn't track it anymore, just rm it
-            let _ = std::fs::remove_dir_all(&path);
+    let worktrees = Repo::open(&repo.repo_root)
+        .and_then(|r| r.list_worktrees())
+        .unwrap_or_default();
+    for wt in &worktrees {
+        if wt.remove(true).is_err() {
+            let _ = std::fs::remove_dir_all(wt.path());
         }
-        ui::success(&format!("Removed worktree '{}'", ui::highlight(name)));
+        ui::success(&format!("Removed worktree '{}'", ui::highlight(&wt.name())));
     }
 
     // 4. Clear orchestrator state file

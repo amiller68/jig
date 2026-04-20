@@ -60,6 +60,8 @@ impl TemplateContext {
     }
 }
 
+// TODO (cleanup): are we even fucking using ANY of this??
+//  we're not using handlebars at all faaik
 impl Default for TemplateContext {
     fn default() -> Self {
         Self::new()

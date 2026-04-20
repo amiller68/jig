@@ -2,7 +2,7 @@
 
 use clap::{Args, Subcommand};
 
-use jig_core::git::Repo;
+use jig_core::git::{Branch, Repo};
 use jig_core::Error;
 
 use crate::op::{Op, RepoCtx};
@@ -70,6 +70,8 @@ pub enum ReviewError {
     Io(#[from] std::io::Error),
     #[error("Review {0:03} not found at .jig/reviews/{0:03}.md")]
     ReviewNotFound(u32),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for Review {
@@ -101,15 +103,16 @@ impl Op for Review {
 
 fn run_show(ctx: &RepoCtx, show: &ReviewShow) -> Result<ReviewOutput, ReviewError> {
     let repo = ctx.repo()?;
-    let worktree_path = repo.worktrees_dir.join(&show.name);
+    let worktree_path = repo.worktrees_path.join(&show.name);
 
     if !worktree_path.exists() {
         return Err(Error::WorktreeNotFound(show.name.clone()).into());
     }
 
-    let branch = Repo::worktree_branch(&worktree_path)?;
-    let commits = Repo::commits_ahead(&worktree_path, &repo.base_branch)?;
-    let is_dirty = Repo::has_uncommitted_changes(&worktree_path)?;
+    let branch = Repo::open(&worktree_path)?.current_branch()?;
+    let wt_repo = Repo::open(&worktree_path)?;
+    let commits = wt_repo.commits_ahead(&Branch::new(&repo.base_branch))?;
+    let is_dirty = wt_repo.has_uncommitted_changes()?;
 
     // Header
     ui::header(&format!("Review: {}", show.name));
@@ -138,18 +141,19 @@ fn run_show(ctx: &RepoCtx, show: &ReviewShow) -> Result<ReviewOutput, ReviewErro
 
     // Diff
     eprintln!();
+    let diff = wt_repo.diff(&Branch::new(&repo.base_branch))?;
     if show.full {
         ui::header("Full diff:");
-        let diff = Repo::diff(&worktree_path, &repo.base_branch)?;
-        if diff.is_empty() {
+        let patch = diff.patch()?;
+        if patch.is_empty() {
             eprintln!("  No changes");
             Ok(ReviewOutput(String::new()))
         } else {
-            Ok(ReviewOutput(diff))
+            Ok(ReviewOutput(patch))
         }
     } else {
         ui::header("Changed files:");
-        let stat = Repo::diff_stat(&worktree_path, &repo.base_branch)?;
+        let stat = diff.stat_string()?;
         if stat.is_empty() {
             eprintln!("  No changes");
             Ok(ReviewOutput(String::new()))

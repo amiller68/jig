@@ -2,8 +2,8 @@
 
 use clap::Args;
 
-use jig_core::issues::naming::{derive_worker_name, extract_linear_identifier};
-use jig_core::worktree::Worktree;
+use jig_core::git::Branch;
+use jig_core::Worker;
 use jig_core::{config, terminal, Error};
 
 use crate::op::{NoOutput, Op, RepoCtx};
@@ -33,6 +33,8 @@ pub enum SpawnError {
     #[error(transparent)]
     Core(#[from] Error),
     #[error(transparent)]
+    Git(#[from] jig_core::GitError),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
@@ -53,20 +55,12 @@ impl Op for Spawn {
             return Err(Error::MissingDependency("claude".to_string()).into());
         }
 
-        // Resolve issue early so we can derive the name if needed
-        let issue_ref = self.issue.as_deref();
-
-        // Resolve the issue ID — if the input is a branch-format string,
-        // extract the Linear identifier for the API lookup.
-        let resolved_issue_id = issue_ref
-            .and_then(|raw| extract_linear_identifier(raw).or_else(|| Some(raw.to_string())));
-
-        let issue = if let Some(ref id) = resolved_issue_id {
+        let issue = if let Some(ref issue_ref) = self.issue {
             let provider = repo.issue_provider()?;
             Some(
                 provider
-                    .get(id)?
-                    .ok_or_else(|| Error::Custom(format!("issue not found: {}", id)))?,
+                    .get(issue_ref)?
+                    .ok_or_else(|| Error::Custom(format!("issue not found: {}", issue_ref)))?,
             )
         } else {
             None
@@ -76,7 +70,11 @@ impl Op for Spawn {
         let name = if let Some(ref explicit) = self.name {
             explicit.clone()
         } else if let Some(ref issue) = issue {
-            derive_worker_name(&issue.id, issue.branch_name.as_deref())
+            issue
+                .branch_name
+                .as_deref()
+                .map(|b| Branch::new(b).to_string())
+                .unwrap_or_else(|| issue.id.to_lowercase())
         } else {
             return Err(Error::Custom(
                 "worktree name required: provide a name argument or use --issue".into(),
@@ -84,9 +82,9 @@ impl Op for Spawn {
             .into());
         };
 
-        let worktree_path = repo.worktrees_dir.join(&name);
+        let worktree_path = repo.worktrees_path.join(&name);
 
-        // Create worktree if needed using Worktree::create
+        // Create worktree if needed using Worker::create
         let wt = if !worktree_path.exists() {
             // Resolve base branch: explicit --base > parent branch > repo default
             let parent_base = issue
@@ -102,13 +100,13 @@ impl Op for Spawn {
             let copy_files = config::get_copy_files(&repo.repo_root)?;
             let on_create_hook = config::get_on_create_hook(&repo.repo_root)?;
 
-            let wt = Worktree::create(
-                &repo.repo_root,
-                &repo.worktrees_dir,
-                &repo.git_common_dir,
-                &name,
-                None,
-                base,
+            let git_repo = jig_core::Repo::open(&repo.repo_root)?;
+            let branch = Branch::new(&name);
+            let base_branch = Branch::new(base);
+            let wt = Worker::create(
+                &git_repo,
+                &branch,
+                &base_branch,
                 on_create_hook.as_deref(),
                 &copy_files,
                 false,
@@ -122,7 +120,7 @@ impl Op for Spawn {
 
             wt
         } else {
-            Worktree::open(&repo.repo_root, &repo.worktrees_dir, &name)?
+            Worker::open(&repo.repo_root, &repo.worktrees_path, &name)?
         };
 
         // Track issue ID before consuming the issue
@@ -137,7 +135,7 @@ impl Op for Spawn {
         };
 
         // Register and launch using Worktree methods
-        wt.register(effective_context.as_deref(), issue_ref)?;
+        wt.register(self.issue.as_deref())?;
         wt.launch(effective_context.as_deref())?;
 
         // Update issue status to InProgress to prevent duplicate spawning

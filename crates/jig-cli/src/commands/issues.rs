@@ -8,7 +8,9 @@ use comfy_table::{Cell, Color};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 
-use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
+use jig_core::issues::{
+    self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus, ProviderKind,
+};
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
@@ -240,7 +242,7 @@ impl Issues {
     fn apply_dep_filter(
         &self,
         issues: Vec<CoreIssue>,
-        provider: &dyn issues::IssueProvider,
+        provider: &issues::IssueProvider,
     ) -> Vec<CoreIssue> {
         if self.blocked {
             issues
@@ -297,7 +299,7 @@ impl Issues {
             provider.list(&filter)?
         };
         let all_issues = self.exclude_completed(all_issues);
-        let all_issues = self.apply_dep_filter(all_issues, provider.as_ref());
+        let all_issues = self.apply_dep_filter(all_issues, &provider);
         self.finish(all_issues, spawn_labels)
     }
 
@@ -323,7 +325,7 @@ impl Issues {
             } else {
                 provider.list(&filter)?
             };
-            let repo_issues = self.apply_dep_filter(repo_issues, provider.as_ref());
+            let repo_issues = self.apply_dep_filter(repo_issues, &provider);
             all_issues.extend(repo_issues);
         }
 
@@ -340,7 +342,6 @@ impl Issues {
 fn run_create(
     ctx: &RepoCtx,
     title: &str,
-    template: &str,
     priority: Option<&str>,
     category: Option<&str>,
     labels: &[String],
@@ -367,8 +368,8 @@ fn run_create(
         None => None,
     };
 
-    let id = match repo.jig_toml.issues.provider.as_str() {
-        "linear" => {
+    let id = match repo.jig_toml.issues.provider {
+        ProviderKind::Linear => {
             let linear_provider = repo.linear_provider()?;
             linear_provider.create_issue(
                 title,
@@ -376,19 +377,6 @@ fn run_create(
                 pri.as_ref(),
                 labels,
                 category,
-                parent,
-                Some(&initial_status),
-            )?
-        }
-        _ => {
-            let cat = category.unwrap_or("features");
-            let file_provider = repo.file_provider();
-            file_provider.create_issue(
-                title,
-                cat,
-                template,
-                pri.as_ref(),
-                labels,
                 parent,
                 Some(&initial_status),
             )?
@@ -513,8 +501,8 @@ fn run_update(
         || category.is_some()
         || assignee.is_some();
 
-    match repo.jig_toml.issues.provider.as_str() {
-        "linear" => {
+    match repo.jig_toml.issues.provider {
+        ProviderKind::Linear => {
             let linear_provider = repo.linear_provider()?;
             if has_field_updates || parent.is_some() || remove_parent {
                 linear_provider.update_issue(
@@ -536,32 +524,6 @@ fn run_update(
                 linear_provider.remove_blocked_by(id, blocker)?;
             }
         }
-        _ => {
-            if assignee.is_some() {
-                return Err(IssuesError::Usage(
-                    "--assignee is only supported by the Linear provider".to_string(),
-                ));
-            }
-            let file_provider = repo.file_provider();
-            if has_field_updates || parent.is_some() || remove_parent {
-                file_provider.update_issue(
-                    id,
-                    title,
-                    effective_body.as_deref(),
-                    pri.as_ref(),
-                    &computed_labels,
-                    category,
-                    parent,
-                    remove_parent,
-                )?;
-            }
-            for blocker in blocked_by {
-                file_provider.add_blocked_by(id, blocker)?;
-            }
-            for blocker in remove_blocked_by {
-                file_provider.remove_blocked_by(id, blocker)?;
-            }
-        }
     }
 
     Ok(IssuesOutput::Updated(id.to_string()))
@@ -577,14 +539,10 @@ fn run_status_update(
     let status = IssueStatus::from_str_loose(new_status)
         .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", new_status)))?;
 
-    match repo.jig_toml.issues.provider.as_str() {
-        "linear" => {
+    match repo.jig_toml.issues.provider {
+        ProviderKind::Linear => {
             let linear_provider = repo.linear_provider()?;
             linear_provider.update_status(id, &status)?;
-        }
-        _ => {
-            let file_provider = repo.file_provider();
-            file_provider.update_status(id, &status)?;
         }
     }
 
@@ -597,17 +555,10 @@ fn run_status_update(
 fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, IssuesError> {
     let repo = ctx.repo()?;
 
-    match repo.jig_toml.issues.provider.as_str() {
-        "linear" => {
+    match repo.jig_toml.issues.provider {
+        ProviderKind::Linear => {
             let linear_provider = repo.linear_provider()?;
             linear_provider.update_status(id, &IssueStatus::Complete)?;
-        }
-        _ => {
-            let file_provider = repo.file_provider();
-            file_provider.update_status(id, &IssueStatus::Complete)?;
-            if delete {
-                file_provider.delete_issue(id)?;
-            }
         }
     }
 
@@ -698,7 +649,7 @@ impl Op for Issues {
         match &self.command {
             Some(IssuesCommand::Create {
                 title,
-                template,
+                template: _,
                 priority,
                 category,
                 label,
@@ -708,7 +659,6 @@ impl Op for Issues {
             }) => run_create(
                 ctx,
                 title,
-                template,
                 priority.as_deref(),
                 category.as_deref(),
                 label,
