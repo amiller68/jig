@@ -266,10 +266,10 @@ timeout_seconds = 600    # max time before a triage worker is considered stuck (
 
 The issue actor polls for triage-eligible issues (status=Triage) alongside normal spawnable issues. Triage and spawn share the worker budget. The `TriageTracker` (in-memory, on `DaemonRuntime`) prevents duplicate spawns and detects stuck workers:
 
-1. **Discovery**: Issue actor returns triageable issues separately from spawnable ones
+1. **Discovery**: Issue actor returns `TriageIssue` payloads separately from spawnable ones
 2. **Dedup**: Tracker filters out issues already being triaged (`is_active`)
-3. **Spawn**: Triage workers are named `triage-{issue_id}` and sent to the spawn actor
-4. **Registration**: On spawn, the tracker records the issue ID, worker name, and timestamp
+3. **Dispatch**: Triage issues are named `triage-{issue_id}` and sent directly to the triage actor (bypassing the spawn actor)
+4. **Registration**: On dispatch, the tracker records the issue ID, worker name, and timestamp
 5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention` and the worker's tmux window is killed
 6. **Completion**: When a triage worker's tmux session exits, the tracker removes the entry
 
