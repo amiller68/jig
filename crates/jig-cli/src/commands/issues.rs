@@ -968,10 +968,8 @@ fn interactive_loop(
             }
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if cursor + 1 < issues.len() {
-                        cursor += 1;
-                    }
+                KeyCode::Char('j') | KeyCode::Down if cursor + 1 < issues.len() => {
+                    cursor += 1;
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     cursor = cursor.saturating_sub(1);
@@ -1024,11 +1022,7 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
 
         // Footer
         let total = lines.len();
-        let pct = if total == 0 {
-            100
-        } else {
-            ((scroll + visible).min(total) * 100) / total
-        };
+        let pct = (((scroll + visible).min(total) * 100).checked_div(total)).unwrap_or(100);
         write!(w, "\x1B[2m— {}% (j/k scroll, q back) —\x1B[0m", pct)?;
         w.flush()?;
 
@@ -1038,10 +1032,8 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
             }
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if scroll + visible < lines.len() {
-                        scroll += 1;
-                    }
+                KeyCode::Char('j') | KeyCode::Down if scroll + visible < lines.len() => {
+                    scroll += 1;
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     scroll = scroll.saturating_sub(1);
