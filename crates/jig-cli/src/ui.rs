@@ -598,7 +598,12 @@ pub fn render_triage_section_grouped(triages: &[TriageDisplayInfo], borders: boo
             .map(|line| format!("  {}", line))
             .collect::<Vec<_>>()
             .join("\n");
-        sections.push(format!("\x1B[1m{}\x1B[0m\n{}", repo, indented));
+        let header = if is_plain() {
+            repo.to_string()
+        } else {
+            format!("\x1B[1m{}\x1B[0m", repo)
+        };
+        sections.push(format!("{}\n{}", header, indented));
     }
 
     if is_plain() {
