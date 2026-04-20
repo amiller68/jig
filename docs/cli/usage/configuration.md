@@ -202,17 +202,17 @@ auto_spawn_labels = []                      # spawn ALL planned issues
 
 When `auto_spawn_labels` is absent (the default), auto-spawn is disabled. When set to `[]`, all planned issues with satisfied dependencies are eligible. The AUTO column in `jig issues` shows `✓` for issues matching the configured labels.
 
-### Triage auto-spawn
+### Triage
 
-The daemon can automatically spawn lightweight triage workers for issues in **Triage** status:
+The daemon can automatically triage issues in **Triage** status using lightweight subprocess agents:
 
 ```toml
 [triage]
 enabled = true
 model = "sonnet"         # Model for triage agents (default: "sonnet")
-timeout_seconds = 600    # max time for a triage worker before it's considered stuck (default 600)
+timeout_seconds = 600    # max time for a triage subprocess before it's considered stuck (default 600)
 ```
 
-When enabled, the issue actor discovers issues with Triage status and spawns triage workers (named `triage-{issue_id}`). Triage workers run in ephemeral (one-shot) mode with restricted tool access: `Read`, `Glob`, `Grep`, `Bash(jig *)`, and `mcp__linear*`. They investigate the issue, append findings to the issue description, transition it to Backlog, then exit.
+When enabled, the issue actor discovers issues with Triage status and dispatches them to the triage actor, which runs each as a direct subprocess (no tmux window, no worktree). Triage subprocesses run in ephemeral (one-shot) mode with restricted tool access: `Read`, `Glob`, `Grep`, and `Bash(jig *)`. They investigate the issue, append findings to the issue description, transition it to Backlog, then exit.
 
-Triage workers share the same worker budget as normal auto-spawn. The daemon tracks in-flight triages to prevent duplicates and emits `NeedsIntervention` notifications if a triage worker exceeds the timeout. See [daemon docs](../../daemon.md#triage-verification) for the post-spawn lifecycle.
+Triage does not consume the worker budget. The daemon tracks in-flight triages to prevent duplicates and emits `NeedsIntervention` notifications if a triage subprocess exceeds the timeout. See [daemon docs](../../daemon.md#triage) for details.

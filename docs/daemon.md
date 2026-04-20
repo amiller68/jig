@@ -264,45 +264,39 @@ disallowed_tools = ["Bash(gh issue create:*)"]
 
 Triage workers use a stricter allowlist: `Read`, `Glob`, `Grep`, and `Bash(jig *)` only — no code modification, no general shell access.
 
-## Triage auto-spawn and tracking
+## Triage
 
-The daemon can automatically spawn lightweight triage workers for issues in **Triage** status. Enable this per-repo:
+The daemon can automatically triage issues in **Triage** status by running lightweight subprocess agents. Enable this per-repo:
 
 ```toml
 # jig.toml
 [triage]
 enabled = true
-timeout_seconds = 600    # max time before a triage worker is considered stuck (default 600)
+timeout_seconds = 600    # max time before a triage subprocess is considered stuck (default 600)
 ```
 
 ### How it works
 
-The issue actor polls for triage-eligible issues (status=Triage) alongside normal spawnable issues. Triage and spawn share the worker budget. The `TriageTracker` (in-memory, on `DaemonRuntime`) prevents duplicate spawns and detects stuck workers:
+Triage runs as direct subprocesses via the triage actor — no tmux window, no worktree, no worker budget consumed. This keeps triage lightweight and avoids the overhead of a full worker lifecycle.
 
-1. **Discovery**: Issue actor returns triageable issues separately from spawnable ones
-2. **Dedup**: Tracker filters out issues already being triaged (`is_active`)
-3. **Spawn**: Triage workers are named `triage-{issue_id}` and sent to the spawn actor
-4. **Registration**: On spawn, the tracker records the issue ID, worker name, and timestamp
-5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention` and the worker's tmux window is killed
-6. **Completion**: When a triage worker's tmux session exits, the tracker removes the entry
-
-### Triage verification
-
-When a worker with a linked issue exits (tmux window gone), the daemon checks whether the issue is still in **Triage** status. If so, the triage worker failed silently — the daemon emits a `NeedsIntervention` notification so a human can investigate.
-
-This check only fires once on the transition (not repeatedly each tick). If the issue has moved to **Backlog** or any other status, the triage is considered successful and no notification is emitted.
+1. **Discovery**: Issue actor returns triageable issues (status=Triage) separately from spawnable ones
+2. **Dedup**: `TriageTracker` (in-memory, on `DaemonRuntime`) filters out issues already being triaged (`is_active`)
+3. **Dispatch**: Triage issues are sent to the triage actor, which runs each as a subprocess with restricted tool access (`Read`, `Glob`, `Grep`, `Bash(jig *)`)
+4. **Registration**: The tracker records the issue ID, worker name, and timestamp
+5. **Stuck detection**: Each tick, entries older than the repo's `timeout_seconds` emit `NeedsIntervention` and the tracker entry is cleared so a fresh triage can be dispatched on a later tick
+6. **Completion**: When the triage actor reports a subprocess has finished, the tracker removes the entry
 
 The triage workflow:
-1. Triage worker spawns, investigates the issue, appends findings to the description (`jig issues update <id> --body "..." --append`)
-2. Worker transitions the issue to Backlog (`jig issues status <id> --status backlog`)
-3. Worker exits
-4. Daemon detects exit, checks issue status — Backlog means success, Triage means failure
+1. Triage subprocess investigates the issue, appends findings to the description (`jig issues update <id> --body "..." --append`)
+2. Subprocess transitions the issue to Backlog (`jig issues status <id> --status backlog`)
+3. Subprocess exits
+4. Daemon clears the tracker entry
 
 No auto-retry on failure. Failed triage requires human attention.
 
 ### Persistence
 
-The tracker is in-memory only. On daemon restart, it rebuilds from active workers whose names start with `triage-`.
+The tracker is in-memory only. On daemon restart, active triage entries are not restored — any in-flight triages at shutdown are simply re-discovered on the next issue poll if still in Triage status.
 
 ## Parent branch auto-update
 
