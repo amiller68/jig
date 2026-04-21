@@ -23,18 +23,6 @@ use crate::templates::{TemplateContext, TemplateEngine};
 use crate::worker::{TaskContext, Worker, WorkerStatus};
 use crate::worktree::Worktree;
 
-/// Distinguishes normal (interactive) worker spawns from wrap-up spawns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SpawnKind {
-    /// Interactive worker in a tmux session — full tool access, persistent session.
-    #[default]
-    Normal,
-    /// Wrap-up worker for a parent epic — spawned after all children are complete
-    /// and merged. Uses the wrap-up preamble template and the parent's own
-    /// integration branch as the base.
-    Wrapup,
-}
-
 /// Task status for ps command
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
@@ -55,7 +43,7 @@ impl TaskStatus {
     }
 }
 
-/// Input for the shared [`spawn_worker_for_issue`] function.
+/// Input for the shared spawn functions.
 ///
 /// Mirrors the fields from `daemon::messages::SpawnableIssue` that are needed
 /// for the spawn sequence. Daemon code converts `SpawnableIssue` → `SpawnIssueInput`.
@@ -64,43 +52,26 @@ pub struct SpawnIssueInput<'a> {
     pub issue: &'a Issue,
     pub worker_name: &'a str,
     pub provider_kind: ProviderKind,
-    pub kind: SpawnKind,
 }
 
-/// Spawn a single worker for an issue: create worktree, register, run on-create
-/// hook, emit spawn event, launch, and update issue status.
+/// Shared setup for both normal and wrap-up spawns: create the worktree, set
+/// parent info, register as Initializing, run the on-create hook, and emit the
+/// Spawn event. Returns the ready-to-launch [`Worktree`] and the rendered
+/// spawn context string.
 ///
-/// This is the **single authoritative codepath** for daemon-driven spawning.
-/// Both `tick_once` (blocking) and `tick` (watch-mode spawn actor) call this.
-pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Result<(), String> {
+/// Returns `Ok(None)` if the worktree already exists (caller treats as no-op).
+fn prepare_worktree_for_spawn(
+    input: &SpawnIssueInput<'_>,
+    base_branch: &str,
+) -> std::result::Result<Option<(Worktree, String)>, String> {
     let repo_root = input.repo_root;
     let worktrees_dir = repo_root.join(config::JIG_DIR);
     let worktree_path = config::worktree_path(repo_root, input.worker_name);
 
     if worktree_path.exists() {
         tracing::debug!(worker = %input.worker_name, "worktree already exists, skipping");
-        return Ok(());
+        return Ok(None);
     }
-
-    let base_branch = if input.kind == SpawnKind::Wrapup {
-        // Wrap-up workers use the parent's own integration branch as base.
-        // The branch already exists on origin with all child work merged in.
-        match input.issue.branch_name.as_deref() {
-            Some(branch) => format!("origin/{}", branch),
-            None => return Err("wrap-up spawn requires issue to have a branch_name".to_string()),
-        }
-    } else {
-        match input
-            .issue
-            .parent
-            .as_ref()
-            .and_then(|p| p.branch_name.as_deref())
-        {
-            Some(parent_branch) => format!("origin/{}", parent_branch),
-            None => RepoContext::resolve_base_branch_for(repo_root)
-                .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string()),
-        }
-    };
 
     let copy_files = config::get_copy_files(repo_root).map_err(|e| e.to_string())?;
     let on_create_hook = config::get_on_create_hook(repo_root).map_err(|e| e.to_string())?;
@@ -108,22 +79,19 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         .map_err(|e| e.to_string())?
         .common_dir();
 
-    // Create worktree WITHOUT running on-create hook — we handle it after registration
     let mut wt = Worktree::create(
         repo_root,
         &worktrees_dir,
         &git_common_dir,
         input.worker_name,
         input.issue.branch_name.as_deref(),
-        &base_branch,
+        base_branch,
         None, // defer on-create hook
         &copy_files,
         true, // auto_spawned
     )
     .map_err(|e| e.to_string())?;
 
-    // Set parent info on the worktree so it's included in event data.
-    // This allows the daemon to identify parent-child relationships at tick time.
     if let Some(ref parent) = input.issue.parent {
         wt.parent_issue = Some(parent.id.clone());
         if let Some(ref branch) = parent.branch_name {
@@ -133,8 +101,6 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
 
     let context = input.issue.to_spawn_context(input.provider_kind);
 
-    // Register as Initializing so jig ps/ls show the worker immediately,
-    // injecting the issue title into the event data for later retrieval.
     wt.register_initializing_with_issue_text(
         Some(&context),
         Some(&input.issue.id),
@@ -142,7 +108,6 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
     )
     .map_err(|e| e.to_string())?;
 
-    // Run on-create hook now that the worker is visible
     if let Some(hook) = on_create_hook.as_deref() {
         let success = config::run_on_create_hook(hook, &wt.path).map_err(|e| e.to_string())?;
         if !success {
@@ -151,23 +116,56 @@ pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Resul
         }
     }
 
-    // Transition from Initializing → Spawned
     wt.emit_spawn_event();
 
-    match input.kind {
-        SpawnKind::Normal => {
-            wt.launch(Some(&context)).map_err(|e| e.to_string())?;
-            // Update issue status to InProgress to prevent duplicate spawning
-            update_issue_status(repo_root, &input.issue.id);
-        }
-        SpawnKind::Wrapup => {
-            let child_ids: Vec<String> =
-                input.issue.children.iter().map(|c| c.id.clone()).collect();
-            wt.launch_wrapup(Some(&context), &input.issue.title, &child_ids)
-                .map_err(|e| e.to_string())?;
-            // Parent is already InProgress — no status update needed
-        }
-    }
+    Ok(Some((wt, context)))
+}
+
+/// Spawn a single worker for an issue: create worktree, register, run on-create
+/// hook, emit spawn event, launch, and update issue status.
+///
+/// This is the **single authoritative codepath** for daemon-driven spawning.
+/// Both `tick_once` (blocking) and `tick` (watch-mode spawn actor) call this.
+pub fn spawn_worker_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Result<(), String> {
+    let base_branch = match input
+        .issue
+        .parent
+        .as_ref()
+        .and_then(|p| p.branch_name.as_deref())
+    {
+        Some(parent_branch) => format!("origin/{}", parent_branch),
+        None => RepoContext::resolve_base_branch_for(input.repo_root)
+            .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string()),
+    };
+
+    let Some((wt, context)) = prepare_worktree_for_spawn(input, &base_branch)? else {
+        return Ok(());
+    };
+
+    wt.launch(Some(&context)).map_err(|e| e.to_string())?;
+    // Update issue status to InProgress to prevent duplicate spawning
+    update_issue_status(input.repo_root, &input.issue.id);
+
+    Ok(())
+}
+
+/// Spawn a wrap-up worker for a parent epic whose children are all complete
+/// and merged. Uses the parent's own integration branch as the base and the
+/// wrap-up preamble template.
+pub fn spawn_wrapup_for_issue(input: &SpawnIssueInput<'_>) -> std::result::Result<(), String> {
+    let base_branch = match input.issue.branch_name.as_deref() {
+        Some(branch) => format!("origin/{}", branch),
+        None => return Err("wrap-up spawn requires issue to have a branch_name".to_string()),
+    };
+
+    let Some((wt, context)) = prepare_worktree_for_spawn(input, &base_branch)? else {
+        return Ok(());
+    };
+
+    let child_ids: Vec<String> = input.issue.children.iter().map(|c| c.id.clone()).collect();
+    wt.launch_wrapup(Some(&context), &input.issue.title, &child_ids)
+        .map_err(|e| e.to_string())?;
+    // Parent is already InProgress — no status update needed
 
     Ok(())
 }
@@ -625,22 +623,4 @@ fn cleanup_stale_workers(
     }
 
     Ok(Some(state))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spawn_kind_default_is_normal() {
-        let kind: SpawnKind = Default::default();
-        assert_eq!(kind, SpawnKind::Normal);
-    }
-
-    #[test]
-    fn spawn_kind_equality() {
-        assert_eq!(SpawnKind::Normal, SpawnKind::Normal);
-        assert_eq!(SpawnKind::Wrapup, SpawnKind::Wrapup);
-        assert_ne!(SpawnKind::Normal, SpawnKind::Wrapup);
-    }
 }

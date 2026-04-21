@@ -1,9 +1,10 @@
 //! Triage actor — runs ephemeral triage agents as direct subprocesses.
 //!
-//! Unlike normal workers (which run in tmux windows), triage workers are
-//! one-shot read-only agents that don't need interactive sessions. This actor
-//! receives `TriageRequest`s, spawns each triage as a `std::process::Command`
-//! subprocess, and returns `TriageComplete`s with per-issue results.
+//! Unlike normal workers (which run in tmux windows), triage agents are
+//! one-shot read-only subprocesses that don't need interactive sessions.
+//! This actor receives `TriageRequest`s, spawns each triage as a
+//! `std::process::Command` subprocess, and returns `TriageComplete`s with
+//! per-issue results.
 
 use crate::spawn;
 
@@ -45,21 +46,15 @@ fn run_single(issue: &TriageIssue) -> TriageResult {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    tracing::info!(
-        worker = %issue.worker_name,
-        issue = %issue.issue.id,
-        "running triage subprocess"
-    );
+    tracing::info!(issue = %issue.issue.id, "running triage subprocess");
 
     match spawn::run_triage_subprocess(&issue.repo_root, &issue.issue) {
         Ok(()) => {
             tracing::info!(
-                worker = %issue.worker_name,
                 issue = %issue.issue.id,
                 "triage subprocess completed successfully"
             );
             TriageResult {
-                worker_name: issue.worker_name.clone(),
                 repo_name,
                 issue_id: issue.issue.id.clone(),
                 error: None,
@@ -67,12 +62,10 @@ fn run_single(issue: &TriageIssue) -> TriageResult {
         }
         Err(msg) => {
             tracing::warn!(
-                worker = %issue.worker_name,
                 issue = %issue.issue.id,
                 "triage subprocess failed: {}", msg
             );
             TriageResult {
-                worker_name: issue.worker_name.clone(),
                 repo_name,
                 issue_id: issue.issue.id.clone(),
                 error: Some(msg),
@@ -87,7 +80,7 @@ mod tests {
     use crate::issues::{Issue, IssueStatus, ProviderKind};
     use std::path::PathBuf;
 
-    fn make_triage_issue(id: &str, worker: &str) -> TriageIssue {
+    fn make_triage_issue(id: &str) -> TriageIssue {
         TriageIssue {
             repo_root: PathBuf::from("/tmp/nonexistent-repo"),
             issue: Issue {
@@ -104,36 +97,32 @@ mod tests {
                 branch_name: None,
                 parent: None,
             },
-            worker_name: worker.to_string(),
             provider_kind: ProviderKind::Linear,
         }
     }
 
     #[test]
     fn run_single_missing_repo() {
-        let issue = make_triage_issue("JIG-99", "triage-jig-99");
+        let issue = make_triage_issue("JIG-99");
         let result = run_single(&issue);
         assert!(result.error.is_some());
         assert_eq!(result.issue_id, "JIG-99");
-        assert_eq!(result.worker_name, "triage-jig-99");
     }
 
     #[test]
     fn triage_result_success_fields() {
         let result = TriageResult {
-            worker_name: "triage-jig-38".to_string(),
             repo_name: "my-repo".to_string(),
             issue_id: "JIG-38".to_string(),
             error: None,
         };
         assert!(result.error.is_none());
-        assert_eq!(result.worker_name, "triage-jig-38");
+        assert_eq!(result.issue_id, "JIG-38");
     }
 
     #[test]
     fn triage_result_error_fields() {
         let result = TriageResult {
-            worker_name: "triage-jig-38".to_string(),
             repo_name: "my-repo".to_string(),
             issue_id: "JIG-38".to_string(),
             error: Some("triage agent exited with code 1".to_string()),

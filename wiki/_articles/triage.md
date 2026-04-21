@@ -103,14 +103,14 @@ This gets appended to the Linear issue body, so when you open the issue you see 
 
 ## How the daemon tracks triages
 
-The daemon maintains a `TriageTracker` — an in-memory registry of in-flight triage subprocesses. Each entry records the issue ID, a worker name (e.g., `triage-jig-42`), the repo, and a spawn timestamp.
+The daemon maintains a `TriageTracker` — an in-memory registry of in-flight triage subprocesses. Each entry records the issue ID, the repo, and a spawn timestamp.
 
 On every tick, the daemon:
 
 1. **Drains results** — collects completion/failure reports from triage subprocesses that finished since last tick. Clears their tracker entries.
 2. **Polls for Triage issues** — asks the issue provider for all issues with Triage status.
 3. **Deduplicates** — filters out any issue that already has an active triage entry.
-4. **Detects stuck workers** — checks each active entry's age against the repo's `timeout_seconds`. If exceeded, clears the entry and emits NeedsIntervention.
+4. **Detects stuck triages** — checks each active entry's age against the repo's `timeout_seconds`. If exceeded, clears the entry and emits NeedsIntervention.
 5. **Dispatches new triages** — registers new entries and sends them to the triage actor for subprocess execution.
 
 The tracker persists to `~/.config/jig/state/triages.json` so it can recover state across daemon restarts.

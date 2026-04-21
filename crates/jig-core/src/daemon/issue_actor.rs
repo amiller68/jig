@@ -14,7 +14,6 @@ use crate::issues::naming::derive_worker_name;
 use crate::issues::provider::IssueProvider;
 use crate::issues::types::{Issue, IssueFilter, IssueStatus};
 use crate::issues::ProviderKind;
-use crate::spawn::SpawnKind;
 
 use super::messages::{
     IssueRequest, IssueResponse, ParentBranchResult, SpawnableIssue, TriageIssue,
@@ -79,7 +78,6 @@ fn collect_spawnable(
             issue,
             worker_name,
             provider_kind,
-            kind: SpawnKind::Normal,
         });
         repo_spawned += 1;
     }
@@ -112,16 +110,10 @@ fn collect_triageable(
     triageable
         .into_iter()
         .take(budget)
-        .map(|issue| {
-            // Synthetic display name for logging/notifications; there is no
-            // worktree or tmux window behind it.
-            let worker_name = format!("triage-{}", issue.id.to_lowercase());
-            TriageIssue {
-                repo_root: repo_root.to_path_buf(),
-                issue,
-                worker_name,
-                provider_kind,
-            }
+        .map(|issue| TriageIssue {
+            repo_root: repo_root.to_path_buf(),
+            issue,
+            provider_kind,
         })
         .collect()
 }
@@ -356,7 +348,6 @@ fn collect_wrapup_parents(
             issue,
             worker_name,
             provider_kind,
-            kind: SpawnKind::Wrapup,
         });
         count += 1;
     }
@@ -1285,7 +1276,7 @@ mod tests {
         let wrapup1 =
             collect_wrapup_parents(&provider, ProviderKind::File, tmp.path(), "r", 10, &[]);
         assert_eq!(wrapup1.len(), 1);
-        assert_eq!(wrapup1[0].kind, SpawnKind::Wrapup);
+        assert_eq!(wrapup1[0].issue.id, "ENG-100");
 
         // Second call: existing worker → skip.
         let worker_name = derive_worker_name(&parent.id, parent.branch_name.as_deref());

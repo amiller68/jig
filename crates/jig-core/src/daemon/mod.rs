@@ -598,7 +598,7 @@ impl<'a> Daemon<'a> {
 
             // Stuck triage detection: check each active triage against its
             // repo's configured timeout (from [triage] timeout_seconds).
-            let stuck_ids: Vec<(String, String, String)> = {
+            let stuck_ids: Vec<(String, String)> = {
                 let mut stuck = Vec::new();
                 for entry in runtime.triage_tracker().stuck_entries() {
                     // Load per-repo triage timeout
@@ -607,29 +607,21 @@ impl<'a> Daemon<'a> {
                         .map(|toml| toml.triage.timeout_seconds)
                         .unwrap_or(600);
                     if now - entry.spawned_at > timeout {
-                        stuck.push((
-                            entry.issue_id.clone(),
-                            entry.worker_name.clone(),
-                            entry.repo_name.clone(),
-                        ));
+                        stuck.push((entry.issue_id.clone(), entry.repo_name.clone()));
                     }
                 }
                 stuck
             };
 
-            for (issue_id, worker_name, repo_name) in &stuck_ids {
+            for (issue_id, repo_name) in &stuck_ids {
                 tracing::warn!(
                     issue = %issue_id,
-                    worker = %worker_name,
                     "triage timed out, emitting NeedsIntervention"
                 );
                 let event = NotificationEvent::NeedsIntervention {
                     repo: repo_name.clone(),
-                    worker: worker_name.clone(),
-                    reason: format!(
-                        "Triage timed out for {} (worker: {})",
-                        issue_id, worker_name
-                    ),
+                    worker: issue_id.clone(),
+                    reason: format!("Triage timed out for {}", issue_id),
                 };
                 if let Err(e) = self.notifier.emit(event) {
                     tracing::warn!(
@@ -924,22 +916,18 @@ impl<'a> Daemon<'a> {
 
                 if let Some(err) = tr.error {
                     tracing::warn!(
-                        worker = %tr.worker_name,
                         issue = %tr.issue_id,
                         "triage failed: {}", err
                     );
                     // Emit NeedsIntervention for failed triages
                     let event = NotificationEvent::NeedsIntervention {
                         repo: tr.repo_name.clone(),
-                        worker: tr.worker_name.clone(),
-                        reason: format!(
-                            "Triage failed for {} (worker: {}): {}",
-                            tr.issue_id, tr.worker_name, err
-                        ),
+                        worker: tr.issue_id.clone(),
+                        reason: format!("Triage failed for {}: {}", tr.issue_id, err),
                     };
                     if let Err(e) = self.notifier.emit(event) {
                         tracing::warn!(
-                            worker = %tr.worker_name,
+                            issue = %tr.issue_id,
                             "NeedsIntervention notification failed: {}", e
                         );
                     }
@@ -948,7 +936,6 @@ impl<'a> Daemon<'a> {
                         .push(format!("triage {}: {}", tr.issue_id, err));
                 } else {
                     tracing::info!(
-                        worker = %tr.worker_name,
                         issue = %tr.issue_id,
                         "triage completed successfully"
                     );
@@ -1113,9 +1100,10 @@ impl<'a> Daemon<'a> {
         );
 
         // 5. Send spawnable issues to background spawn actor (non-blocking).
-        //    Wrap-up parents are dispatched through the same actor. Skip any
-        //    wrap-up whose issue already has an active worker (old-model
-        //    migration guard — prevents double-spawning).
+        //    Wrap-up parents are dispatched through the same actor via the
+        //    dedicated `wrapup` field in `SpawnRequest`. Skip any wrap-up whose
+        //    issue already has an active worker (old-model migration guard —
+        //    prevents double-spawning).
         if !wrapup.is_empty() {
             wrapup.retain(|si| {
                 let active = Self::has_active_parent_worker(&workers_state, &si.issue.id);
@@ -1128,12 +1116,9 @@ impl<'a> Daemon<'a> {
                 }
                 !active
             });
-            if !wrapup.is_empty() {
-                spawnable.extend(wrapup);
-            }
         }
-        if !spawnable.is_empty() {
-            runtime.send_spawn(spawnable);
+        if !spawnable.is_empty() || !wrapup.is_empty() {
+            runtime.send_spawn(spawnable, wrapup);
         }
 
         // 6. Send triageable issues to background triage actor (subprocess, non-blocking).
@@ -1153,7 +1138,6 @@ impl<'a> Daemon<'a> {
                 runtime.triage_tracker_mut().register(
                     ti.issue.id.clone(),
                     triage_tracker::TriageEntry {
-                        worker_name: ti.worker_name.clone(),
                         spawned_at: now,
                         issue_id: ti.issue.id.clone(),
                         repo_name,
@@ -1238,7 +1222,7 @@ impl<'a> Daemon<'a> {
                 let response = issue_actor::process_request(&req);
                 // Spawn normal issues
                 for issue in response.spawnable {
-                    match self.auto_spawn_worker(&issue) {
+                    match self.auto_spawn_worker(&issue, false) {
                         Ok(()) => {
                             tracing::info!(
                                 worker = %issue.worker_name,
@@ -1254,9 +1238,10 @@ impl<'a> Daemon<'a> {
                         }
                     }
                 }
-                // Spawn wrap-up parents (same codepath as normal spawn, but
-                // skipped if a worker already exists for the parent — old-model
-                // migration guard).
+                // Spawn wrap-up parents — same setup as normal spawn but uses
+                // the parent's integration branch as base and the wrap-up
+                // preamble. Skipped if a worker already exists for the parent
+                // (old-model migration guard).
                 for issue in response.wrapup {
                     if Self::has_active_parent_worker(&workers_state, &issue.issue.id) {
                         tracing::info!(
@@ -1266,7 +1251,7 @@ impl<'a> Daemon<'a> {
                         );
                         continue;
                     }
-                    match self.auto_spawn_worker(&issue) {
+                    match self.auto_spawn_worker(&issue, true) {
                         Ok(()) => {
                             tracing::info!(
                                 worker = %issue.worker_name,
@@ -1285,14 +1270,12 @@ impl<'a> Daemon<'a> {
                 // Run triage issues as direct subprocesses (blocking)
                 for issue in response.triageable {
                     tracing::info!(
-                        worker = %issue.worker_name,
                         issue = %issue.issue.id,
                         "running inline triage subprocess"
                     );
                     match crate::spawn::run_triage_subprocess(&issue.repo_root, &issue.issue) {
                         Ok(()) => {
                             tracing::info!(
-                                worker = %issue.worker_name,
                                 issue = %issue.issue.id,
                                 "triage completed successfully"
                             );
@@ -2194,9 +2177,10 @@ impl<'a> Daemon<'a> {
 
     /// Auto-spawn a worker for an issue.
     ///
-    /// Delegates to [`crate::spawn::spawn_worker_for_issue`] for the core spawn
-    /// sequence, then emits the WorkStarted notification.
-    fn auto_spawn_worker(&self, issue: &SpawnableIssue) -> Result<()> {
+    /// Delegates to [`crate::spawn::spawn_worker_for_issue`] (or the wrap-up
+    /// variant when `is_wrapup` is true) for the core spawn sequence, then
+    /// emits the WorkStarted notification.
+    fn auto_spawn_worker(&self, issue: &SpawnableIssue, is_wrapup: bool) -> Result<()> {
         use crate::spawn::{self, SpawnIssueInput};
 
         let input = SpawnIssueInput {
@@ -2204,9 +2188,12 @@ impl<'a> Daemon<'a> {
             issue: &issue.issue,
             worker_name: &issue.worker_name,
             provider_kind: issue.provider_kind,
-            kind: issue.kind,
         };
-        spawn::spawn_worker_for_issue(&input).map_err(crate::error::Error::Custom)?;
+        if is_wrapup {
+            spawn::spawn_wrapup_for_issue(&input).map_err(crate::error::Error::Custom)?;
+        } else {
+            spawn::spawn_worker_for_issue(&input).map_err(crate::error::Error::Custom)?;
+        }
 
         // Emit WorkStarted notification
         let repo_name = issue
