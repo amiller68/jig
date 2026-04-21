@@ -118,26 +118,6 @@ impl TriageTracker {
         }
         tracker
     }
-
-    /// Rebuild tracker from active workers whose names start with "triage-".
-    pub fn rebuild_from_workers(workers: &[(String, String)], now: i64) -> Self {
-        let mut tracker = Self::new();
-        for (repo_name, worker_name) in workers {
-            if let Some(issue_id) = worker_name.strip_prefix("triage-") {
-                let issue_id = issue_id.to_uppercase();
-                tracker.register(
-                    issue_id.clone(),
-                    TriageEntry {
-                        worker_name: worker_name.clone(),
-                        spawned_at: now,
-                        issue_id: issue_id.clone(),
-                        repo_name: repo_name.clone(),
-                    },
-                );
-            }
-        }
-        tracker
-    }
 }
 
 impl Default for TriageTracker {
@@ -277,18 +257,5 @@ mod tests {
             make_entry("triage-jig-2", "JIG-2", "repo", 200),
         );
         assert_eq!(tracker.active_entries().len(), 2);
-    }
-
-    #[test]
-    fn rebuild_from_workers_populates_tracker() {
-        let workers = vec![
-            ("repo".to_string(), "triage-jig-38".to_string()),
-            ("repo".to_string(), "al/jig-39-normal-worker".to_string()),
-            ("repo".to_string(), "triage-eng-100".to_string()),
-        ];
-        let tracker = TriageTracker::rebuild_from_workers(&workers, 5000);
-        assert!(tracker.is_active("JIG-38"));
-        assert!(tracker.is_active("ENG-100"));
-        assert!(!tracker.is_active("JIG-39"));
     }
 }
