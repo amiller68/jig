@@ -405,12 +405,24 @@ impl DaemonRuntime {
     }
 
     /// Send spawnable issues to the spawn actor (non-blocking).
-    pub fn send_spawn(&mut self, issues: Vec<SpawnableIssue>) {
-        if self.spawn_pending || issues.is_empty() {
+    ///
+    /// Normal and wrap-up spawns flow through the same actor but via distinct
+    /// fields on [`SpawnRequest`] so the actor can dispatch each to the right
+    /// `spawn::*_for_issue` codepath.
+    pub fn send_spawn(&mut self, issues: Vec<SpawnableIssue>, wrapup: Vec<SpawnableIssue>) {
+        if self.spawn_pending || (issues.is_empty() && wrapup.is_empty()) {
             return;
         }
-        self.spawning_workers = issues.iter().map(|i| i.worker_name.clone()).collect();
-        if self.spawn_tx.try_send(SpawnRequest { issues }).is_ok() {
+        self.spawning_workers = issues
+            .iter()
+            .chain(wrapup.iter())
+            .map(|i| i.worker_name.clone())
+            .collect();
+        if self
+            .spawn_tx
+            .try_send(SpawnRequest { issues, wrapup })
+            .is_ok()
+        {
             self.spawn_pending = true;
             tracing::debug!("triggered spawn");
         } else {
