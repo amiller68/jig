@@ -600,7 +600,7 @@ impl<'a> Daemon<'a> {
             // repo's configured timeout (from [triage] timeout_seconds).
             let stuck_ids: Vec<(String, String, String)> = {
                 let mut stuck = Vec::new();
-                for entry in runtime.triage_tracker().stuck_entries() {
+                for entry in runtime.triage_tracker().active_entries() {
                     // Load per-repo triage timeout
                     let timeout = Self::find_repo_path(&registry, &entry.repo_name)
                         .and_then(|re| JigToml::load(&re.path).ok().flatten())

@@ -65,12 +65,7 @@ impl TriageTracker {
             .collect()
     }
 
-    /// Get all active entries (for per-repo timeout checking).
-    pub fn stuck_entries(&self) -> Vec<&TriageEntry> {
-        self.active.values().collect()
-    }
-
-    /// Get all active entries as a slice-like view for display purposes.
+    /// Get all active entries.
     pub fn active_entries(&self) -> Vec<&TriageEntry> {
         self.active.values().collect()
     }
