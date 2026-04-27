@@ -1,66 +1,35 @@
 //! Error types for jig-core
 
-use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Not in a git repository")]
+    #[error("not in a git repository")]
     NotInGitRepo,
 
-    #[error("Not in a worktree")]
-    NotInWorktree,
-
-    #[error("Worktree '{0}' already exists")]
-    WorktreeExists(String),
-
-    #[error("Worktree '{0}' does not exist")]
+    #[error("worktree '{0}' not found")]
     WorktreeNotFound(String),
 
-    #[error("Worker '{0}' not found")]
-    WorkerNotFound(String),
-
-    #[error("Branch '{0}' does not exist")]
-    BranchNotFound(String),
-
-    #[error("Worktree has uncommitted changes. Use --force to override")]
+    #[error("uncommitted changes")]
     UncommittedChanges,
 
-    #[error("No worktrees found")]
-    NoWorktrees,
-
-    #[error("Name is required")]
+    #[error("name is required")]
     NameRequired,
 
-    #[error("Config key '{0}' not found")]
-    ConfigNotFound(String),
-
-    #[error("Already initialized. Use --force to reinitialize")]
-    AlreadyInitialized,
-
-    #[error("Missing dependency: {0}")]
+    #[error("missing dependency: {0}")]
     MissingDependency(String),
 
     #[error(transparent)]
     Tmux(#[from] crate::host::tmux::TmuxError),
 
-    #[error("On-create hook failed")]
-    OnCreateHookFailed,
-
-    #[error("Worker '{0}' is still initializing (running on-create hook)")]
-    WorkerInitializing(String),
-
-    #[error("Worker '{0}' failed during setup: {1}")]
-    WorkerSetupFailed(String, String),
-
-    #[error("Merge conflict with branch '{0}'")]
-    MergeConflict(String),
-
     #[error(transparent)]
     Git(#[from] crate::git::GitError),
 
-    #[error("Git error: {0}")]
-    Git2(#[from] git2::Error),
+    #[error(transparent)]
+    Linear(#[from] crate::issues::providers::linear::client::LinearError),
+
+    #[error(transparent)]
+    GitHub(#[from] crate::github::GitHubError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -71,20 +40,8 @@ pub enum Error {
     #[error("TOML parse error: {0}")]
     TomlParse(#[from] toml::de::Error),
 
-    #[error("Template error: {0}")]
+    #[error("template error: {0}")]
     Template(#[from] handlebars::RenderError),
-
-    #[error("Invalid path: {0}")]
-    InvalidPath(PathBuf),
-
-    #[error("State error: {0}")]
-    State(String),
-
-    #[error(transparent)]
-    Linear(#[from] crate::issues::providers::linear::client::LinearError),
-
-    #[error(transparent)]
-    GitHub(#[from] crate::github::GitHubError),
 
     #[error("{0}")]
     Custom(String),

@@ -6,9 +6,9 @@
 pub mod client;
 mod provider;
 
+use crate::config::GlobalConfig;
 use crate::config::LinearIssuesConfig;
 use crate::error::Result;
-use crate::global::GlobalConfig;
 
 use crate::issues::issue::{Issue, IssueFilter, IssueStatus};
 use client::{LinearClient, LinearError};
@@ -197,15 +197,9 @@ impl LinearProvider {
 
 impl LinearProvider {
     pub(crate) fn list_issues(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
-        let projects = if let Some(ref cat) = filter.category {
-            vec![cat.clone()]
-        } else {
-            self.projects.clone()
-        };
-
         let mut issues = self.client.list_issues(
             &self.team,
-            &projects,
+            &self.projects,
             filter.status.as_ref(),
             filter.priority.as_ref(),
             self.assignee.as_deref(),
@@ -226,9 +220,9 @@ impl LinearProvider {
         }
 
         issues.sort_by(|a, b| {
-            let pa = a.priority.as_ref().map(|p| p.clone() as u8).unwrap_or(99);
-            let pb = b.priority.as_ref().map(|p| p.clone() as u8).unwrap_or(99);
-            pa.cmp(&pb).then_with(|| a.id.cmp(&b.id))
+            a.priority()
+                .cmp(b.priority())
+                .then_with(|| a.id().cmp(b.id()))
         });
 
         Ok(issues)

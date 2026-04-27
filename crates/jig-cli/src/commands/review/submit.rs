@@ -17,7 +17,7 @@ pub struct ReviewSubmit {}
 
 impl ReviewSubmit {
     pub fn run_inner(&self, ctx: &RepoCtx) -> Result<ReviewOutput, ReviewError> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
 
         // Read all of stdin
         let mut input = String::new();
@@ -44,7 +44,7 @@ impl ReviewSubmit {
 
         // Make path relative for display
         let display_path = review_path
-            .strip_prefix(&repo.repo_root)
+            .strip_prefix(&cfg.repo_root)
             .unwrap_or(&review_path);
 
         ui::success(&format!("Review written to {}", display_path.display()));

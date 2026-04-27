@@ -42,6 +42,12 @@ impl From<&str> for Branch {
     }
 }
 
+impl From<Branch> for String {
+    fn from(b: Branch) -> Self {
+        b.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,8 +2,8 @@
 
 use clap::Args;
 
-use jig_core::Error;
-use jig_core::Worker;
+use jig_core::agents;
+use jig_core::{config, Error, Prompt, Worker, Worktree};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -23,6 +23,8 @@ pub struct Resume {
 pub enum ResumeError {
     #[error(transparent)]
     Core(#[from] Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
 }
 
 impl Op for Resume {
@@ -30,13 +32,18 @@ impl Op for Resume {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
 
         // Open existing worktree
-        let wt = Worker::open(&repo.repo_root, &repo.worktrees_path, &self.name)?;
+        let wt_path = cfg.worktrees_path.join(&self.name);
+        if !wt_path.exists() {
+            return Err(Error::WorktreeNotFound(self.name.clone()).into());
+        }
+        let wt = Worktree::open(&wt_path)?;
 
         // Error if tmux window already exists
-        if wt.has_tmux_window() {
+        let pre = Worker::from(&wt);
+        if pre.has_tmux_window() {
             ui::failure(&format!(
                 "Worker '{}' already has a tmux window. Use '{}' to attach.",
                 ui::highlight(&self.name),
@@ -51,18 +58,25 @@ impl Op for Resume {
 
         // Read original context from spawn event if no override provided
         let effective_context = if let Some(ref ctx_override) = self.context {
-            Some(ctx_override.clone())
+            ctx_override.clone()
         } else {
-            let repo_name = repo
+            let repo_name = cfg
                 .repo_root
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            jig_core::daemon::recovery::RecoveryScanner::read_spawn_context(&repo_name, &self.name)
+            crate::daemon::recovery::RecoveryScanner::read_spawn_context(&repo_name, &self.name)
+                .unwrap_or_else(|| "You were interrupted. Resume your previous task.".to_string())
         };
 
-        // Resume the worker
-        wt.resume(effective_context.as_deref())?;
+        let jig_config = config::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
+        let agent = agents::Agent::from_name(&jig_config.agent.agent_type)
+            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude))
+            .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
+
+        let prompt = Prompt::new(jig_core::worker::SPAWN_PREAMBLE).task(&effective_context);
+
+        Worker::resume(&wt, &agent, prompt)?;
 
         ui::success(&format!(
             "Resumed worker '{}' in tmux",

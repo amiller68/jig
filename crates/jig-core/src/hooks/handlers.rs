@@ -6,10 +6,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::commits;
 use crate::config::JigToml;
 use crate::error::Result;
-use crate::events::{Event, EventLog, EventType};
+use crate::worker::events::{Event, EventKind, EventLog};
 
 /// Handle post-commit hook: emit a Commit event with the HEAD SHA.
 ///
@@ -22,13 +21,11 @@ pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
 
     let sha = head_sha(repo_path).unwrap_or_default();
 
-    let event = Event::new(EventType::Commit)
-        .with_field("sha", sha)
-        .with_field("repo", repo_name.clone())
-        .with_field("worker", worker_name.clone());
-
     let log = EventLog::for_worker(&repo_name, &worker_name)?;
-    log.append(&event)?;
+    log.append(&Event::now(EventKind::Commit {
+        sha,
+        repo: repo_name,
+    }))?;
 
     Ok(())
 }
@@ -41,13 +38,11 @@ pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
 
     let sha = head_sha(repo_path).unwrap_or_default();
 
-    let event = Event::new(EventType::Push)
-        .with_field("sha", sha)
-        .with_field("repo", repo_name.clone())
-        .with_field("worker", worker_name.clone());
-
     let log = EventLog::for_worker(&repo_name, &worker_name)?;
-    log.append(&event)?;
+    log.append(&Event::now(EventKind::Push {
+        sha,
+        repo: repo_name,
+    }))?;
 
     Ok(())
 }
@@ -78,7 +73,7 @@ pub fn handle_commit_msg(repo_path: &Path, commit_msg_file: &str) -> Result<()> 
         .commits
         .to_validation_config();
 
-    match commits::parse_and_validate(cleaned, &config) {
+    match config.parse_and_validate(cleaned) {
         Ok((_msg, errors)) => {
             if errors.is_empty() {
                 Ok(())

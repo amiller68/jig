@@ -6,13 +6,13 @@
 pub mod issue;
 pub mod providers;
 
-pub use issue::{Issue, IssueFilter, IssuePriority, IssueStatus, ParentIssue};
+pub use issue::{Issue, IssueFilter, IssuePriority, IssueRef, IssueStatus};
 pub use providers::linear::LinearProvider;
 pub use providers::{IssueProvider, ProviderKind};
 
+use crate::config::GlobalConfig;
 use crate::config::JigToml;
 use crate::error::{Error, Result};
-use crate::global::GlobalConfig;
 
 /// Create an issue provider based on repo and global configuration.
 pub fn make_provider(jig_toml: &JigToml, global_config: &GlobalConfig) -> Result<IssueProvider> {

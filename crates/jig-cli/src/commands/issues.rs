@@ -218,12 +218,8 @@ pub struct StatsData {
 impl Issues {
     fn filter(&self) -> IssueFilter {
         IssueFilter {
-            status: self.status.as_deref().and_then(IssueStatus::from_str_loose),
-            priority: self
-                .priority
-                .as_deref()
-                .and_then(IssuePriority::from_str_loose),
-            category: self.category.clone(),
+            status: self.status.as_deref().and_then(|s| s.parse().ok()),
+            priority: self.priority.as_deref().and_then(|s| s.parse().ok()),
             labels: self.label.clone(),
         }
     }
@@ -235,7 +231,7 @@ impl Issues {
         }
         issues
             .into_iter()
-            .filter(|i| i.status != IssueStatus::Complete)
+            .filter(|i| *i.status() != IssueStatus::Complete)
             .collect()
     }
 
@@ -265,7 +261,7 @@ impl Issues {
         auto_spawn_labels: Option<Vec<String>>,
     ) -> Result<IssuesOutput, IssuesError> {
         if self.ids {
-            let ids: Vec<String> = all_issues.into_iter().map(|i| i.id).collect();
+            let ids: Vec<String> = all_issues.into_iter().map(|i| i.into_id().into()).collect();
             return Ok(IssuesOutput::Ids(ids));
         }
 
@@ -278,9 +274,9 @@ impl Issues {
     }
 
     fn run_list(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
         let filter = self.filter();
-        let provider = repo.issue_provider()?;
+        let provider = cfg.issue_provider()?;
 
         if let Some(ref id) = self.id {
             let issue = provider
@@ -289,7 +285,7 @@ impl Issues {
             return Ok(IssuesOutput::Detail(Box::new(issue)));
         }
 
-        let spawn_labels = repo.jig_toml.issues.auto_spawn_labels.clone();
+        let spawn_labels = cfg.repo.issues.auto_spawn_labels.clone();
         let all_issues = if self.auto {
             let labels = spawn_labels.as_deref().unwrap_or(&[]);
             let spawnable = provider.list_spawnable(labels)?;
@@ -307,8 +303,8 @@ impl Issues {
         let filter = self.filter();
 
         let mut all_issues = Vec::new();
-        for repo in &ctx.repos {
-            let provider = repo.issue_provider()?;
+        for cfg in &ctx.configs {
+            let provider = cfg.issue_provider()?;
 
             if let Some(ref id) = self.id {
                 if let Some(issue) = provider.get(id)? {
@@ -317,7 +313,7 @@ impl Issues {
                 continue;
             }
 
-            let spawn_labels = repo.jig_toml.issues.auto_spawn_labels.clone();
+            let spawn_labels = cfg.repo.issues.auto_spawn_labels.clone();
             let repo_issues = if self.auto {
                 let labels = spawn_labels.as_deref().unwrap_or(&[]);
                 let spawnable = provider.list_spawnable(labels)?;
@@ -349,13 +345,12 @@ fn run_create(
     parent: Option<&str>,
     status: &str,
 ) -> Result<IssuesOutput, IssuesError> {
-    let repo = ctx.repo()?;
-    let pri = priority.and_then(IssuePriority::from_str_loose);
+    let cfg = ctx.config()?;
+    let pri = priority.and_then(|s| s.parse().ok());
 
-    // Parse the initial status up front so we fail before creating the issue
-    // if the caller passed something invalid.
-    let initial_status = IssueStatus::from_str_loose(status)
-        .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", status)))?;
+    let initial_status: IssueStatus = status
+        .parse()
+        .map_err(|_| IssuesError::Usage(format!("unknown status: {}", status)))?;
 
     // Read body from stdin if "-" was passed
     let body_text = match body {
@@ -368,9 +363,9 @@ fn run_create(
         None => None,
     };
 
-    let id = match repo.jig_toml.issues.provider {
+    let id = match cfg.repo.issues.provider {
         ProviderKind::Linear => {
-            let linear_provider = repo.linear_provider()?;
+            let linear_provider = cfg.linear_provider()?;
             linear_provider.create_issue(
                 title,
                 body_text.as_deref(),
@@ -404,10 +399,9 @@ fn run_update(
     parent: Option<&str>,
     remove_parent: bool,
 ) -> Result<IssuesOutput, IssuesError> {
-    let repo = ctx.repo()?;
-    let pri = priority.and_then(IssuePriority::from_str_loose);
+    let cfg = ctx.config()?;
+    let pri = priority.and_then(|s| s.parse().ok());
 
-    // Read body from stdin if "-" was passed
     let body_text = match body {
         Some("-") => {
             let mut buf = String::new();
@@ -447,16 +441,16 @@ fn run_update(
     // If --append is set and body is provided, fetch existing description and prepend it
     let effective_body = match (append, body_text) {
         (true, Some(new_body)) => {
-            let provider = repo.issue_provider()?;
+            let provider = cfg.issue_provider()?;
             let existing = provider
                 .get(id)?
                 .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
             // The issue body includes `# Title\n\n` prefix from Linear conversion;
             // extract only the description portion (after the first heading).
             let existing_desc = existing
-                .body
-                .strip_prefix(&format!("# {}\n\n", existing.title))
-                .unwrap_or(&existing.body);
+                .body()
+                .strip_prefix(&format!("# {}\n\n", existing.title()))
+                .unwrap_or(existing.body());
             if existing_desc.is_empty() {
                 Some(new_body)
             } else {
@@ -476,11 +470,11 @@ fn run_update(
     let computed_labels: Vec<String> = if !labels.is_empty() {
         labels.to_vec()
     } else if mutate_labels {
-        let provider = repo.issue_provider()?;
+        let provider = cfg.issue_provider()?;
         let existing = provider
             .get(id)?
             .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
-        let mut set: Vec<String> = existing.labels.clone();
+        let mut set: Vec<String> = existing.labels().to_vec();
         for add in add_labels {
             if !set.iter().any(|l| l.eq_ignore_ascii_case(add)) {
                 set.push(add.clone());
@@ -501,9 +495,9 @@ fn run_update(
         || category.is_some()
         || assignee.is_some();
 
-    match repo.jig_toml.issues.provider {
+    match cfg.repo.issues.provider {
         ProviderKind::Linear => {
-            let linear_provider = repo.linear_provider()?;
+            let linear_provider = cfg.linear_provider()?;
             if has_field_updates || parent.is_some() || remove_parent {
                 linear_provider.update_issue(
                     id,
@@ -534,30 +528,31 @@ fn run_status_update(
     id: &str,
     new_status: &str,
 ) -> Result<IssuesOutput, IssuesError> {
-    let repo = ctx.repo()?;
+    let cfg = ctx.config()?;
 
-    let status = IssueStatus::from_str_loose(new_status)
-        .ok_or_else(|| IssuesError::Usage(format!("unknown status: {}", new_status)))?;
+    let status: IssueStatus = new_status
+        .parse()
+        .map_err(|_| IssuesError::Usage(format!("unknown status: {}", new_status)))?;
 
-    match repo.jig_toml.issues.provider {
+    match cfg.repo.issues.provider {
         ProviderKind::Linear => {
-            let linear_provider = repo.linear_provider()?;
+            let linear_provider = cfg.linear_provider()?;
             linear_provider.update_status(id, &status)?;
         }
     }
 
     Ok(IssuesOutput::StatusUpdated(
         id.to_string(),
-        status.as_str().to_string(),
+        status.to_string(),
     ))
 }
 
 fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, IssuesError> {
-    let repo = ctx.repo()?;
+    let cfg = ctx.config()?;
 
-    match repo.jig_toml.issues.provider {
+    match cfg.repo.issues.provider {
         ProviderKind::Linear => {
-            let linear_provider = repo.linear_provider()?;
+            let linear_provider = cfg.linear_provider()?;
             linear_provider.update_status(id, &IssueStatus::Complete)?;
         }
     }
@@ -566,8 +561,8 @@ fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, I
 }
 
 fn run_stats(ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
-    let repo = ctx.repo()?;
-    let provider = repo.issue_provider()?;
+    let cfg = ctx.config()?;
+    let provider = cfg.issue_provider()?;
 
     let all_issues = provider.list(&IssueFilter::default())?;
     Ok(IssuesOutput::Stats(compute_stats(&all_issues)))
@@ -576,8 +571,8 @@ fn run_stats(ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
 fn run_stats_global(ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
     let mut all_issues = Vec::new();
 
-    for repo in &ctx.repos {
-        let provider = repo.issue_provider()?;
+    for cfg in &ctx.configs {
+        let provider = cfg.issue_provider()?;
         all_issues.extend(provider.list(&IssueFilter::default())?);
     }
 
@@ -596,10 +591,8 @@ fn compute_stats(issues: &[CoreIssue]) -> StatsData {
     let mut high = 0usize;
     let mut medium = 0usize;
     let mut low = 0usize;
-    let mut no_priority = 0usize;
-
     for issue in issues {
-        match issue.status {
+        match issue.status() {
             IssueStatus::Triage => triage += 1,
             IssueStatus::Backlog => backlog += 1,
             IssueStatus::Planned => planned += 1,
@@ -607,12 +600,11 @@ fn compute_stats(issues: &[CoreIssue]) -> StatsData {
             IssueStatus::Complete => complete += 1,
             IssueStatus::Blocked => blocked += 1,
         }
-        match &issue.priority {
-            Some(IssuePriority::Urgent) => urgent += 1,
-            Some(IssuePriority::High) => high += 1,
-            Some(IssuePriority::Medium) => medium += 1,
-            Some(IssuePriority::Low) => low += 1,
-            None => no_priority += 1,
+        match &issue.priority() {
+            IssuePriority::Urgent => urgent += 1,
+            IssuePriority::High => high += 1,
+            IssuePriority::Medium => medium += 1,
+            IssuePriority::Low => low += 1,
         }
     }
 
@@ -631,7 +623,6 @@ fn compute_stats(issues: &[CoreIssue]) -> StatsData {
         ("High".to_string(), high),
         ("Medium".to_string(), medium),
         ("Low".to_string(), low),
-        ("None".to_string(), no_priority),
     ];
     by_priority.retain(|(_, count)| *count > 0);
 
@@ -726,10 +717,13 @@ impl fmt::Display for IssuesOutput {
                 }
                 if ui::is_plain() {
                     for issue in issues {
-                        let status = issue.status.as_str();
-                        let pri = issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-");
-                        let cat = issue.category.as_deref().unwrap_or("-");
-                        writeln!(f, "{}\t{}\t{}\t{}", status, pri, cat, issue.title)?;
+                        writeln!(
+                            f,
+                            "{}\t{}\t{}",
+                            issue.status(),
+                            issue.priority(),
+                            issue.title()
+                        )?;
                     }
                     return Ok(());
                 }
@@ -737,16 +731,17 @@ impl fmt::Display for IssuesOutput {
                 write!(f, "{table}")
             }
             Self::Detail(issue) => {
-                if let Some(parent) = &issue.parent {
-                    writeln!(f, "Parent: {} — {}", parent.id, parent.title)?;
+                if let Some(parent) = &issue.parent() {
+                    writeln!(f, "Parent: {}", parent)?;
                     writeln!(f)?;
                 }
-                write!(f, "{}", issue.body)?;
-                if !issue.labels.is_empty() {
-                    write!(f, "\n\nLabels: {}", issue.labels.join(", "))?;
+                write!(f, "{}", issue.body())?;
+                if !issue.labels().is_empty() {
+                    write!(f, "\n\nLabels: {}", issue.labels().join(", "))?;
                 }
-                if !issue.depends_on.is_empty() {
-                    write!(f, "\n\nBlocked by: {}", issue.depends_on.join(", "))?;
+                if !issue.depends_on().is_empty() {
+                    let deps: Vec<&str> = issue.depends_on().iter().map(|d| d.as_ref()).collect();
+                    write!(f, "\n\nBlocked by: {}", deps.join(", "))?;
                 }
                 Ok(())
             }
@@ -793,10 +788,10 @@ impl fmt::Display for IssuesOutput {
 }
 
 fn render_table(issues: &[CoreIssue], auto_spawn_labels: Option<&[String]>) -> comfy_table::Table {
-    let mut table = ui::new_table(&["STATUS", "AUTO", "PRI", "CATEGORY", "ISSUE"]);
+    let mut table = ui::new_table(&["STATUS", "AUTO", "PRI", "ISSUE"]);
 
     for issue in issues {
-        let (status_sym, status_color) = match issue.status {
+        let (status_sym, status_color) = match issue.status() {
             IssueStatus::Triage => ("[?]", Color::Magenta),
             IssueStatus::Backlog => ("[.]", Color::DarkGrey),
             IssueStatus::Planned => ("[ ]", Color::White),
@@ -805,12 +800,11 @@ fn render_table(issues: &[CoreIssue], auto_spawn_labels: Option<&[String]>) -> c
             IssueStatus::Blocked => ("[!]", Color::Red),
         };
 
-        let (pri_text, pri_color) = match &issue.priority {
-            Some(IssuePriority::Urgent) => ("Urgent", Color::Red),
-            Some(IssuePriority::High) => ("High", Color::Yellow),
-            Some(IssuePriority::Medium) => ("Med", Color::White),
-            Some(IssuePriority::Low) => ("Low", Color::DarkGrey),
-            None => ("-", Color::DarkGrey),
+        let (pri_text, pri_color) = match &issue.priority() {
+            IssuePriority::Urgent => ("Urgent", Color::Red),
+            IssuePriority::High => ("High", Color::Yellow),
+            IssuePriority::Medium => ("Med", Color::White),
+            IssuePriority::Low => ("Low", Color::DarkGrey),
         };
 
         let auto_indicator = match auto_spawn_labels {
@@ -818,19 +812,16 @@ fn render_table(issues: &[CoreIssue], auto_spawn_labels: Option<&[String]>) -> c
             _ => "",
         };
 
-        let category = issue.category.as_deref().unwrap_or("-");
-
-        let title = if issue.children.is_empty() {
-            issue.title.clone()
+        let title = if issue.children().is_empty() {
+            issue.title().to_string()
         } else {
-            format!("{} ({} tickets)", issue.title, issue.children.len())
+            format!("{} ({} tickets)", issue.title(), issue.children().len())
         };
 
         table.add_row(vec![
             Cell::new(status_sym).fg(status_color),
             Cell::new(auto_indicator).fg(Color::Green),
             Cell::new(pri_text).fg(pri_color),
-            Cell::new(category),
             Cell::new(&title).fg(Color::Cyan),
         ]);
     }
@@ -882,7 +873,7 @@ fn interactive_loop(
             let idx = scroll + i;
             let marker = if idx == cursor { ">" } else { " " };
 
-            let status_sym = match issue.status {
+            let status_sym = match issue.status() {
                 IssueStatus::Triage => "[?]",
                 IssueStatus::Backlog => "[.]",
                 IssueStatus::Planned => "[ ]",
@@ -891,14 +882,14 @@ fn interactive_loop(
                 IssueStatus::Blocked => "[!]",
             };
 
-            let pri = issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-");
+            let pri = issue.priority().to_string();
 
             let auto = match auto_spawn_labels {
                 Some(labels) if issue.auto(labels) => " ✓",
                 _ => "  ",
             };
 
-            let title = ui::truncate(&issue.title, max_title);
+            let title = ui::truncate(issue.title(), max_title);
 
             let highlight = if idx == cursor { "\x1B[1;36m" } else { "" };
             let reset = if idx == cursor { "\x1B[0m" } else { "" };
@@ -945,7 +936,7 @@ fn interactive_loop(
 
 /// Full-screen pager view for a single issue. Scroll with j/k, q/Esc to return.
 fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> {
-    let lines: Vec<&str> = issue.body.lines().collect();
+    let lines: Vec<&str> = issue.body().lines().collect();
     let mut scroll = 0usize;
 
     loop {
@@ -956,16 +947,12 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
         write!(
             w,
             "\x1B[1m{}\x1B[0m  \x1B[2m{} | {}\x1B[0m\r\n",
-            issue.title,
-            issue.status.as_str(),
-            issue.priority.as_ref().map(|p| p.as_str()).unwrap_or("-"),
+            issue.title(),
+            issue.status(),
+            issue.priority(),
         )?;
-        if let Some(parent) = &issue.parent {
-            write!(
-                w,
-                "\x1B[2mParent: {} — {}\x1B[0m\r\n",
-                parent.id, parent.title
-            )?;
+        if let Some(parent) = &issue.parent() {
+            write!(w, "\x1B[2mParent: {}\x1B[0m\r\n", parent)?;
         }
 
         for line in lines.iter().skip(scroll).take(visible) {

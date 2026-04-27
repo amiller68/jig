@@ -1,5 +1,25 @@
 use serde::{Deserialize, Serialize};
 
+/// Tmux-level status of a worker's session/window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TmuxStatus {
+    Running,
+    Exited,
+    NoSession,
+    NoWindow,
+}
+
+impl TmuxStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Exited => "exited",
+            Self::NoSession => "no-session",
+            Self::NoWindow => "no-window",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerStatus {

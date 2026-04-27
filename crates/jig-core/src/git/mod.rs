@@ -12,6 +12,7 @@ mod repo;
 mod worktree;
 
 pub use branch::Branch;
+pub use commit::conventional;
 pub use commit::Oid;
 pub use diff::{Diff, FileDiff, Stats as DiffStats};
 pub use error::GitError;

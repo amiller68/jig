@@ -5,10 +5,10 @@ use std::path::Path;
 use clap::Args;
 use comfy_table::{Cell, CellAlignment, Color};
 
-use jig_core::events::{EventLog, WorkerState};
 use jig_core::git::{Branch, Repo};
-use jig_core::global::GlobalConfig;
+use jig_core::worker::events::{EventLog, WorkerState};
 use jig_core::worker::WorkerStatus;
+use jig_core::GlobalConfig;
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
 use crate::ui;
@@ -52,8 +52,8 @@ impl Op for List {
             return self.list_all_git_worktrees();
         }
 
-        let repo = ctx.repo()?;
-        let git_repo = Repo::open(&repo.repo_root)?;
+        let cfg = ctx.config()?;
+        let git_repo = Repo::open(&cfg.repo_root)?;
         let worktrees = git_repo.list_worktrees()?;
         let names: Vec<String> = worktrees.iter().map(|wt| wt.name()).collect();
         if names.is_empty() {
@@ -65,12 +65,8 @@ impl Op for List {
             return Ok(ListOutput(out));
         }
 
-        let table = build_worktree_table(
-            &names,
-            &repo.worktrees_path,
-            &repo.base_branch,
-            &repo.repo_root,
-        );
+        let base_branch = cfg.base_branch();
+        let table = build_worktree_table(&names, &cfg.worktrees_path, &base_branch, &cfg.repo_root);
         eprintln!("{table}");
         Ok(ListOutput(String::new()))
     }
@@ -105,13 +101,13 @@ impl List {
     fn run_global_plain(&self, ctx: &GlobalCtx) -> Result<ListOutput, ListError> {
         let mut out = String::new();
         let mut first = true;
-        for repo in &ctx.repos {
-            let git_repo = Repo::open(&repo.repo_root)?;
+        for cfg in &ctx.configs {
+            let git_repo = Repo::open(&cfg.repo_root)?;
             let worktrees = git_repo.list_worktrees()?;
             if worktrees.is_empty() {
                 continue;
             }
-            let repo_name = repo
+            let repo_name = cfg
                 .repo_root
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -130,14 +126,14 @@ impl List {
 
     fn run_global_table(&self, ctx: &GlobalCtx) -> Result<ListOutput, ListError> {
         let mut first = true;
-        for repo in &ctx.repos {
-            let git_repo = Repo::open(&repo.repo_root)?;
+        for cfg in &ctx.configs {
+            let git_repo = Repo::open(&cfg.repo_root)?;
             let wts = git_repo.list_worktrees()?;
             if wts.is_empty() {
                 continue;
             }
             let worktrees: Vec<String> = wts.iter().map(|wt| wt.name()).collect();
-            let repo_name = repo
+            let repo_name = cfg
                 .repo_root
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -147,11 +143,12 @@ impl List {
             }
             first = false;
             ui::header(&repo_name);
+            let base_branch = cfg.base_branch();
             let table = build_worktree_table(
                 &worktrees,
-                &repo.worktrees_path,
-                &repo.base_branch,
-                &repo.repo_root,
+                &cfg.worktrees_path,
+                &base_branch,
+                &cfg.repo_root,
             );
             eprintln!("{table}");
         }

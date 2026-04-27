@@ -6,7 +6,6 @@ use regex::Regex;
 
 use super::client::GitHubClient;
 use super::error::Result;
-use crate::nudge::NudgeType;
 
 /// Default conventional commit pattern (compiled once).
 static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -17,13 +16,9 @@ static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// Result of checking a PR's GitHub state.
 #[derive(Debug, Clone)]
 pub struct PrCheck {
-    /// Nudge type if action is needed.
-    pub nudge: Option<NudgeType>,
-    /// Human-readable details.
+    pub has_problem: bool,
     pub details: Vec<String>,
-    /// Number of review comments (inline). Only set for review checks.
     pub review_comment_count: Option<u32>,
-    /// Number of ChangesRequested reviews. Only set for review checks.
     pub changes_requested_count: Option<u32>,
 }
 
@@ -33,7 +28,7 @@ pub fn check_ci(client: &GitHubClient, git_ref: &str) -> Result<PrCheck> {
 
     if failures.is_empty() {
         return Ok(PrCheck {
-            nudge: None,
+            has_problem: false,
             details: vec![],
             review_comment_count: None,
             changes_requested_count: None,
@@ -58,7 +53,7 @@ pub fn check_ci(client: &GitHubClient, git_ref: &str) -> Result<PrCheck> {
         .collect();
 
     Ok(PrCheck {
-        nudge: Some(NudgeType::Ci),
+        has_problem: true,
         details,
         review_comment_count: None,
         changes_requested_count: None,
@@ -71,7 +66,7 @@ pub fn check_conflicts(client: &GitHubClient, pr_number: u64) -> Result<PrCheck>
 
     if !has_conflicts {
         return Ok(PrCheck {
-            nudge: None,
+            has_problem: false,
             details: vec![],
             review_comment_count: None,
             changes_requested_count: None,
@@ -79,7 +74,7 @@ pub fn check_conflicts(client: &GitHubClient, pr_number: u64) -> Result<PrCheck>
     }
 
     Ok(PrCheck {
-        nudge: Some(NudgeType::Conflict),
+        has_problem: true,
         details: vec!["PR has merge conflicts".to_string()],
         review_comment_count: None,
         changes_requested_count: None,
@@ -113,7 +108,7 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
 
     if !has_changes_requested && unresolved_comments.is_empty() {
         return Ok(PrCheck {
-            nudge: None,
+            has_problem: false,
             details: vec![],
             review_comment_count: Some(review_comment_count),
             changes_requested_count: Some(changes_requested_count),
@@ -130,7 +125,7 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
     );
     if client.dev_pushed_after_reviews(pr_number) {
         return Ok(PrCheck {
-            nudge: None,
+            has_problem: false,
             details: vec!["Dev pushed after latest review feedback".to_string()],
             review_comment_count: Some(review_comment_count),
             changes_requested_count: Some(changes_requested_count),
@@ -144,7 +139,7 @@ pub fn check_reviews(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
     details.extend(unresolved_comments);
 
     Ok(PrCheck {
-        nudge: Some(NudgeType::Review),
+        has_problem: true,
         details,
         review_comment_count: Some(review_comment_count),
         changes_requested_count: Some(changes_requested_count),
@@ -164,7 +159,7 @@ pub fn check_commits(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
 
     if bad.is_empty() {
         return Ok(PrCheck {
-            nudge: None,
+            has_problem: false,
             details: vec![],
             review_comment_count: None,
             changes_requested_count: None,
@@ -172,7 +167,7 @@ pub fn check_commits(client: &GitHubClient, pr_number: u64) -> Result<PrCheck> {
     }
 
     Ok(PrCheck {
-        nudge: Some(NudgeType::BadCommits),
+        has_problem: true,
         details: bad,
         review_comment_count: None,
         changes_requested_count: None,

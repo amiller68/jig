@@ -9,26 +9,16 @@
 //! - Agent adapters for different AI assistants
 
 pub mod agents;
-pub mod commits;
 pub mod config;
-pub mod context;
-pub mod daemon;
-pub mod dispatch;
 pub mod error;
-pub mod events;
 pub mod git;
 pub mod github;
-pub mod global;
 pub mod hooks;
 pub mod host;
 pub mod issues;
 pub mod notify;
-pub mod nudge;
-pub mod registry;
+pub mod prompt;
 pub mod review;
-pub mod spawn;
-pub mod state;
-pub mod templates;
 pub mod worker;
 
 /// Deprecated: use `host` directly
@@ -48,23 +38,21 @@ pub mod terminal {
 }
 
 pub use agents::Agent;
-pub use config::{Config, JigToml, LinearIssuesConfig, RepoConfig, ReviewConfig};
-pub use context::RepoContext;
+pub use config::{
+    ensure_global_dirs, global_config_dir, global_state_dir, Config, GlobalConfig, JigToml,
+    LinearIssuesConfig, RepoRegistry, ReviewConfig, WorkerEntry, WorkersState,
+};
 pub use error::{Error, Result};
-pub use events::{derive_status, Event, EventLog, EventType, WorkerState};
 pub use git::{Branch, DiffStats, FileDiff, GitError, Repo, Worktree, WorktreeRef};
 pub use github::GitHubClient;
-pub use global::{
-    ensure_global_dirs, global_config_dir, global_state_dir, GlobalConfig, WorkerEntry,
-    WorkersState,
-};
 pub use host::tmux::{TmuxError, TmuxSession, TmuxWindow};
+pub use issues::issue::IssueRef;
 pub use issues::{
     make_linear_provider, make_provider, Issue, IssueFilter, IssuePriority, IssueProvider,
     IssueStatus, LinearProvider,
 };
-pub use nudge::{classify_nudge, execute_nudge, NudgeType};
-pub use registry::RepoRegistry;
-pub use state::OrchestratorState;
-pub use templates::{TemplateContext, TemplateEngine};
-pub use worker::{IssueRef, ParentInfo, Worker, WorkerStatus};
+pub use prompt::Prompt;
+pub use worker::events::{
+    derive_status, Event, EventKind, EventLog, EventType, TerminalKind, WorkerState,
+};
+pub use worker::{Worker, WorkerStatus};

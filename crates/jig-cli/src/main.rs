@@ -5,6 +5,7 @@ mod op;
 
 mod cli;
 mod commands;
+pub(crate) mod daemon;
 mod ui;
 
 use std::io::IsTerminal;
@@ -52,21 +53,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(ref command) => {
             let output = if cli.global {
                 let registry = jig_core::RepoRegistry::load().unwrap_or_default();
-                let repos: Vec<_> = registry
+                let configs: Vec<_> = registry
                     .repos()
                     .iter()
                     .filter(|e| e.path.exists())
-                    .filter_map(|e| jig_core::RepoContext::from_path(&e.path).ok())
+                    .filter_map(|e| jig_core::Config::from_path(&e.path).ok())
                     .collect();
-                let ctx = GlobalCtx { repos };
+                let ctx = GlobalCtx { configs };
                 command.run_global(&ctx)?
             } else {
-                let repo = jig_core::RepoContext::from_cwd().ok();
+                let config = jig_core::Config::from_cwd().ok();
 
                 // Best-effort auto-registration and pruning of current repo
-                if let Some(ref repo) = repo {
+                if let Some(ref cfg) = config {
                     if let Ok(mut registry) = jig_core::RepoRegistry::load() {
-                        let _ = registry.register(repo.repo_root.clone());
+                        let _ = registry.register(cfg.repo_root.clone());
                         let pruned = registry.prune();
                         if cli.verbose && !pruned.is_empty() {
                             for p in &pruned {
@@ -77,7 +78,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
-                let ctx = RepoCtx { repo };
+                let ctx = RepoCtx { config };
                 command.run(&ctx)?
             };
             let output_str = output.to_string();

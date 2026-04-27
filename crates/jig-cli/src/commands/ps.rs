@@ -10,7 +10,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{self, disable_raw_mode};
 
 use jig_core::config::JigToml;
-use jig_core::daemon::{DaemonConfig, RuntimeConfig, TickResult, TimerInfo};
+use crate::daemon::{DaemonConfig, RuntimeConfig, TickResult, TimerInfo};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -38,12 +38,12 @@ impl Op for Ps {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
-        let repo_filter = repo
+        let cfg = ctx.config()?;
+        let repo_filter = cfg
             .repo_root
             .file_name()
             .map(|n| n.to_string_lossy().to_string());
-        let runtime_config = self.build_runtime_config(&repo.repo_root);
+        let runtime_config = self.build_runtime_config(&cfg.repo_root);
         self.execute_ps(repo_filter, runtime_config, false)
     }
 
@@ -74,7 +74,7 @@ impl Ps {
 
         let mut display = vec![];
         let mut triage_display = vec![];
-        jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
+        crate::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
             display.clone_from(&tick.worker_display);
             triage_display.clone_from(&tick.triage_display);
             false
@@ -114,7 +114,7 @@ impl Ps {
     /// Build RuntimeConfig from CLI flags + jig.toml + global config.
     fn build_runtime_config(&self, repo_root: &std::path::Path) -> RuntimeConfig {
         let jig_toml = JigToml::load(repo_root).ok().flatten().unwrap_or_default();
-        let global_config = jig_core::global::GlobalConfig::load().unwrap_or_default();
+        let global_config = jig_core::config::GlobalConfig::load().unwrap_or_default();
         let spawn_config = &jig_toml.spawn;
 
         let max_concurrent_workers = self
@@ -261,7 +261,7 @@ fn run_watch(
         });
     }
 
-    let result = jig_core::daemon::run_with(&daemon_config, runtime_config, |tick, quit| {
+    let result = crate::daemon::run_with(&daemon_config, runtime_config, |tick, quit| {
         // The background thread sets quit_for_thread; propagate to the daemon's quit flag
         if quit_for_thread.load(Ordering::Relaxed) {
             quit.store(true, Ordering::Relaxed);

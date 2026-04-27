@@ -7,12 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::JIG_DIR;
+use crate::config::hook_registry_path;
 use crate::error::Result;
-
-/// Registry path within the `.jig` directory.
-const REGISTRY_DIR: &str = "hooks";
-const REGISTRY_FILE: &str = "hooks.json";
 
 /// Tracks installed git hooks for idempotent init and safe uninstall.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,10 +117,7 @@ impl Default for HookRegistry {
 
 /// Path to the hook registry file for a given repo.
 pub fn registry_path(repo_path: &Path) -> PathBuf {
-    repo_path
-        .join(JIG_DIR)
-        .join(REGISTRY_DIR)
-        .join(REGISTRY_FILE)
+    hook_registry_path(repo_path)
 }
 
 #[cfg(test)]

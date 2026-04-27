@@ -4,8 +4,7 @@ use std::process::Command;
 
 use clap::Args;
 
-use jig_core::state::OrchestratorState;
-use jig_core::{Error, Worktree};
+use jig_core::{Error, EventLog, GlobalConfig, WorkerState, Worktree};
 
 use crate::op::{Op, RepoCtx};
 use crate::ui;
@@ -50,14 +49,14 @@ impl Op for Pr {
     type Output = PrOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
 
         // 1. Get current branch
         let git_repo = jig_core::git::Repo::discover()?;
         let branch = git_repo.current_branch().map_err(|_| PrError::NoBranch)?;
 
         // 2. Resolve base branch
-        let base = resolve_base(&repo.repo_root, repo)?;
+        let base = resolve_base(&cfg.repo_root, cfg)?;
         let base_for_gh = base.strip_prefix("origin/").unwrap_or(&base);
 
         ui::detail(&format!(
@@ -123,48 +122,46 @@ impl Op for Pr {
 ///
 /// If running inside a jig worktree with an associated issue that has a parent,
 /// use the parent issue's branch name. Otherwise fall back to the repo base branch.
-fn resolve_base(
-    repo_root: &std::path::Path,
-    repo: &jig_core::RepoContext,
-) -> Result<String, PrError> {
+fn resolve_base(repo_root: &std::path::Path, cfg: &jig_core::Config) -> Result<String, PrError> {
     // Try to detect if we're in a jig worktree
     let worktree_name = match Worktree::current() {
         Ok(wt) => wt.name(),
-        Err(_) => return Ok(repo.base_branch.clone()),
+        Err(_) => return Ok(cfg.base_branch()),
     };
 
-    // Load orchestrator state and find our worker
-    let state = match OrchestratorState::load(repo_root)? {
-        Some(s) => s,
-        None => return Ok(repo.base_branch.clone()),
-    };
+    // Read issue ref from event log
+    let repo_name = repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let health_config = GlobalConfig::load().map(|g| g.health).unwrap_or_default();
 
-    let worker = match state.get_worker_by_name(&worktree_name) {
-        Some(w) => w,
-        None => return Ok(repo.base_branch.clone()),
-    };
-
-    // Get issue ref from the worker
-    let issue_ref = match worker.issue_ref() {
-        Some(r) => r.to_string(),
-        None => return Ok(repo.base_branch.clone()),
+    let issue_ref = match EventLog::for_worker(&repo_name, &worktree_name) {
+        Ok(log) => {
+            let events = log.read_all().unwrap_or_default();
+            if events.is_empty() {
+                return Ok(cfg.base_branch());
+            }
+            match WorkerState::reduce(&events, &health_config).issue_ref {
+                Some(r) => r,
+                None => return Ok(cfg.base_branch()),
+            }
+        }
+        Err(_) => return Ok(cfg.base_branch()),
     };
 
     // Fetch the issue and check for a parent
-    let provider = repo.issue_provider()?;
+    let provider = cfg.issue_provider()?;
     let issue = match provider.get(&issue_ref)? {
         Some(i) => i,
-        None => return Ok(repo.base_branch.clone()),
+        None => return Ok(cfg.base_branch()),
     };
 
-    // If the issue has a parent, fetch the parent to get its branch name
-    if let Some(parent) = &issue.parent {
-        if let Ok(Some(parent_issue)) = provider.get(&parent.id) {
-            if let Some(parent_branch) = &parent_issue.branch_name {
-                return Ok(parent_branch.clone());
-            }
+    if let Some(parent_ref) = &issue.parent() {
+        if let Ok(Some(parent_issue)) = provider.get(parent_ref) {
+            return Ok(parent_issue.branch().to_string());
         }
     }
 
-    Ok(repo.base_branch.clone())
+    Ok(cfg.base_branch())
 }

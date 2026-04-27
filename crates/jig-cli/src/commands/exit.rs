@@ -41,7 +41,7 @@ impl Op for Exit {
     type Output = ExitOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
 
         let wt = Worktree::current()?;
         let name = wt.name();
@@ -50,7 +50,7 @@ impl Op for Exit {
 
         ui::success(&format!("Exited worktree '{}'", ui::highlight(&name)));
 
-        let canonical = repo.repo_root.canonicalize()?;
+        let canonical = cfg.repo_root.canonicalize()?;
         Ok(ExitOutput(canonical))
     }
 }

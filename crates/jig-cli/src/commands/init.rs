@@ -92,10 +92,10 @@ impl Op for Init {
             )
         })?;
 
-        // Init needs get_base_repo() directly because RepoContext may not exist
+        // Init needs get_base_repo() directly because Config may not exist
         // (init is often the first jig command run in a repo)
-        let repo_root = match ctx.repo() {
-            Ok(repo) => repo.repo_root.clone(),
+        let repo_root = match ctx.config() {
+            Ok(cfg) => cfg.repo_root.clone(),
             Err(_) => {
                 let git_repo = Repo::discover()?;
                 git_repo.clone_path()
@@ -417,7 +417,7 @@ fn launch_audit(
     extra: Option<&str>,
 ) -> Result<(), InitError> {
     let prompt = audit_prompt(agent, has_backup, extra);
-    let cmd = agent.spawn_command(Some(&prompt), &[]);
+    let cmd = agent.spawn_command(&prompt);
 
     let session_name = "jig-init";
     let window_name = repo_root
@@ -446,7 +446,7 @@ fn launch_audit(
 
 /// Initialize global config at ~/.config/jig/config.toml.
 fn init_global(force: bool) -> Result<NoOutput, InitError> {
-    let config_dir = jig_core::global::paths::global_config_dir()?;
+    let config_dir = jig_core::config::paths::global_config_dir()?;
     let config_path = config_dir.join("config.toml");
 
     if config_path.exists() && !force {
@@ -522,20 +522,18 @@ fn install_hooks(repo_root: &Path, agent: &agents::Agent, force: bool) {
         }
     }
 
-    if agent.kind() == agents::AgentKind::Claude {
-        ui::progress("Installing Claude Code hooks...");
-        match jig_core::hooks::install_claude_hooks() {
-            Ok(result) => {
-                for name in &result.installed {
-                    eprintln!("  {} {}: installed", ui::SYM_OK, name);
-                }
-                for name in &result.skipped {
-                    eprintln!("  {} {}: already exists", ui::SYM_OK, name);
-                }
+    ui::progress(&format!("Installing {} agent hooks...", agent.name()));
+    match agent.install_hooks() {
+        Ok(result) => {
+            for name in &result.installed {
+                eprintln!("  {} {}: installed", ui::SYM_OK, name);
             }
-            Err(e) => {
-                ui::warning(&format!("Claude hooks: {}", e));
+            for name in &result.skipped {
+                eprintln!("  {} {}: already exists", ui::SYM_OK, name);
             }
+        }
+        Err(e) => {
+            ui::warning(&format!("Agent hooks: {}", e));
         }
     }
 }

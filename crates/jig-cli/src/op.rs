@@ -8,31 +8,31 @@ use std::fmt::Display;
 
 /// Single-repo context (no -g). Current repo if available.
 pub struct RepoCtx {
-    pub repo: Option<jig_core::RepoContext>,
+    pub config: Option<jig_core::Config>,
 }
 
 impl RepoCtx {
-    /// Get the repo context, or error if not in a git repo.
-    pub fn repo(&self) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
-        self.repo.as_ref().ok_or(jig_core::Error::NotInGitRepo)
+    /// Get the config, or error if not in a git repo.
+    pub fn config(&self) -> std::result::Result<&jig_core::Config, jig_core::Error> {
+        self.config.as_ref().ok_or(jig_core::Error::NotInGitRepo)
     }
 }
 
 /// Global context (-g). All registered repos.
 pub struct GlobalCtx {
-    pub repos: Vec<jig_core::RepoContext>,
+    pub configs: Vec<jig_core::Config>,
 }
 
 impl GlobalCtx {
     /// Find the repo that contains a worktree with the given name.
-    pub fn repo_for_worktree(
+    pub fn config_for_worktree(
         &self,
         name: &str,
-    ) -> std::result::Result<&jig_core::RepoContext, jig_core::Error> {
-        for repo in &self.repos {
-            let path = repo.worktrees_path.join(name);
+    ) -> std::result::Result<&jig_core::Config, jig_core::Error> {
+        for cfg in &self.configs {
+            let path = cfg.worktrees_path.join(name);
             if path.exists() {
-                return Ok(repo);
+                return Ok(cfg);
             }
         }
         Err(jig_core::Error::WorktreeNotFound(name.to_string()))
@@ -40,10 +40,6 @@ impl GlobalCtx {
 }
 
 /// Trait for CLI operations.
-///
-/// Commands implement `run` for single-repo mode and optionally override
-/// `run_global` for `-g` mode. The default `run_global` rejects with an
-/// error message and exits.
 pub trait Op {
     type Error: Error + Send + Sync + 'static;
     type Output: Display;
@@ -67,15 +63,6 @@ impl Display for NoOutput {
 }
 
 /// Macro to generate Command enum with Op implementation
-///
-/// Usage:
-/// ```ignore
-/// command_enum! {
-///     #[command(visible_alias = "c")]
-///     (Create, crate::commands::Create),
-///     (List, crate::commands::List),
-/// }
-/// ```
 #[macro_export]
 macro_rules! command_enum {
     ($($(#[$attr:meta])* ($variant:ident, $type:ty)),* $(,)?) => {

@@ -1,9 +1,11 @@
 //! Daemon command — run the orchestrator loop
 
+use std::time::Duration;
+
 use clap::Args;
 
-use jig_core::daemon::{self, DaemonConfig};
-use jig_core::global::GlobalConfig;
+use jig_core::config::GlobalConfig;
+use crate::daemon::{self, DaemonConfig, RuntimeConfig};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -14,10 +16,6 @@ pub struct Daemon {
     /// Poll interval in seconds
     #[arg(long)]
     interval: Option<u64>,
-
-    /// Run once and exit (no loop)
-    #[arg(long)]
-    once: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -35,19 +33,17 @@ impl Op for Daemon {
         let interval = self.interval.unwrap_or(global.daemon.interval_seconds);
         let config = DaemonConfig {
             interval_seconds: interval,
-            once: self.once,
             session_prefix: global.daemon.session_prefix.clone(),
             ..Default::default()
         };
 
-        if self.once {
-            eprintln!("{}", ui::dim("Running single pass..."));
-        } else {
-            ui::success(&format!("Daemon started (polling every {}s)", interval));
-            eprintln!("{}", ui::dim("Press Ctrl+C to stop."));
-        }
+        ui::success(&format!("Daemon started (polling every {}s)", interval));
+        eprintln!("{}", ui::dim("Press Ctrl+C to stop."));
 
-        daemon::run(&config)?;
+        daemon::run_with(&config, RuntimeConfig::default(), |_tick, _quit| {
+            std::thread::sleep(Duration::from_secs(interval));
+            true
+        })?;
 
         Ok(NoOutput)
     }

@@ -4,54 +4,66 @@
 //! git worktree on disk.  The full [`Worktree`] (wrapping a git2 repo
 //! handle) is resolved on demand — we never serialize what we can derive.
 
+pub mod events;
 mod status;
 
-pub use status::WorkerStatus;
+pub use status::{TmuxStatus, WorkerStatus};
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::agents;
-use crate::config::{self, JigToml};
-use crate::context::RepoContext;
+use crate::agents::Agent;
 use crate::error::Result;
-use crate::events::{Event, EventLog, EventType};
-use crate::git::{Branch, DiffStats, Repo, Worktree, WorktreeRef};
-use crate::global::GlobalConfig;
+use crate::git::{Branch, Repo, Worktree, WorktreeRef};
 use crate::host::tmux::TmuxWindow;
-use crate::state::OrchestratorState;
-use crate::templates::{TemplateContext, TemplateEngine};
+use crate::issues::issue::IssueRef;
+use crate::prompt::Prompt;
+use events::{Event, EventKind, EventLog, TerminalKind};
 
-/// A reference to an issue in an external tracker (e.g. "ENG-123", "bugs/fix-auth.md").
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IssueRef(pub String);
+pub const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
 
-impl IssueRef {
-    pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
-    }
-}
+YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), draft PR created via `jig pr` or /draft, and issue marked complete (see completion instructions in the task). Call /review when ready.
 
-impl std::fmt::Display for IssueRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+IMPORTANT: Create the draft PR using `jig pr` (or `/draft`, which wraps it). NEVER use `gh pr create` directly — it bypasses parent branch resolution and will target the wrong base branch.
 
-impl std::ops::Deref for IssueRef {
-    type Target = str;
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
+HOW MONITORING WORKS: A daemon watches your activity via tool-use events. If you go idle or get stuck for ~5 minutes, you'll receive automated nudge messages (up to {{max_nudges}}). After that, a human is notified. Do not wait for input.
 
-/// Parent issue context, passed at registration time and emitted into the event log.
-pub struct ParentInfo<'a> {
-    pub issue: &'a str,
-    pub branch: Option<&'a str>,
-}
+IF YOU GET STUCK:
+- Do NOT enter plan mode or ask for confirmation — just proceed
+- If a command fails, try to fix it yourself
+- If tests fail, debug and fix them
+- If unsure about an approach, pick the simplest one and go
+- If truly blocked, explain what's blocking you so the nudge system can relay it
+
+AUTOMATED REVIEW: After you create a draft PR, an automated review agent may review your code. If it requests changes, you'll receive a nudge with the path to a review file (e.g. .jig/reviews/001.md). When that happens:
+
+1. Read the review file to see the findings
+2. Address each finding — fix issues or prepare explanations
+3. Submit your response: jig review respond --review <N> (pipe your response markdown to stdin)
+4. Commit and push your changes
+5. The next review cycle triggers automatically on push
+
+Response format (pipe to jig review respond --review N):
+
+# Response to Review NNN
+
+## Addressed
+- `file:line` — finding description: what you did to fix it
+
+## Disputed
+- `file:line` — finding description: why you disagree
+
+## Deferred
+- `file:line` — finding description: why this is out of scope
+
+## Notes
+Any additional context.
+
+TASK:
+{{task_context}}
+"#;
 
 /// A Worker is a Claude Code session in an isolated git worktree.
 ///
@@ -68,72 +80,19 @@ pub struct Worker {
     pub(crate) auto_spawned: bool,
 }
 
-impl Worker {
-    // ── Constructors ──
-
-    pub fn create(
-        repo: &Repo,
-        branch: &Branch,
-        base: &Branch,
-        on_create_hook: Option<&str>,
-        copy_files: &[String],
-        auto: bool,
-    ) -> Result<Self> {
-        crate::git::ensure_excluded(&repo.common_dir(), config::JIG_DIR)?;
-
-        let wt = Worktree::create(repo, branch, base)?;
-        let repo_root = repo.clone_path();
-
-        let wt_path = wt.path();
-        if !copy_files.is_empty() {
-            config::copy_worktree_files(&repo_root, &wt_path, copy_files)?;
-        }
-
-        if let Some(hook) = on_create_hook {
-            config::run_on_create_hook(hook, &wt_path)?;
-        }
-
-        Ok(Self {
+impl From<&Worktree> for Worker {
+    fn from(wt: &Worktree) -> Self {
+        Self {
             id: Uuid::new_v4(),
-            name: branch.to_string(),
+            name: wt.name(),
             path: wt.as_ref(),
             issue_ref: None,
-            auto_spawned: auto,
-        })
-    }
-
-    pub fn open(_repo_root: &Path, worktrees_path: &Path, name: &str) -> Result<Self> {
-        let path = worktrees_path.join(name);
-        if !path.exists() {
-            return Err(crate::error::Error::WorktreeNotFound(name.to_string()));
-        }
-
-        let _ = WorktreeRef::new(&path).open()?;
-
-        Ok(Self {
-            id: Uuid::new_v4(),
-            name: name.to_string(),
-            path: WorktreeRef::new(path),
-            issue_ref: None,
             auto_spawned: false,
-        })
+        }
     }
+}
 
-    pub fn list(repo_root: &Path, _worktrees_path: &Path) -> Result<Vec<Self>> {
-        let repo = crate::git::Repo::open(repo_root)?;
-        Ok(repo
-            .list_worktrees()?
-            .into_iter()
-            .map(|wt| Self {
-                id: Uuid::new_v4(),
-                name: wt.name(),
-                path: wt.as_ref(),
-                issue_ref: None,
-                auto_spawned: false,
-            })
-            .collect())
-    }
-
+impl Worker {
     // ── Accessors ──
 
     pub fn id(&self) -> Uuid {
@@ -158,280 +117,275 @@ impl Worker {
 
     // ── Tmux ──
 
-    // TODO (cleanup): this should return Result, not swallow errors
-    pub fn tmux_window(&self) -> TmuxWindow {
-        let wt = self.path.open();
-        let session = match wt {
-            Ok(wt) => {
-                let repo_name = wt.repo_name();
-                format!("jig-{}", repo_name)
-            }
-            Err(_) => "jig-unknown".to_string(),
-        };
-        TmuxWindow::new(session, &self.name)
+    pub fn tmux_window(&self) -> Result<TmuxWindow> {
+        let wt = self.path.open()?;
+        let session = format!("jig-{}", wt.repo_name());
+        Ok(TmuxWindow::new(session, &self.name))
     }
 
     pub fn has_tmux_window(&self) -> bool {
-        self.tmux_window().exists()
+        self.tmux_window().map(|w| w.exists()).unwrap_or(false)
     }
 
     pub fn is_agent_running(&self) -> bool {
-        self.tmux_window().is_running()
+        self.tmux_window().map(|w| w.is_running()).unwrap_or(false)
     }
 
-    // ── Launch / Resume ──
+    // ── Event log ──
 
-    pub fn launch(&self, context: Option<&str>) -> Result<()> {
-        let wt = self.worktree()?;
-        let repo_root = wt.repo_root();
-
-        let engine = TemplateEngine::new().with_repo(&repo_root);
-        let global_config = GlobalConfig::load()?;
-        let mut tpl_ctx = TemplateContext::new();
-        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
-        tpl_ctx.set(
-            "task_context",
-            context.unwrap_or(
-                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
-            ),
-        );
-        let effective_context = engine.render("spawn-preamble", &tpl_ctx)?;
-
-        let config = JigToml::load(&repo_root)?.unwrap_or_default();
-        let agent = agents::Agent::from_name(&config.agent.agent_type)
-            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude));
-
-        let window = self.tmux_window();
-        window.create(&self.path)?;
-
-        let cmd = agent.spawn_command(Some(&effective_context), &config.agent.disallowed_tools);
-        window.send_keys(&[&cmd, "Enter"])?;
-
-        Ok(())
+    pub fn event_log(&self) -> Result<EventLog> {
+        let repo_name = self.repo_name();
+        let log = EventLog::for_worker(&repo_name, &self.name)?;
+        Ok(log)
     }
 
-    pub fn launch_wrapup(
-        &self,
-        context: Option<&str>,
-        parent_title: &str,
-        children: &[String],
-    ) -> Result<()> {
-        let wt = self.worktree()?;
-        let repo_root = wt.repo_root();
+    // ── Agent lifecycle ──
 
-        let engine = TemplateEngine::new().with_repo(&repo_root);
-        let global_config = GlobalConfig::load()?;
-        let mut tpl_ctx = TemplateContext::new();
-        tpl_ctx.set_num("max_nudges", global_config.health.max_nudges);
-        tpl_ctx.set("parent_title", parent_title);
-        tpl_ctx.set(
-            "task_context",
-            context.unwrap_or(
-                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
-            ),
-        );
-        tpl_ctx.set_list("children", children.to_vec());
-        let effective_context = engine.render("spawn-preamble-wrapup", &tpl_ctx)?;
+    /// Create worktree, emit events, render prompt, start agent in tmux.
+    ///
+    /// Resolves copy_files, on_create_hook, and base branch from repo config.
+    /// Emits `Initializing` before worktree creation. On failure, emits
+    /// `Terminal(failed)`. On success, emits `Spawn` and starts the agent.
+    pub fn spawn(
+        repo: &Repo,
+        branch: &Branch,
+        base: &Branch,
+        agent: &Agent,
+        prompt: Prompt,
+        auto: bool,
+        issue_ref: Option<IssueRef>,
+    ) -> Result<Self> {
+        let repo_root = repo.clone_path();
+        let repo_name = repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let branch_name = branch.to_string();
 
-        let config = JigToml::load(&repo_root)?.unwrap_or_default();
-        let agent = agents::Agent::from_name(&config.agent.agent_type)
-            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude));
+        let event_log = EventLog::for_worker(&repo_name, &branch_name)?;
+        event_log.reset()?;
 
-        let window = self.tmux_window();
-        window.create(&self.path)?;
-        let cmd = agent.spawn_command(Some(&effective_context), &config.agent.disallowed_tools);
-        window.send_keys(&[&cmd, "Enter"])?;
+        let _ = event_log.append(&Event::now(EventKind::Initializing {
+            branch: branch_name.clone(),
+            base: base.to_string(),
+            auto,
+        }));
 
-        Ok(())
-    }
-
-    pub fn resume(&self, context: Option<&str>) -> Result<()> {
-        let wt = self.worktree()?;
-        let repo_root = wt.repo_root();
-        let repo_name = wt.repo_name();
-
-        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
-            let mut event = Event::new(EventType::Resume);
-            if let Some(ctx) = context {
-                event = event.with_field("context", ctx);
+        let wt = match Worktree::create(repo, branch, base) {
+            Ok(wt) => wt,
+            Err(e) => {
+                let _ = event_log.append(&Event::now(EventKind::Terminal {
+                    terminal: TerminalKind::Failed,
+                    reason: Some(e.to_string()),
+                }));
+                return Err(e.into());
             }
-            let _ = event_log.append(&event);
+        };
+
+        let issue = issue_ref
+            .clone()
+            .unwrap_or_else(|| IssueRef::new(branch_name.clone()));
+        let _ = event_log.append(&Event::now(EventKind::Spawn {
+            branch: branch_name,
+            repo: repo_name,
+            issue,
+        }));
+
+        let worker = Self {
+            id: Uuid::new_v4(),
+            name: wt.name(),
+            path: wt.as_ref(),
+            issue_ref,
+            auto_spawned: auto,
+        };
+
+        let context = prompt.render()?;
+        let window = worker.tmux_window()?;
+        window.create(&worker.path)?;
+        let cmd = agent.spawn_command(&context);
+        window.send_keys(&[&cmd, "Enter"])?;
+
+        Ok(worker)
+    }
+
+    /// Resume an existing worker by relaunching its agent session.
+    pub fn resume(wt: &Worktree, agent: &Agent, prompt: Prompt) -> Result<Self> {
+        let worker = Self {
+            id: Uuid::new_v4(),
+            name: wt.name(),
+            path: wt.as_ref(),
+            issue_ref: None,
+            auto_spawned: false,
+        };
+        let context = prompt.render()?;
+
+        if let Ok(event_log) = worker.event_log() {
+            let _ = event_log.append(&Event::now(EventKind::Resume));
         }
 
-        let config = JigToml::load(&repo_root)?.unwrap_or_default();
-        let agent = agents::Agent::from_name(&config.agent.agent_type)
-            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude));
-
-        let window = self.tmux_window();
-        window.create(&self.path)?;
-        let cmd = agent.resume_command();
+        let window = worker.tmux_window()?;
+        window.create(&worker.path)?;
+        let cmd = agent.resume_command(&context);
         window.send_keys(&[&cmd, "Enter"])?;
+
+        Ok(worker)
+    }
+
+    /// Send a nudge to the worker's tmux window and emit event.
+    pub fn nudge(&self, prompt: Prompt) -> Result<()> {
+        let nudge_type_key = prompt.name().to_string();
+        let message = prompt.render()?;
+
+        let window = self.tmux_window()?;
+        window.send_message(&message)?;
+
+        if let Ok(event_log) = self.event_log() {
+            let _ = event_log.append(&Event::now(EventKind::Nudge {
+                nudge_type: nudge_type_key,
+                message: message.clone(),
+            }));
+        }
 
         Ok(())
     }
 
-    // ── Remove ──
+    // ── Remove / Kill ──
 
     pub fn remove(&self, force: bool) -> Result<()> {
         Ok(self.worktree()?.remove(force)?)
     }
 
-    // ── Registration (OrchestratorState) ──
-
-    pub fn register(&self, issue_ref: Option<&str>) -> Result<()> {
-        self.register_with_event(issue_ref, None, None, EventType::Spawn)
-    }
-
-    pub fn register_initializing(&self, issue_ref: Option<&str>) -> Result<()> {
-        self.register_with_event(issue_ref, None, None, EventType::Initializing)
-    }
-
-    pub fn register_initializing_with_issue_text(
-        &self,
-        issue_ref: Option<&str>,
-        issue_title: &str,
-        parent: Option<ParentInfo<'_>>,
-    ) -> Result<()> {
-        self.register_with_event(
-            issue_ref,
-            Some(issue_title),
-            parent,
-            EventType::Initializing,
-        )
-    }
-
-    fn register_with_event(
-        &self,
-        issue_ref: Option<&str>,
-        issue_title: Option<&str>,
-        parent: Option<ParentInfo<'_>>,
-        initial_event_type: EventType,
-    ) -> Result<()> {
-        let wt = self.worktree()?;
-        let repo_root = wt.repo_root();
-        let branch = wt.branch()?;
-        let repo_name = wt.repo_name();
-
-        let base_branch = RepoContext::resolve_base_branch_for(&repo_root)
-            .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string());
-
-        let config = crate::config::RepoConfig {
-            base_branch,
-            ..Default::default()
-        };
-
-        let mut state = OrchestratorState::load_or_create(repo_root, config)?;
-
-        let mut record = self.clone();
-        record.issue_ref = issue_ref.map(IssueRef::new);
-
-        state.add_worker(record);
-        state.save()?;
-
-        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
-            let _ = event_log.reset();
-            let branch_str: &str = &branch;
-            let mut event = Event::new(initial_event_type)
-                .with_field("branch", branch_str)
-                .with_field("repo", repo_name.as_str());
-            if self.auto_spawned {
-                event = event.with_field("auto", true);
-            }
-            if let Some(issue) = issue_ref {
-                event = event.with_field("issue", issue);
-            }
-            if let Some(title) = issue_title {
-                event = event.with_field("issue_title", title);
-            }
-            if let Some(ref p) = parent {
-                event = event.with_field("parent_issue", p.issue);
-                if let Some(branch) = p.branch {
-                    event = event.with_field("parent_branch", branch);
-                }
-            }
-            let _ = event_log.append(&event);
-        }
-
+    pub fn kill(&self) -> Result<()> {
+        let window = self.tmux_window()?;
+        window.kill()?;
         Ok(())
-    }
-
-    pub fn emit_spawn_event(&self) {
-        if let Ok(wt) = self.worktree() {
-            let repo_name = wt.repo_name();
-            let branch = wt
-                .branch()
-                .map(|b| b.to_string())
-                .unwrap_or_else(|_| self.name.clone());
-            if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
-                let event = Event::new(EventType::Spawn)
-                    .with_field("branch", branch.as_str())
-                    .with_field("repo", repo_name.as_str());
-                let _ = event_log.append(&event);
-            }
-        }
-    }
-
-    pub fn emit_setup_failed(&self, reason: &str) {
-        if let Ok(wt) = self.worktree() {
-            let repo_name = wt.repo_name();
-            if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
-                let event = Event::new(EventType::Terminal)
-                    .with_field("terminal", "failed")
-                    .with_field("reason", reason);
-                let _ = event_log.append(&event);
-            }
-        }
     }
 
     pub fn unregister(&self) -> Result<()> {
-        let wt = self.worktree()?;
-        let repo_root = wt.repo_root();
-        let repo_name = wt.repo_name();
-
-        if let Some(mut state) = OrchestratorState::load(&repo_root)? {
-            let id = state.get_worker_by_name(&self.name).map(|w| w.id);
-            if let Some(id) = id {
-                state.remove_worker(&id);
-                state.save()?;
-            }
+        if let Ok(log) = self.event_log() {
+            let _ = log.remove();
         }
-
-        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
-            let _ = event_log.remove();
-        }
-
         Ok(())
     }
 
-    // ── Orphan detection ──
+    // ── Attach ──
 
-    pub fn is_orphaned(&self) -> bool {
-        self.auto_spawned && !self.has_tmux_window() && self.path.exists()
+    pub fn attach(&self) -> Result<()> {
+        let window = self.tmux_window()?;
+        if !window.exists() {
+            if self.path.exists() {
+                if let Some(status) = self.worker_status() {
+                    match status {
+                        WorkerStatus::Initializing => {
+                            return Err(crate::error::Error::Custom(format!(
+                                "worker '{}' is still initializing (running on-create hook)",
+                                self.name
+                            )));
+                        }
+                        WorkerStatus::Failed => {
+                            let reason = self.fail_reason().unwrap_or("unknown".into());
+                            return Err(crate::error::Error::Custom(format!(
+                                "worker '{}' failed during setup: {}",
+                                self.name, reason
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            return Err(crate::error::Error::Custom(format!(
+                "worker '{}' not found",
+                self.name
+            )));
+        }
+        window.attach()?;
+        Ok(())
     }
 
-    // ── Git helpers (resolve worktree, delegate) ──
+    // ── Event-derived status ──
 
-    pub fn has_uncommitted_changes(&self) -> Result<bool> {
-        Ok(self.worktree()?.has_uncommitted_changes()?)
+    pub fn worker_status(&self) -> Option<WorkerStatus> {
+        let log = self.event_log().ok()?;
+        let events = log.read_all().ok()?;
+        if events.is_empty() {
+            return None;
+        }
+        let health = crate::config::GlobalConfig::load()
+            .map(|g| g.health)
+            .unwrap_or_default();
+        Some(events::WorkerState::reduce(&events, &health).status)
     }
 
-    pub fn get_commits_ahead(&self) -> Result<Vec<String>> {
-        Ok(self.worktree()?.commits_ahead()?)
+    pub fn fail_reason(&self) -> Option<String> {
+        let log = self.event_log().ok()?;
+        let events = log.read_all().ok()?;
+        events.iter().rev().find_map(|e| {
+            if let EventKind::Terminal {
+                reason: Some(r), ..
+            } = &e.kind
+            {
+                Some(r.clone())
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn get_diff_stats(&self) -> Result<DiffStats> {
-        Ok(self.worktree()?.diff_stats()?)
+    // ── Tmux status ──
+
+    pub fn tmux_status(&self) -> TmuxStatus {
+        match self.tmux_window() {
+            Ok(w) => {
+                if !w.exists() {
+                    TmuxStatus::NoWindow
+                } else if w.is_running() {
+                    TmuxStatus::Running
+                } else {
+                    TmuxStatus::Exited
+                }
+            }
+            Err(_) => TmuxStatus::NoWindow,
+        }
     }
 
-    pub fn get_diff(&self) -> Result<String> {
-        Ok(self.worktree()?.diff()?.patch()?)
+    // ── Discovery ──
+
+    pub fn discover(cfg: &crate::config::Config) -> Vec<Self> {
+        let worktrees_dir = &cfg.worktrees_path;
+        if !worktrees_dir.exists() {
+            return vec![];
+        }
+
+        let entries = match std::fs::read_dir(worktrees_dir) {
+            Ok(e) => e,
+            Err(_) => return vec![],
+        };
+
+        let mut workers = Vec::new();
+
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !entry.path().is_dir() {
+                continue;
+            }
+            if !entry.path().join(".git").exists() {
+                continue;
+            }
+
+            workers.push(Self {
+                id: Uuid::nil(),
+                name,
+                path: WorktreeRef::new(entry.path()),
+                issue_ref: None,
+                auto_spawned: false,
+            });
+        }
+
+        workers.sort_by(|a, b| a.name.cmp(&b.name));
+        workers
     }
 
-    pub fn get_diff_stat(&self) -> Result<String> {
-        Ok(self.worktree()?.diff_stat()?)
-    }
-
-    pub fn repo_name(&self) -> String {
+    fn repo_name(&self) -> String {
         self.worktree()
             .map(|wt| wt.repo_name())
             .unwrap_or_else(|_| "unknown".to_string())

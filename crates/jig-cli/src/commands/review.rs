@@ -102,16 +102,17 @@ impl Op for Review {
 }
 
 fn run_show(ctx: &RepoCtx, show: &ReviewShow) -> Result<ReviewOutput, ReviewError> {
-    let repo = ctx.repo()?;
-    let worktree_path = repo.worktrees_path.join(&show.name);
+    let cfg = ctx.config()?;
+    let worktree_path = cfg.worktrees_path.join(&show.name);
 
     if !worktree_path.exists() {
         return Err(Error::WorktreeNotFound(show.name.clone()).into());
     }
 
+    let base_branch = cfg.base_branch();
     let branch = Repo::open(&worktree_path)?.current_branch()?;
     let wt_repo = Repo::open(&worktree_path)?;
-    let commits = wt_repo.commits_ahead(&Branch::new(&repo.base_branch))?;
+    let commits = wt_repo.commits_ahead(&Branch::new(&base_branch))?;
     let is_dirty = wt_repo.has_uncommitted_changes()?;
 
     // Header
@@ -122,7 +123,7 @@ fn run_show(ctx: &RepoCtx, show: &ReviewShow) -> Result<ReviewOutput, ReviewErro
         "  {} {} ahead of {}",
         ui::dim("Commits:"),
         ui::highlight(&commits.len().to_string()),
-        ui::dim(&repo.base_branch)
+        ui::dim(&base_branch)
     );
 
     if is_dirty {
@@ -141,7 +142,7 @@ fn run_show(ctx: &RepoCtx, show: &ReviewShow) -> Result<ReviewOutput, ReviewErro
 
     // Diff
     eprintln!();
-    let diff = wt_repo.diff(&Branch::new(&repo.base_branch))?;
+    let diff = wt_repo.diff(&Branch::new(&base_branch))?;
     if show.full {
         ui::header("Full diff:");
         let patch = diff.patch()?;

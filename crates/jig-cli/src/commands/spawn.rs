@@ -2,9 +2,9 @@
 
 use clap::Args;
 
+use jig_core::agents;
 use jig_core::git::Branch;
-use jig_core::Worker;
-use jig_core::{config, terminal, Error};
+use jig_core::{config, terminal, Error, Prompt, Worker};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -43,20 +43,17 @@ impl Op for Spawn {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
 
-        // Check for tmux
         if !terminal::command_exists("tmux") {
             return Err(Error::MissingDependency("tmux".to_string()).into());
         }
-
-        // Check for claude
         if !terminal::command_exists("claude") {
             return Err(Error::MissingDependency("claude".to_string()).into());
         }
 
         let issue = if let Some(ref issue_ref) = self.issue {
-            let provider = repo.issue_provider()?;
+            let provider = cfg.issue_provider()?;
             Some(
                 provider
                     .get(issue_ref)?
@@ -70,11 +67,7 @@ impl Op for Spawn {
         let name = if let Some(ref explicit) = self.name {
             explicit.clone()
         } else if let Some(ref issue) = issue {
-            issue
-                .branch_name
-                .as_deref()
-                .map(|b| Branch::new(b).to_string())
-                .unwrap_or_else(|| issue.id.to_lowercase())
+            issue.branch().to_string()
         } else {
             return Err(Error::Custom(
                 "worktree name required: provide a name argument or use --issue".into(),
@@ -82,50 +75,36 @@ impl Op for Spawn {
             .into());
         };
 
-        let worktree_path = repo.worktrees_path.join(&name);
+        let worktree_path = cfg.worktrees_path.join(&name);
+        if worktree_path.exists() {
+            return Err(Error::Custom(format!(
+                "Worktree '{}' already exists — use `jig resume` or `jig attach`",
+                name
+            ))
+            .into());
+        }
 
-        // Create worktree if needed using Worker::create
-        let wt = if !worktree_path.exists() {
-            // Resolve base branch: explicit --base > parent branch > repo default
-            let parent_base = issue
-                .as_ref()
-                .and_then(|i| i.parent.as_ref())
-                .and_then(|p| p.branch_name.as_deref())
-                .map(|b| format!("origin/{}", b));
-            let base = self
-                .base
-                .as_deref()
-                .or(parent_base.as_deref())
-                .unwrap_or(&repo.base_branch);
-            let copy_files = config::get_copy_files(&repo.repo_root)?;
-            let on_create_hook = config::get_on_create_hook(&repo.repo_root)?;
-
-            let git_repo = jig_core::Repo::open(&repo.repo_root)?;
-            let branch = Branch::new(&name);
-            let base_branch = Branch::new(base);
-            let wt = Worker::create(
-                &git_repo,
-                &branch,
-                &base_branch,
-                on_create_hook.as_deref(),
-                &copy_files,
-                false,
-            )?;
-
-            ui::success(&format!(
-                "Created worktree '{}' from '{}'",
-                ui::highlight(&name),
-                ui::highlight(base)
-            ));
-
-            wt
-        } else {
-            Worker::open(&repo.repo_root, &repo.worktrees_path, &name)?
-        };
+        // Resolve base branch
+        let parent_issue = issue
+            .as_ref()
+            .and_then(|i| i.parent())
+            .and_then(|parent_ref| {
+                let provider = cfg.issue_provider().ok()?;
+                provider.get(parent_ref).ok().flatten()
+            });
+        let parent_base = parent_issue
+            .as_ref()
+            .map(|p| format!("origin/{}", p.branch()));
+        let base_branch_str = cfg.base_branch();
+        let base = self
+            .base
+            .as_deref()
+            .or(parent_base.as_deref())
+            .unwrap_or(&base_branch_str);
 
         // Track issue ID before consuming the issue
-        let issue_id_for_status = issue.as_ref().map(|i| i.id.clone());
-        let issue_context = issue.map(|i| i.body);
+        let issue_id_for_status = issue.as_ref().map(|i| i.id().clone());
+        let issue_context = issue.map(|i| i.body().to_string());
 
         // Build effective context: --context takes precedence, issue body as fallback
         let effective_context = match (&self.context, &issue_context) {
@@ -134,13 +113,37 @@ impl Op for Spawn {
             (None, None) => None,
         };
 
-        // Register and launch using Worktree methods
-        wt.register(self.issue.as_deref())?;
-        wt.launch(effective_context.as_deref())?;
+        let global_config = jig_core::GlobalConfig::load()?;
+        let jig_config = config::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
+        let agent = agents::Agent::from_name(&jig_config.agent.agent_type)
+            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude))
+            .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
 
-        // Update issue status to InProgress to prevent duplicate spawning
+        let git_repo = jig_core::Repo::open(&cfg.repo_root)?;
+        let branch = Branch::new(&name);
+        let base_branch = Branch::new(base);
+
+        let prompt = Prompt::new(jig_core::worker::SPAWN_PREAMBLE)
+            .task(effective_context.as_deref().unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ))
+            .var_num("max_nudges", global_config.health.max_nudges);
+
+        let issue_ref = self.issue.as_deref().map(jig_core::IssueRef::new);
+        let _worker = Worker::spawn(
+            &git_repo,
+            &branch,
+            &base_branch,
+            &agent,
+            prompt,
+            false,
+            issue_ref,
+        )?;
+
         if let Some(ref issue_id) = issue_id_for_status {
-            jig_core::spawn::update_issue_status(&repo.repo_root, issue_id);
+            if let Ok(provider) = cfg.issue_provider() {
+                let _ = provider.update_status(issue_id, &jig_core::IssueStatus::InProgress);
+            }
         }
 
         ui::success(&format!(

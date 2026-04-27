@@ -29,7 +29,7 @@ impl Op for Home {
     type Output = HomeOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
-        Ok(HomeOutput(repo.repo_root.clone()))
+        let cfg = ctx.config()?;
+        Ok(HomeOutput(cfg.repo_root.clone()))
     }
 }

@@ -45,6 +45,13 @@ impl FromStr for AgentKind {
     }
 }
 
+/// Result of installing agent-specific hooks.
+#[derive(Debug, Default)]
+pub struct AgentHookResult {
+    pub installed: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
 /// Backend trait — one impl per agent. Not public; callers use [`Agent`].
 pub(crate) trait AgentBackend: Send + Sync {
     fn kind(&self) -> AgentKind;
@@ -56,15 +63,17 @@ pub(crate) trait AgentBackend: Send + Sync {
     fn settings_content(&self) -> Option<&str>;
     fn health_command(&self) -> &[&str];
 
-    fn spawn_command(&self, context: Option<&str>, disallowed_tools: &[String]) -> String;
-    fn resume_command(&self) -> String;
+    fn spawn_command(&self, context: &str, disallowed_tools: &[String]) -> String;
+    fn resume_command(&self, context: &str) -> String;
     fn ephemeral_command(&self, prompt: &str, allowed_tools: &[&str]) -> String;
     fn triage_argv(&self, model: &str, allowed_tools: &[&str]) -> Vec<String>;
+    fn install_hooks(&self) -> crate::error::Result<AgentHookResult>;
 }
 
 /// Concrete agent handle.
 pub struct Agent {
     inner: Box<dyn AgentBackend>,
+    disallowed_tools: Vec<String>,
 }
 
 impl Agent {
@@ -72,12 +81,18 @@ impl Agent {
         match kind {
             AgentKind::Claude => Self {
                 inner: Box::new(ClaudeCode),
+                disallowed_tools: Vec::new(),
             },
         }
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
         name.parse::<AgentKind>().ok().map(Self::from_kind)
+    }
+
+    pub fn with_disallowed_tools(mut self, tools: Vec<String>) -> Self {
+        self.disallowed_tools = tools;
+        self
     }
 
     pub fn kind(&self) -> AgentKind {
@@ -108,16 +123,19 @@ impl Agent {
         self.inner.health_command()
     }
 
-    pub fn spawn_command(&self, context: Option<&str>, disallowed_tools: &[String]) -> String {
-        self.inner.spawn_command(context, disallowed_tools)
+    pub fn spawn_command(&self, context: &str) -> String {
+        self.inner.spawn_command(context, &self.disallowed_tools)
     }
-    pub fn resume_command(&self) -> String {
-        self.inner.resume_command()
+    pub fn resume_command(&self, context: &str) -> String {
+        self.inner.resume_command(context)
     }
     pub fn ephemeral_command(&self, prompt: &str, allowed_tools: &[&str]) -> String {
         self.inner.ephemeral_command(prompt, allowed_tools)
     }
     pub fn triage_argv(&self, model: &str, allowed_tools: &[&str]) -> Vec<String> {
         self.inner.triage_argv(model, allowed_tools)
+    }
+    pub fn install_hooks(&self) -> crate::error::Result<AgentHookResult> {
+        self.inner.install_hooks()
     }
 }

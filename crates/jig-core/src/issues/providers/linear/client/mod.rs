@@ -6,7 +6,8 @@ pub mod queries;
 pub mod request;
 pub mod types;
 
-use crate::issues::issue::{ChildIssue, Issue, IssuePriority, IssueStatus, ParentIssue};
+use crate::git::Branch;
+use crate::issues::issue::{Issue, IssuePriority, IssueRef, IssueStatus};
 
 pub use client::LinearClient;
 pub use error::LinearError;
@@ -23,13 +24,13 @@ fn map_status(state_type: &str) -> IssueStatus {
     }
 }
 
-fn map_priority(p: u8) -> Option<IssuePriority> {
+fn map_priority(p: u8) -> IssuePriority {
     match p {
-        1 => Some(IssuePriority::Urgent),
-        2 => Some(IssuePriority::High),
-        3 => Some(IssuePriority::Medium),
-        4 => Some(IssuePriority::Low),
-        _ => None,
+        1 => IssuePriority::Urgent,
+        2 => IssuePriority::High,
+        3 => IssuePriority::Medium,
+        4 => IssuePriority::Low,
+        _ => IssuePriority::Medium,
     }
 }
 
@@ -37,29 +38,19 @@ impl From<types::RawIssue> for Issue {
     fn from(raw: types::RawIssue) -> Self {
         let status = map_status(&raw.state.state_type);
         let priority = map_priority(raw.priority);
-        let category = raw
-            .project
-            .as_ref()
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| raw.team.name.clone());
-
-        let depends_on: Vec<String> = raw
+        let depends_on = raw
             .inverse_relations
             .nodes
             .into_iter()
             .filter(|r| r.relation_type == "blocks")
-            .map(|r| r.issue.identifier)
+            .map(|r| r.issue.identifier.into())
             .collect();
 
-        let children: Vec<ChildIssue> = raw
+        let children: Vec<IssueRef> = raw
             .children
             .nodes
             .into_iter()
-            .map(|c| ChildIssue {
-                id: c.identifier,
-                status: c.state.as_ref().map(|s| map_status(&s.state_type)),
-                branch_name: c.branch_name,
-            })
+            .map(|c| c.identifier.into())
             .collect();
 
         let body = match &raw.description {
@@ -69,28 +60,21 @@ impl From<types::RawIssue> for Issue {
 
         let labels: Vec<String> = raw.labels.nodes.into_iter().map(|l| l.name).collect();
 
-        let parent = raw.parent.map(|p| ParentIssue {
-            id: p.identifier,
-            title: p.title,
-            branch_name: p.branch_name,
-            status: Some(map_status(&p.state.state_type)),
-            body: p.description,
-        });
+        let parent: Option<IssueRef> = raw.parent.map(|p| p.identifier.into());
 
-        Issue {
-            id: raw.identifier,
-            title: raw.title,
-            status,
-            priority,
-            category: Some(category),
-            depends_on,
-            body,
-            source: raw.url,
-            children,
-            labels,
-            branch_name: raw.branch_name,
-            parent,
+        let branch = raw
+            .branch_name
+            .map(Into::into)
+            .unwrap_or_else(|| Branch::new(raw.identifier.to_lowercase()));
+
+        let mut issue = Issue::new(raw.identifier, raw.title, status, priority, branch, body)
+            .with_depends_on(depends_on)
+            .with_children(children)
+            .with_labels(labels);
+        if let Some(p) = parent {
+            issue = issue.with_parent(p);
         }
+        issue
     }
 }
 
@@ -226,7 +210,7 @@ impl LinearClient {
             .ok_or_else(|| error::LinearError::Other(format!("issue not found: {}", identifier)))?;
 
         self.execute(mutations::update_issue_status::UpdateIssueStatus {
-            issue_id: issue.id.clone(),
+            issue_id: issue.id().to_string(),
             state_id,
         })
     }
@@ -292,7 +276,10 @@ impl LinearClient {
             let parent_issue = self.get_issue(parent_id)?.ok_or_else(|| {
                 error::LinearError::Other(format!("parent issue not found: {}", parent_id))
             })?;
-            input.insert("parentId".into(), serde_json::json!(parent_issue.id));
+            input.insert(
+                "parentId".into(),
+                serde_json::json!(parent_issue.id().to_string()),
+            );
         }
 
         if input.is_empty() {
@@ -300,7 +287,7 @@ impl LinearClient {
         }
 
         self.execute(mutations::update_issue::UpdateIssue {
-            issue_id: issue.id.clone(),
+            issue_id: issue.id().to_string(),
             input: serde_json::Value::Object(input),
         })
     }
@@ -399,7 +386,10 @@ impl LinearClient {
             let parent_issue = self.get_issue(parent_id)?.ok_or_else(|| {
                 error::LinearError::Other(format!("parent issue not found: {}", parent_id))
             })?;
-            input.insert("parentId".into(), serde_json::json!(parent_issue.id));
+            input.insert(
+                "parentId".into(),
+                serde_json::json!(parent_issue.id().to_string()),
+            );
         }
 
         if let Some(status) = initial_status {

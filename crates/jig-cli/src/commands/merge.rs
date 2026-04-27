@@ -3,7 +3,8 @@
 use clap::Args;
 
 use jig_core::git::Repo;
-use jig_core::{spawn, Error};
+use jig_core::worker::Worker;
+use jig_core::Error;
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -28,16 +29,16 @@ impl Op for Merge {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
-        let worktree_path = repo.worktrees_path.join(&self.name);
+        let cfg = ctx.config()?;
+        let worktree_path = cfg.worktrees_path.join(&self.name);
 
         if !worktree_path.exists() {
-            return Err(Error::WorktreeNotFound(self.name.clone()).into());
+            return Err(jig_core::GitError::WorktreeNotFound(self.name.clone()).into());
         }
 
         // Check for uncommitted changes
         if Repo::open(&worktree_path)?.has_uncommitted_changes()? {
-            return Err(Error::UncommittedChanges.into());
+            return Err(jig_core::GitError::UncommittedChanges.into());
         }
 
         // Get branch name
@@ -52,11 +53,12 @@ impl Op for Merge {
             ui::highlight(&branch)
         ));
 
-        // Unregister from spawn state
-        spawn::unregister(repo, &self.name)?;
-
-        // Kill tmux window if running
-        spawn::kill_window(repo, &self.name)?;
+        // Clean up worker state
+        let workers = Worker::discover(cfg);
+        if let Some(worker) = workers.iter().find(|w| w.name() == self.name) {
+            worker.unregister()?;
+            let _ = worker.kill();
+        }
 
         eprintln!();
         ui::detail(&format!(

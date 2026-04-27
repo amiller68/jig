@@ -4,7 +4,7 @@ use std::fmt;
 
 use clap::{Args, Subcommand};
 
-use jig_core::global::{GlobalConfig, NotifyConfig};
+use jig_core::config::{GlobalConfig, NotifyConfig};
 use jig_core::notify::{NotificationEvent, NotificationQueue, Notifier};
 
 use crate::op::{Op, RepoCtx};

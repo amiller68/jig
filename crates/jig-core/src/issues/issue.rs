@@ -1,13 +1,76 @@
 //! Core issue types.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
-use super::providers::ProviderKind;
+use crate::git::Branch;
+use crate::prompt::Prompt;
+
+use super::providers::IssueProvider;
+
+/// A reference to an issue in an external tracker (e.g. "ENG-123").
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IssueRef(String);
+
+impl IssueRef {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+}
+
+impl std::fmt::Display for IssueRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::ops::Deref for IssueRef {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for IssueRef {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for IssueRef {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<IssueRef> for String {
+    fn from(r: IssueRef) -> Self {
+        r.0
+    }
+}
+
+impl PartialEq<str> for IssueRef {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for IssueRef {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl AsRef<str> for IssueRef {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Issue status values matching the convention in `issues/README.md`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
+#[serde(rename_all = "snake_case")]
+#[strum(ascii_case_insensitive)]
 pub enum IssueStatus {
     Triage,
     Backlog,
@@ -17,50 +80,12 @@ pub enum IssueStatus {
     Blocked,
 }
 
-impl IssueStatus {
-    pub fn from_str_loose(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
-            "triage" => Some(Self::Triage),
-            "backlog" => Some(Self::Backlog),
-            "planned" | "todo" => Some(Self::Planned),
-            "in progress" | "in_progress" | "in-progress" | "inprogress" => Some(Self::InProgress),
-            "complete" | "done" => Some(Self::Complete),
-            "blocked" => Some(Self::Blocked),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Triage => "Triage",
-            Self::Backlog => "Backlog",
-            Self::Planned => "Planned",
-            Self::InProgress => "In Progress",
-            Self::Complete => "Complete",
-            Self::Blocked => "Blocked",
-        }
-    }
-
-    pub fn symbol(&self) -> &'static str {
-        match self {
-            Self::Triage => "[?]",
-            Self::Backlog => "[.]",
-            Self::Planned => "[ ]",
-            Self::InProgress => "[~]",
-            Self::Complete => "[x]",
-            Self::Blocked => "[!]",
-        }
-    }
-}
-
-impl fmt::Display for IssueStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Issue priority levels.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Display, EnumString,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(ascii_case_insensitive)]
 pub enum IssuePriority {
     Urgent,
     High,
@@ -68,154 +93,164 @@ pub enum IssuePriority {
     Low,
 }
 
-impl IssuePriority {
-    pub fn from_str_loose(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
-            "urgent" => Some(Self::Urgent),
-            "high" => Some(Self::High),
-            "medium" | "med" => Some(Self::Medium),
-            "low" => Some(Self::Low),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Urgent => "Urgent",
-            Self::High => "High",
-            Self::Medium => "Medium",
-            Self::Low => "Low",
-        }
-    }
-}
-
-impl fmt::Display for IssuePriority {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Child issue metadata, fetched eagerly to support parent-filter logic.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChildIssue {
-    /// Child issue identifier (e.g. "ENG-124").
-    pub id: String,
-    /// Child issue's status (for determining if parent is still integrating).
-    pub status: Option<IssueStatus>,
-    /// Child issue's branch name (for git ancestry checks during wrap-up readiness).
-    pub branch_name: Option<String>,
-}
-
-/// Parent issue metadata, fetched eagerly to avoid extra API calls.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParentIssue {
-    /// Parent issue identifier (e.g. "ENG-100").
-    pub id: String,
-    /// Parent issue's title (for spawn preamble context).
-    pub title: String,
-    /// Parent issue's branch name, used as base branch for child worktrees.
-    pub branch_name: Option<String>,
-    /// Parent issue's status (transient, for spawn gating without extra API call).
-    pub status: Option<IssueStatus>,
-    /// Parent issue's body/description (for spawn preamble context).
-    pub body: Option<String>,
-}
-
 /// A parsed issue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Issue {
-    /// Relative path without `.md`, e.g. "features/smart-context-injection".
-    pub id: String,
-    /// Title from first `# Heading`.
-    pub title: String,
-    pub status: IssueStatus,
-    pub priority: Option<IssuePriority>,
-    /// Category inferred from parent directory or `**Category:**` field.
-    pub category: Option<String>,
-    /// Paths listed in `**Depends-On:**`.
-    pub depends_on: Vec<String>,
-    /// Full markdown body.
-    pub body: String,
-    /// Source file path.
-    pub source: String,
-    /// Child issues (for epics with sub-tasks).
-    pub children: Vec<ChildIssue>,
-    /// Labels/tags attached to this issue.
-    pub labels: Vec<String>,
-    /// Suggested branch name (e.g. from Linear's `branchName` field).
-    pub branch_name: Option<String>,
-    /// Parent issue reference with eagerly-fetched metadata.
-    pub parent: Option<ParentIssue>,
-}
-
-/// Filter criteria for listing issues.
-#[derive(Debug, Default)]
-pub struct IssueFilter {
-    pub status: Option<IssueStatus>,
-    pub priority: Option<IssuePriority>,
-    pub category: Option<String>,
-    /// Filter by labels (all must match).
-    pub labels: Vec<String>,
-}
-
-impl IssueFilter {
-    /// Apply this filter to a list of issues, returning only those that match.
-    pub fn apply(&self, issues: Vec<Issue>) -> Vec<Issue> {
-        issues.into_iter().filter(|i| i.matches(self)).collect()
-    }
+    id: IssueRef,
+    title: String,
+    status: IssueStatus,
+    priority: IssuePriority,
+    depends_on: Vec<IssueRef>,
+    body: String,
+    children: Vec<IssueRef>,
+    labels: Vec<String>,
+    branch: Branch,
+    parent: Option<IssueRef>,
 }
 
 impl Issue {
-    /// Produce the full agent context text for spawning a worker on this issue.
-    ///
-    /// Combines the title, body, and provider-specific completion instructions
-    /// into a single string ready for the spawn preamble.
-    pub fn to_spawn_context(&self, provider_kind: ProviderKind) -> String {
-        let completion_instructions = match provider_kind {
-            ProviderKind::Linear => "\n\nISSUE COMPLETION: This issue is tracked by Linear. \
-                 Status sync is handled automatically — no manual status update is needed."
-                .to_string(),
-        };
-        let parent_section = match &self.parent {
-            Some(parent) => {
-                let body = parent.body.as_deref().unwrap_or("");
-                format!(
-                    "PARENT ISSUE ({}): {}\n{}\n\n---\n\nSUB-TASK:\n",
-                    parent.id, parent.title, body
-                )
-            }
-            None => String::new(),
-        };
-        format!(
-            "{}{}\n\n{}{}",
-            parent_section, self.title, self.body, completion_instructions
-        )
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: impl Into<IssueRef>,
+        title: impl Into<String>,
+        status: IssueStatus,
+        priority: IssuePriority,
+        branch: Branch,
+        body: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            status,
+            priority,
+            depends_on: vec![],
+            body: body.into(),
+            children: vec![],
+            labels: vec![],
+            branch,
+            parent: None,
+        }
     }
 
-    /// Whether this issue is a parent with at least one child still in
-    /// Backlog or InProgress — meaning it should be excluded from normal
-    /// auto-spawn (the parent worker runs only at wrap-up).
-    pub fn has_active_children(&self) -> bool {
-        self.children.iter().any(|c| {
-            matches!(
-                c.status,
-                Some(IssueStatus::Backlog) | Some(IssueStatus::InProgress)
-            )
-        })
+    pub fn with_parent(mut self, parent: impl Into<IssueRef>) -> Self {
+        self.parent = Some(parent.into());
+        self
+    }
+
+    pub fn with_children(mut self, children: Vec<IssueRef>) -> Self {
+        self.children = children;
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<IssueRef>) -> Self {
+        self.depends_on = depends_on;
+        self
+    }
+
+    pub fn with_labels(mut self, labels: Vec<String>) -> Self {
+        self.labels = labels;
+        self
+    }
+
+    // -- Accessors --
+
+    pub fn id(&self) -> &IssueRef {
+        &self.id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn status(&self) -> &IssueStatus {
+        &self.status
+    }
+
+    pub fn priority(&self) -> &IssuePriority {
+        &self.priority
+    }
+
+    pub fn depends_on(&self) -> &[IssueRef] {
+        &self.depends_on
+    }
+
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+
+    pub fn children(&self) -> &[IssueRef] {
+        &self.children
+    }
+
+    pub fn labels(&self) -> &[String] {
+        &self.labels
+    }
+
+    pub fn branch(&self) -> &Branch {
+        &self.branch
+    }
+
+    pub fn parent(&self) -> Option<&IssueRef> {
+        self.parent.as_ref()
+    }
+
+    pub fn into_id(self) -> IssueRef {
+        self.id
+    }
+
+    // -- Predicates --
+
+    pub fn is_parent(&self) -> bool {
+        !self.children.is_empty()
+    }
+
+    pub fn is_child(&self) -> bool {
+        self.parent.is_some()
+    }
+
+    pub fn has_label(&self, label: &str) -> bool {
+        self.labels.iter().any(|l| l.eq_ignore_ascii_case(label))
     }
 
     /// Whether this issue is eligible for auto-spawn given the repo's
     /// `auto_spawn_labels` config.
-    ///
-    /// - Empty slice: all issues are eligible
-    /// - Non-empty slice: issue must carry all listed labels (case-insensitive)
     pub fn auto(&self, spawn_labels: &[String]) -> bool {
         if spawn_labels.is_empty() {
             return true;
         }
-        spawn_labels
-            .iter()
-            .all(|required| self.labels.iter().any(|l| l.eq_ignore_ascii_case(required)))
+        spawn_labels.iter().all(|required| self.has_label(required))
+    }
+
+    /// Build a [`Prompt`] from this issue, resolving the parent if present.
+    pub fn to_prompt(&self, template: &str, provider: &IssueProvider) -> Prompt {
+        let parent = self
+            .parent()
+            .and_then(|r| provider.get(r).ok().flatten());
+
+        let parent_section = match &parent {
+            Some(p) => format!(
+                "PARENT ISSUE ({}): {}\n{}\n\n---\n\nSUB-TASK:\n",
+                p.id(),
+                p.title(),
+                p.body()
+            ),
+            None => String::new(),
+        };
+
+        let task_context = format!(
+            "{}{}\n\n{}\n\nISSUE COMPLETION: This issue is tracked by Linear. \
+             Status sync is handled automatically — no manual status update is needed.",
+            parent_section,
+            self.title(),
+            self.body(),
+        );
+
+        Prompt::new(template)
+            .task(&task_context)
+            .var("issue_id", self.id().to_string())
+            .var("issue_title", self.title())
+            .var("issue_body", self.body())
+            .var_list("issue_labels", self.labels().to_vec())
     }
 
     /// Whether this issue matches the given filter.
@@ -226,21 +261,30 @@ impl Issue {
             }
         }
         if let Some(ref priority) = filter.priority {
-            if self.priority.as_ref() != Some(priority) {
-                return false;
-            }
-        }
-        if let Some(ref category) = filter.category {
-            if self.category.as_deref() != Some(category.as_str()) {
+            if &self.priority != priority {
                 return false;
             }
         }
         for label in &filter.labels {
-            if !self.labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
+            if !self.has_label(label) {
                 return false;
             }
         }
         true
+    }
+}
+
+/// Filter criteria for listing issues.
+#[derive(Debug, Default)]
+pub struct IssueFilter {
+    pub status: Option<IssueStatus>,
+    pub priority: Option<IssuePriority>,
+    pub labels: Vec<String>,
+}
+
+impl IssueFilter {
+    pub fn apply(&self, issues: Vec<Issue>) -> Vec<Issue> {
+        issues.into_iter().filter(|i| i.matches(self)).collect()
     }
 }
 
@@ -258,7 +302,8 @@ mod tests {
             IssueStatus::Complete,
             IssueStatus::Blocked,
         ] {
-            assert_eq!(IssueStatus::from_str_loose(status.as_str()), Some(status));
+            let s = status.to_string();
+            assert_eq!(s.parse::<IssueStatus>().ok(), Some(status));
         }
     }
 
@@ -275,14 +320,12 @@ mod tests {
             id: "test".into(),
             title: "Test".into(),
             status: IssueStatus::Planned,
-            priority: Some(IssuePriority::High),
-            category: Some("features".into()),
+            priority: IssuePriority::High,
             depends_on: vec![],
             body: String::new(),
-            source: String::new(),
             children: vec![],
             labels: vec![],
-            branch_name: None,
+            branch: Branch::new("test-branch"),
             parent: None,
         };
 
@@ -303,14 +346,12 @@ mod tests {
             id: "test".into(),
             title: "Test".into(),
             status: IssueStatus::Planned,
-            priority: None,
-            category: None,
+            priority: IssuePriority::Medium,
             depends_on: vec![],
             body: String::new(),
-            source: String::new(),
             children: vec![],
             labels: vec!["backend".into(), "Auth".into()],
-            branch_name: None,
+            branch: Branch::new("test-branch"),
             parent: None,
         };
 
@@ -348,14 +389,12 @@ mod tests {
             id: "test".into(),
             title: "Test".into(),
             status: IssueStatus::Planned,
-            priority: None,
-            category: None,
+            priority: IssuePriority::Medium,
             depends_on: vec![],
             body: String::new(),
-            source: String::new(),
             children: vec![],
             labels: vec!["backend".into(), "sprint-1".into()],
-            branch_name: None,
+            branch: Branch::new("test-branch"),
             parent: None,
         };
 
@@ -379,41 +418,31 @@ mod tests {
     }
 
     #[test]
-    fn from_str_loose_triage() {
+    fn parse_case_insensitive() {
         assert_eq!(
-            IssueStatus::from_str_loose("triage"),
+            "triage".parse::<IssueStatus>().ok(),
             Some(IssueStatus::Triage)
         );
         assert_eq!(
-            IssueStatus::from_str_loose("Triage"),
+            "Triage".parse::<IssueStatus>().ok(),
             Some(IssueStatus::Triage)
         );
         assert_eq!(
-            IssueStatus::from_str_loose("TRIAGE"),
+            "TRIAGE".parse::<IssueStatus>().ok(),
             Some(IssueStatus::Triage)
         );
-    }
-
-    #[test]
-    fn from_str_loose_backlog() {
         assert_eq!(
-            IssueStatus::from_str_loose("backlog"),
+            "backlog".parse::<IssueStatus>().ok(),
             Some(IssueStatus::Backlog)
         );
         assert_eq!(
-            IssueStatus::from_str_loose("Backlog"),
+            "Backlog".parse::<IssueStatus>().ok(),
             Some(IssueStatus::Backlog)
         );
         assert_eq!(
-            IssueStatus::from_str_loose("BACKLOG"),
+            "BACKLOG".parse::<IssueStatus>().ok(),
             Some(IssueStatus::Backlog)
         );
-    }
-
-    #[test]
-    fn triage_and_backlog_symbols() {
-        assert_eq!(IssueStatus::Triage.symbol(), "[?]");
-        assert_eq!(IssueStatus::Backlog.symbol(), "[.]");
     }
 
     #[test]
@@ -422,42 +451,36 @@ mod tests {
             id: "triage-1".into(),
             title: "Triage issue".into(),
             status: IssueStatus::Triage,
-            priority: None,
-            category: None,
+            priority: IssuePriority::Medium,
             depends_on: vec![],
             body: String::new(),
-            source: String::new(),
             children: vec![],
             labels: vec![],
-            branch_name: None,
+            branch: Branch::new("test-branch"),
             parent: None,
         };
         let backlog_issue = Issue {
             id: "backlog-1".into(),
             title: "Backlog issue".into(),
             status: IssueStatus::Backlog,
-            priority: None,
-            category: None,
+            priority: IssuePriority::Medium,
             depends_on: vec![],
             body: String::new(),
-            source: String::new(),
             children: vec![],
             labels: vec![],
-            branch_name: None,
+            branch: Branch::new("test-branch"),
             parent: None,
         };
         let planned_issue = Issue {
             id: "planned-1".into(),
             title: "Planned issue".into(),
             status: IssueStatus::Planned,
-            priority: None,
-            category: None,
+            priority: IssuePriority::Medium,
             depends_on: vec![],
             body: String::new(),
-            source: String::new(),
             children: vec![],
             labels: vec![],
-            branch_name: None,
+            branch: Branch::new("test-branch"),
             parent: None,
         };
 
@@ -470,182 +493,5 @@ mod tests {
         assert!(!triage_issue.matches(&planned_filter));
         assert!(!backlog_issue.matches(&planned_filter));
         assert!(planned_issue.matches(&planned_filter));
-    }
-
-    #[test]
-    fn to_spawn_context_with_parent() {
-        let issue = Issue {
-            id: "ENG-124".into(),
-            title: "Implement subtask".into(),
-            status: IssueStatus::Planned,
-            priority: None,
-            category: None,
-            depends_on: vec![],
-            body: "Subtask details".into(),
-            source: String::new(),
-            children: vec![],
-            labels: vec![],
-            branch_name: None,
-            parent: Some(ParentIssue {
-                id: "ENG-100".into(),
-                title: "Epic feature".into(),
-                branch_name: None,
-                status: None,
-                body: Some("Epic description".into()),
-            }),
-        };
-
-        let context = issue.to_spawn_context(ProviderKind::Linear);
-        assert!(context.contains("PARENT ISSUE (ENG-100): Epic feature"));
-        assert!(context.contains("Epic description"));
-        assert!(context.contains("SUB-TASK:"));
-        assert!(context.contains("Implement subtask"));
-        assert!(context.contains("Subtask details"));
-        // Parent section should come before the sub-task title
-        let parent_pos = context.find("PARENT ISSUE").unwrap();
-        let title_pos = context.find("Implement subtask").unwrap();
-        assert!(parent_pos < title_pos);
-    }
-
-    #[test]
-    fn to_spawn_context_with_parent_no_body() {
-        let issue = Issue {
-            id: "ENG-125".into(),
-            title: "Another subtask".into(),
-            status: IssueStatus::Planned,
-            priority: None,
-            category: None,
-            depends_on: vec![],
-            body: "Details".into(),
-            source: String::new(),
-            children: vec![],
-            labels: vec![],
-            branch_name: None,
-            parent: Some(ParentIssue {
-                id: "ENG-100".into(),
-                title: "Epic feature".into(),
-                branch_name: None,
-                status: None,
-                body: None,
-            }),
-        };
-
-        let context = issue.to_spawn_context(ProviderKind::Linear);
-        assert!(context.contains("PARENT ISSUE (ENG-100): Epic feature"));
-        assert!(context.contains("SUB-TASK:"));
-        assert!(context.contains("Another subtask"));
-    }
-
-    #[test]
-    fn to_spawn_context_linear_provider() {
-        let issue = Issue {
-            id: "ENG-123".into(),
-            title: "Fix the bug".into(),
-            status: IssueStatus::Planned,
-            priority: None,
-            category: None,
-            depends_on: vec![],
-            body: "Bug details".into(),
-            source: String::new(),
-            children: vec![],
-            labels: vec![],
-            branch_name: None,
-            parent: None,
-        };
-
-        let context = issue.to_spawn_context(ProviderKind::Linear);
-        assert!(context.contains("Fix the bug"));
-        assert!(context.contains("Bug details"));
-        assert!(context.contains("Linear"));
-        assert!(!context.contains("file provider"));
-    }
-
-    fn make_issue(children: Vec<ChildIssue>) -> Issue {
-        Issue {
-            id: "EPIC-1".into(),
-            title: "Epic".into(),
-            status: IssueStatus::Planned,
-            priority: None,
-            category: None,
-            depends_on: vec![],
-            body: String::new(),
-            source: String::new(),
-            children,
-            labels: vec![],
-            branch_name: None,
-            parent: None,
-        }
-    }
-
-    #[test]
-    fn has_active_children_no_children() {
-        let issue = make_issue(vec![]);
-        assert!(!issue.has_active_children());
-    }
-
-    #[test]
-    fn has_active_children_backlog_child() {
-        let issue = make_issue(vec![ChildIssue {
-            id: "T-1".into(),
-            status: Some(IssueStatus::Backlog),
-            branch_name: None,
-        }]);
-        assert!(issue.has_active_children());
-    }
-
-    #[test]
-    fn has_active_children_in_progress_child() {
-        let issue = make_issue(vec![ChildIssue {
-            id: "T-1".into(),
-            status: Some(IssueStatus::InProgress),
-            branch_name: None,
-        }]);
-        assert!(issue.has_active_children());
-    }
-
-    #[test]
-    fn has_active_children_all_complete() {
-        let issue = make_issue(vec![
-            ChildIssue {
-                id: "T-1".into(),
-                status: Some(IssueStatus::Complete),
-                branch_name: None,
-            },
-            ChildIssue {
-                id: "T-2".into(),
-                status: Some(IssueStatus::Complete),
-                branch_name: None,
-            },
-        ]);
-        assert!(!issue.has_active_children());
-    }
-
-    #[test]
-    fn has_active_children_mixed_statuses() {
-        let issue = make_issue(vec![
-            ChildIssue {
-                id: "T-1".into(),
-                status: Some(IssueStatus::Complete),
-                branch_name: None,
-            },
-            ChildIssue {
-                id: "T-2".into(),
-                status: Some(IssueStatus::Backlog),
-                branch_name: None,
-            },
-        ]);
-        assert!(issue.has_active_children());
-    }
-
-    #[test]
-    fn has_active_children_planned_child_not_excluded() {
-        // Planned children don't count as "active" for this filter —
-        // only Backlog and InProgress trigger exclusion.
-        let issue = make_issue(vec![ChildIssue {
-            id: "T-1".into(),
-            status: Some(IssueStatus::Planned),
-            branch_name: None,
-        }]);
-        assert!(!issue.has_active_children());
     }
 }

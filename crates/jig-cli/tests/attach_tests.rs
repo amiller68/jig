@@ -19,7 +19,7 @@ fn test_attach_outside_repo_requires_name() {
     cmd.args(["attach"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Name is required"));
+        .stderr(predicate::str::contains("name is required"));
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn test_attach_outside_repo_nonexistent_worktree() {
     cmd.args(["attach", "nonexistent-worker"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("does not exist"));
+        .stderr(predicate::str::contains("not found"));
 }
 
 #[test]

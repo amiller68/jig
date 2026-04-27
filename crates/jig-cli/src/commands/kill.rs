@@ -2,7 +2,7 @@
 
 use clap::Args;
 
-use jig_core::spawn;
+use jig_core::worker::Worker;
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -32,24 +32,29 @@ impl Op for Kill {
     type Output = NoOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
 
         if self.all {
-            let tasks = spawn::list_tasks(repo)?;
-            if tasks.is_empty() {
+            let workers = Worker::discover(cfg);
+            if workers.is_empty() {
                 eprintln!("{}", ui::dim("No workers to kill."));
             }
-            for task in &tasks {
-                let _ = spawn::kill_window(repo, &task.name);
-                spawn::unregister(repo, &task.name)?;
-                ui::success(&format!("Killed '{}'", ui::highlight(&task.name)));
+            for worker in &workers {
+                let _ = worker.kill();
+                worker.unregister()?;
+                ui::success(&format!("Killed '{}'", ui::highlight(worker.name())));
             }
             return Ok(NoOutput);
         }
 
         let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
-        spawn::kill_window(repo, name)?;
-        spawn::unregister(repo, name)?;
+        let workers = Worker::discover(cfg);
+        let worker = workers
+            .iter()
+            .find(|w| w.name() == name)
+            .ok_or_else(|| jig_core::Error::Custom(format!("worker '{}' not found", name)))?;
+        let _ = worker.kill();
+        worker.unregister()?;
         ui::success(&format!("Killed '{}'", ui::highlight(name)));
         Ok(NoOutput)
     }
@@ -57,12 +62,12 @@ impl Op for Kill {
     fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
         if self.all {
             let mut killed = 0;
-            for repo in &ctx.repos {
-                let tasks = spawn::list_tasks(repo)?;
-                for task in &tasks {
-                    let _ = spawn::kill_window(repo, &task.name);
-                    spawn::unregister(repo, &task.name)?;
-                    ui::success(&format!("Killed '{}'", ui::highlight(&task.name)));
+            for cfg in &ctx.configs {
+                let workers = Worker::discover(cfg);
+                for worker in &workers {
+                    let _ = worker.kill();
+                    worker.unregister()?;
+                    ui::success(&format!("Killed '{}'", ui::highlight(worker.name())));
                     killed += 1;
                 }
             }
@@ -73,9 +78,14 @@ impl Op for Kill {
         }
 
         let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
-        let repo = ctx.repo_for_worktree(name)?;
-        spawn::kill_window(repo, name)?;
-        spawn::unregister(repo, name)?;
+        let cfg = ctx.config_for_worktree(name)?;
+        let workers = Worker::discover(cfg);
+        let worker = workers
+            .iter()
+            .find(|w| w.name() == name)
+            .ok_or_else(|| jig_core::Error::Custom(format!("worker '{}' not found", name)))?;
+        let _ = worker.kill();
+        worker.unregister()?;
         ui::success(&format!("Killed '{}'", ui::highlight(name)));
         Ok(NoOutput)
     }

@@ -103,7 +103,7 @@ fn validate_valid_breaking_commit() {
 }
 
 #[test]
-fn validate_invalid_type() {
+fn validate_unknown_type() {
     let repo = TestRepo::new();
     repo.commit("invalid: something");
 
@@ -111,7 +111,7 @@ fn validate_invalid_type() {
         .args(["commit", "validate"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid type 'invalid'"));
+        .stderr(predicate::str::contains("unknown commit type 'invalid'"));
 }
 
 #[test]
@@ -172,15 +172,15 @@ fn validate_multiple_errors() {
     let repo = TestRepo::new();
     repo.commit("init");
 
+    // Use a known type so parsing succeeds, then validation catches multiple issues
     let long_subject = "A".to_string() + &"a".repeat(80);
-    let msg = format!("invalid: {}", long_subject);
+    let msg = format!("feat: {}", long_subject);
 
     repo.jig()
         .args(["commit", "validate", "--stdin"])
         .write_stdin(msg)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid type"))
         .stderr(predicate::str::contains("subject too long"))
         .stderr(predicate::str::contains(
             "subject should start with lowercase",

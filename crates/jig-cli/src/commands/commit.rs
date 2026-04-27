@@ -4,8 +4,8 @@ use std::io::{self, Read as _};
 
 use clap::{Args, Subcommand};
 
-use jig_core::commits;
 use jig_core::config::JigToml;
+use jig_core::git::conventional::ValidationConfig;
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -82,8 +82,8 @@ fn run_validate(
     } else if let Some(path) = file {
         std::fs::read_to_string(path)?
     } else {
-        let repo = ctx.repo()?;
-        let git_repo = git2::Repository::open(&repo.repo_root)?;
+        let cfg = ctx.config()?;
+        let git_repo = git2::Repository::open(&cfg.repo_root)?;
         let obj = git_repo.revparse_single(rev)?;
         let commit = obj
             .peel_to_commit()
@@ -94,14 +94,14 @@ fn run_validate(
             .to_string()
     };
 
-    let config = if let Some(repo) = ctx.repo.as_ref() {
-        let jig_toml = JigToml::load(&repo.repo_root)?.unwrap_or_default();
+    let config = if let Some(cfg) = ctx.config.as_ref() {
+        let jig_toml = JigToml::load(&cfg.repo_root)?.unwrap_or_default();
         jig_toml.commits.to_validation_config()
     } else {
-        commits::ValidationConfig::default()
+        ValidationConfig::default()
     };
 
-    match commits::parse_and_validate(&message, &config) {
+    match config.parse_and_validate(&message) {
         Ok((msg, errors)) => {
             if errors.is_empty() {
                 ui::success(&format!(

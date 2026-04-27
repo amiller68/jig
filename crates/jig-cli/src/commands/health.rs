@@ -2,7 +2,7 @@
 
 use clap::Args;
 
-use jig_core::config::{Config, JigToml};
+use jig_core::config::JigToml;
 use jig_core::terminal;
 
 use crate::op::{NoOutput, Op, RepoCtx};
@@ -59,11 +59,11 @@ impl Op for Health {
 
         // Section 2: Repository — use Option to handle non-repo gracefully
         eprintln!();
-        let repo = ctx.repo.as_ref();
+        let cfg = ctx.config.as_ref();
 
-        match repo {
-            Some(repo) => {
-                let repo_name = repo
+        match cfg {
+            Some(cfg) => {
+                let repo_name = cfg
                     .repo_root
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -71,7 +71,7 @@ impl Op for Health {
                 ui::header(&format!("Repository: {}", repo_name));
 
                 // jig.toml
-                if JigToml::exists(&repo.repo_root) {
+                if JigToml::exists(&cfg.repo_root) {
                     check_ok("jig.toml");
                 } else {
                     check_fail("jig.toml", Some("(not found)"));
@@ -79,12 +79,11 @@ impl Op for Health {
                 }
 
                 // Base branch
-                let config = Config::load()?;
-                let branch = config.get_base_branch(&repo.repo_root);
+                let branch = cfg.base_branch();
                 eprintln!("  {} Base branch: {}", ui::SYM_OK, branch);
 
                 // Jig worktrees directory
-                if repo.worktrees_path.is_dir() {
+                if cfg.worktrees_path.is_dir() {
                     check_ok(&format!("{} directory", jig_core::config::JIG_DIR));
                 } else {
                     check_fail(
@@ -99,7 +98,7 @@ impl Op for Health {
                 ui::header("Agent: claude-code");
 
                 // CLAUDE.md
-                if repo.repo_root.join("CLAUDE.md").is_file() {
+                if cfg.repo_root.join("CLAUDE.md").is_file() {
                     check_ok("CLAUDE.md");
                 } else {
                     check_fail("CLAUDE.md", Some("(not found)"));
@@ -107,7 +106,7 @@ impl Op for Health {
                 }
 
                 // .claude/settings.json
-                if repo
+                if cfg
                     .repo_root
                     .join(".claude")
                     .join("settings.json")
@@ -121,7 +120,7 @@ impl Op for Health {
 
                 // Skills
                 eprintln!("  Skills (.claude/skills/):");
-                let skills_dir = repo.repo_root.join(".claude").join("skills");
+                let skills_dir = cfg.repo_root.join(".claude").join("skills");
                 for skill in EXPECTED_SKILLS {
                     let skill_path = skills_dir.join(skill).join("SKILL.md");
                     if skill_path.is_file() {

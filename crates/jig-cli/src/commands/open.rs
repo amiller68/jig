@@ -4,7 +4,7 @@ use clap::Args;
 use std::path::PathBuf;
 
 use jig_core::git::Repo;
-use jig_core::{terminal, Error, RepoContext, RepoRegistry};
+use jig_core::{terminal, Config, Error, RepoRegistry};
 
 use crate::op::{Op, RepoCtx};
 use crate::ui;
@@ -53,36 +53,36 @@ impl Op for Open {
     type Output = OpenOutput;
 
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        match ctx.repo() {
-            Ok(repo) => self.open_in_repo(repo),
+        match ctx.config() {
+            Ok(cfg) => self.open_in_cfg(cfg),
             Err(_) => {
                 // Auto-detect: outside a git repo, fall back to global discovery
                 let registry = RepoRegistry::load().unwrap_or_default();
-                let repos: Vec<_> = registry
+                let configs: Vec<_> = registry
                     .repos()
                     .iter()
                     .filter(|e| e.path.exists())
-                    .filter_map(|e| RepoContext::from_path(&e.path).ok())
+                    .filter_map(|e| Config::from_path(&e.path).ok())
                     .collect();
-                let repo = if let Some(name) = self.name.as_deref() {
-                    repos
+                let cfg = if let Some(name) = self.name.as_deref() {
+                    configs
                         .iter()
-                        .find(|r| r.worktrees_path.join(name).exists())
+                        .find(|c| c.worktrees_path.join(name).exists())
                         .ok_or(Error::WorktreeNotFound(name.to_string()))?
                 } else {
-                    repos.first().ok_or(Error::NotInGitRepo)?
+                    configs.first().ok_or(Error::NotInGitRepo)?
                 };
-                self.open_in_repo(repo)
+                self.open_in_cfg(cfg)
             }
         }
     }
 }
 
 impl Open {
-    fn open_in_repo(&self, repo: &RepoContext) -> Result<OpenOutput, OpenError> {
+    fn open_in_cfg(&self, cfg: &Config) -> Result<OpenOutput, OpenError> {
         if self.all {
             // Open all worktrees in new tabs
-            let git_repo = Repo::open(&repo.repo_root)?;
+            let git_repo = Repo::open(&cfg.repo_root)?;
             let worktrees = git_repo.list_worktrees()?;
 
             if worktrees.is_empty() {
@@ -105,7 +105,7 @@ impl Open {
         } else {
             // Open specific worktree
             let name = self.name.as_deref().ok_or(Error::NameRequired)?;
-            let worktree_path = repo.worktrees_path.join(name);
+            let worktree_path = cfg.worktrees_path.join(name);
 
             if !worktree_path.exists() {
                 return Err(Error::WorktreeNotFound(name.to_string()).into());

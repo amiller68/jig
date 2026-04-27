@@ -72,8 +72,8 @@ impl Op for Hooks {
     fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         match &self.subcommand {
             HooksCommands::Init { force } => {
-                let repo = ctx.repo()?;
-                let repo_path = &repo.repo_root;
+                let cfg = ctx.config()?;
+                let repo_path = &cfg.repo_root;
 
                 // Install git hooks
                 eprintln!("Installing git hooks...");
@@ -116,24 +116,21 @@ impl Op for Hooks {
 
                 // Install agent-specific hooks based on config
                 let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
-                let agent = jig_core::agents::Agent::from_name(&jig_toml.agent.agent_type);
-
-                if let Some(agent) = agent {
-                    if agent.kind() == jig_core::agents::AgentKind::Claude {
-                        eprintln!();
-                        ui::progress("Installing Claude Code hooks...");
-                        match jig_core::hooks::install_claude_hooks() {
-                            Ok(result) => {
-                                for name in &result.installed {
-                                    eprintln!("  {} {}: installed", ui::SYM_OK, name);
-                                }
-                                for name in &result.skipped {
-                                    eprintln!("  {} {}: up to date", ui::SYM_OK, name);
-                                }
+                if let Some(agent) = jig_core::agents::Agent::from_name(&jig_toml.agent.agent_type)
+                {
+                    eprintln!();
+                    ui::progress(&format!("Installing {} agent hooks...", agent.name()));
+                    match agent.install_hooks() {
+                        Ok(result) => {
+                            for name in &result.installed {
+                                eprintln!("  {} {}: installed", ui::SYM_OK, name);
                             }
-                            Err(e) => {
-                                ui::warning(&format!("Claude hooks: {}", e));
+                            for name in &result.skipped {
+                                eprintln!("  {} {}: up to date", ui::SYM_OK, name);
                             }
+                        }
+                        Err(e) => {
+                            ui::warning(&format!("Agent hooks: {}", e));
                         }
                     }
                 }
@@ -144,8 +141,8 @@ impl Op for Hooks {
                 Ok(NoOutput)
             }
             HooksCommands::Uninstall { hook } => {
-                let repo = ctx.repo()?;
-                let repo_path = &repo.repo_root;
+                let cfg = ctx.config()?;
+                let repo_path = &cfg.repo_root;
 
                 eprintln!("Uninstalling jig hooks...");
                 eprintln!();
@@ -179,23 +176,23 @@ impl Op for Hooks {
                 Ok(NoOutput)
             }
             HooksCommands::PostCommit { .. } => {
-                let repo = ctx.repo()?;
-                jig_core::hooks::handle_post_commit(&repo.repo_root)?;
+                let cfg = ctx.config()?;
+                jig_core::hooks::handle_post_commit(&cfg.repo_root)?;
                 Ok(NoOutput)
             }
             HooksCommands::PostMerge { .. } => {
-                let repo = ctx.repo()?;
-                jig_core::hooks::handle_post_merge(&repo.repo_root)?;
+                let cfg = ctx.config()?;
+                jig_core::hooks::handle_post_merge(&cfg.repo_root)?;
                 Ok(NoOutput)
             }
             HooksCommands::CommitMsg { file, .. } => {
-                let repo = ctx.repo()?;
-                jig_core::hooks::handle_commit_msg(&repo.repo_root, file)?;
+                let cfg = ctx.config()?;
+                jig_core::hooks::handle_commit_msg(&cfg.repo_root, file)?;
                 Ok(NoOutput)
             }
             HooksCommands::PreCommit { .. } => {
-                let repo = ctx.repo()?;
-                jig_core::hooks::handle_pre_commit(&repo.repo_root)?;
+                let cfg = ctx.config()?;
+                jig_core::hooks::handle_pre_commit(&cfg.repo_root)?;
                 Ok(NoOutput)
             }
         }

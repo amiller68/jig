@@ -69,11 +69,27 @@ impl Worktree {
         Ok(Self { repo })
     }
 
-    /// Create a git worktree on disk. Excludes, hooks, file copying,
-    /// and other post-create steps are the caller's responsibility.
+    /// Create a git worktree on disk with full setup: git excludes,
+    /// file copying, and on-create hook execution.
     pub fn create(repo: &Repo, branch: &Branch, base: &Branch) -> Result<Self> {
+        crate::git::ensure_excluded(&repo.common_dir(), crate::config::JIG_DIR)?;
+
+        let repo_root = repo.clone_path();
         let path = repo.create_worktree(branch, base)?;
-        Self::open(&path)
+        let wt = Self::open(&path)?;
+        let wt_path = wt.path();
+
+        let copy_files = crate::config::get_copy_files(&repo_root)
+            .map_err(|e| GitError::Io(std::io::Error::other(e)))?;
+        if !copy_files.is_empty() {
+            crate::config::copy_worktree_files(&repo_root, &wt_path, &copy_files)
+                .map_err(|e| GitError::Io(std::io::Error::other(e)))?;
+        }
+
+        crate::config::run_on_create_hook_for_repo(&repo_root, &wt_path)
+            .map_err(|e| GitError::Io(std::io::Error::other(e)))?;
+
+        Ok(wt)
     }
 
     pub fn as_ref(&self) -> WorktreeRef {
@@ -97,6 +113,10 @@ impl Worktree {
 
     pub fn repo_root(&self) -> PathBuf {
         self.repo.clone_path()
+    }
+
+    pub fn head_sha(&self) -> Result<String> {
+        Ok(self.repo.head_oid()?.to_string())
     }
 
     pub fn branch(&self) -> Result<Branch> {

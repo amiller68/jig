@@ -25,7 +25,7 @@ impl fmt::Display for ProviderKind {
 }
 
 /// Trait for issue backends (file-based, Linear, GitHub, etc.).
-pub(crate) trait IssueBackend {
+pub trait IssueBackend {
     fn name(&self) -> &str;
     fn kind(&self) -> ProviderKind;
     fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>>;
@@ -39,7 +39,7 @@ pub struct IssueProvider {
 }
 
 impl IssueProvider {
-    pub(crate) fn new(inner: Box<dyn IssueBackend>) -> Self {
+    pub fn new(inner: Box<dyn IssueBackend>) -> Self {
         Self { inner }
     }
 
@@ -86,8 +86,8 @@ impl IssueProvider {
 
     /// Check whether all dependencies of an issue are satisfied (Complete).
     pub fn is_spawnable_with_deps(&self, issue: &Issue) -> bool {
-        issue.depends_on.iter().all(|dep_id| {
-            matches!(self.get(dep_id), Ok(Some(dep)) if dep.status == IssueStatus::Complete)
+        issue.depends_on().iter().all(|dep_id| {
+            matches!(self.get(dep_id), Ok(Some(dep)) if *dep.status() == IssueStatus::Complete)
         })
     }
 }

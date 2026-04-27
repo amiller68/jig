@@ -1,8 +1,12 @@
 //! Config command
 
+use std::path::Path;
+
 use clap::{Args, Subcommand};
 
-use jig_core::config::{self, ConfigDisplay};
+use jig_core::config::{
+    GlobalConfig, JigToml, LinearIssuesConfig, ResolvedNudgeConfig, DEFAULT_BASE_BRANCH,
+};
 use jig_core::Error as CoreError;
 
 use crate::op::{GlobalCtx, Op, RepoCtx};
@@ -79,7 +83,7 @@ impl Op for Config {
 
         match &self.subcommand {
             None | Some(ConfigCommands::Show) => {
-                if ctx.repo.is_some() {
+                if ctx.config.is_some() {
                     show_config(ctx)
                 } else {
                     show_global_config()
@@ -102,7 +106,7 @@ impl Op for Config {
         }
 
         // In global mode, create a repo-less context for subcommands that need it
-        let repo_ctx = RepoCtx { repo: None };
+        let repo_ctx = RepoCtx { config: None };
 
         match &self.subcommand {
             None | Some(ConfigCommands::Show) => show_global_config(),
@@ -119,7 +123,7 @@ impl Op for Config {
 }
 
 fn show_global_config() -> Result<ConfigOutput, ConfigError> {
-    let global = jig_core::global::config::GlobalConfig::load()?;
+    let global = jig_core::GlobalConfig::load()?;
 
     /// Format a source attribution tag.
     fn src(s: &str) -> String {
@@ -129,9 +133,9 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
     // -- Base branch --
     ui::header("Configuration");
     eprintln!();
-    match config::get_global_base_branch()? {
+    match &global.default_base_branch {
         Some(branch) => {
-            eprintln!("  {} {}", ui::bold("Base branch:"), ui::highlight(&branch));
+            eprintln!("  {} {}", ui::bold("Base branch:"), ui::highlight(branch));
         }
         None => {
             eprintln!("  {} {}", ui::bold("Base branch:"), ui::dim("(not set)"));
@@ -231,8 +235,8 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
 }
 
 fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
-    let repo = ctx.repo()?;
-    let display = ConfigDisplay::load(&repo.repo_root)?;
+    let cfg = ctx.config()?;
+    let display = ConfigDisplay::load(&cfg.repo_root)?;
 
     /// Format a source attribution tag.
     fn src(s: &str) -> String {
@@ -249,9 +253,6 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     );
     if let Some(ref toml) = display.toml_base {
         eprintln!("    {} {}", src(&display.worktree_source), toml);
-    }
-    if let Some(ref repo_base) = display.repo_base {
-        eprintln!("    {} {}", src("global config"), repo_base);
     }
     if let Some(ref global) = display.global_base {
         eprintln!("    {} {}", src("global default"), global);
@@ -419,18 +420,7 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
 }
 
 fn show_list() -> Result<ConfigOutput, ConfigError> {
-    let entries = config::list_all_config()?;
-
-    if entries.is_empty() {
-        eprintln!("No configuration set");
-        return Ok(ConfigOutput(None));
-    }
-
-    for (category, key, value) in entries {
-        eprintln!("{} {} = {}", ui::dim(&category), ui::highlight(&key), value);
-    }
-
-    Ok(ConfigOutput(None))
+    show_global_config()
 }
 
 fn handle_base(
@@ -441,11 +431,13 @@ fn handle_base(
 ) -> Result<ConfigOutput, ConfigError> {
     if unset {
         if global {
-            config::unset_global_base_branch()?;
+            let mut global_cfg = jig_core::GlobalConfig::load()?;
+            global_cfg.default_base_branch = None;
+            global_cfg.save()?;
             ui::success("Unset global base branch");
         } else {
-            let repo = ctx.repo()?;
-            config::unset_repo_base_branch(&repo.repo_root)?;
+            let cfg = ctx.config()?;
+            update_local_toml(&cfg.repo_root, "worktree", "base", None)?;
             ui::success("Unset repo base branch");
         }
         return Ok(ConfigOutput(None));
@@ -454,19 +446,21 @@ fn handle_base(
     match branch {
         Some(b) => {
             if global {
-                config::set_global_base_branch(b)?;
+                let mut global_cfg = jig_core::GlobalConfig::load()?;
+                global_cfg.default_base_branch = Some(b.to_string());
+                global_cfg.save()?;
                 ui::success(&format!("Set global base branch to '{}'", ui::highlight(b)));
             } else {
-                let repo = ctx.repo()?;
-                config::set_repo_base_branch(&repo.repo_root, b)?;
+                let cfg = ctx.config()?;
+                update_local_toml(&cfg.repo_root, "worktree", "base", Some(b))?;
                 ui::success(&format!("Set repo base branch to '{}'", ui::highlight(b)));
             }
             Ok(ConfigOutput(None))
         }
         None => {
-            // Get/show current value
             if global {
-                match config::get_global_base_branch()? {
+                let global_cfg = jig_core::GlobalConfig::load()?;
+                match global_cfg.default_base_branch {
                     Some(b) => Ok(ConfigOutput(Some(b))),
                     None => {
                         eprintln!("No global default set");
@@ -474,14 +468,8 @@ fn handle_base(
                     }
                 }
             } else {
-                let repo = ctx.repo()?;
-                match config::get_repo_base_branch(&repo.repo_root)? {
-                    Some(b) => Ok(ConfigOutput(Some(b))),
-                    None => {
-                        eprintln!("No config set for this repo");
-                        Ok(ConfigOutput(None))
-                    }
-                }
+                let cfg = ctx.config()?;
+                Ok(ConfigOutput(Some(cfg.base_branch())))
             }
         }
     }
@@ -492,26 +480,228 @@ fn handle_on_create(
     command: Option<&str>,
     unset: bool,
 ) -> Result<ConfigOutput, ConfigError> {
-    let repo = ctx.repo()?;
+    let cfg = ctx.config()?;
 
     if unset {
-        config::unset_on_create_hook(&repo.repo_root)?;
+        update_local_toml(&cfg.repo_root, "worktree", "on_create", None)?;
         ui::success("Unset on-create hook");
         return Ok(ConfigOutput(None));
     }
 
     match command {
         Some(cmd) => {
-            config::set_on_create_hook(&repo.repo_root, cmd)?;
+            update_local_toml(&cfg.repo_root, "worktree", "on_create", Some(cmd))?;
             ui::success(&format!("Set on-create hook to '{}'", ui::highlight(cmd)));
             Ok(ConfigOutput(None))
         }
-        None => match config::get_on_create_hook(&repo.repo_root)? {
-            Some(cmd) => Ok(ConfigOutput(Some(cmd))),
-            None => {
-                eprintln!("No on-create hook set");
-                Ok(ConfigOutput(None))
+        None => {
+            let on_create = cfg.repo.worktree.on_create.as_deref();
+            match on_create {
+                Some(cmd) => Ok(ConfigOutput(Some(cmd.to_string()))),
+                None => {
+                    eprintln!("No on-create hook set");
+                    Ok(ConfigOutput(None))
+                }
             }
-        },
+        }
     }
+}
+
+struct ConfigDisplay {
+    effective_base: String,
+    toml_base: Option<String>,
+    worktree_source: String,
+    global_base: Option<String>,
+    effective_on_create: Option<String>,
+    toml_on_create: Option<String>,
+    agent_type: String,
+    agent_source: String,
+    issues_provider: jig_core::issues::ProviderKind,
+    issues_directory: String,
+    issues_source: String,
+    linear: Option<LinearIssuesConfig>,
+    auto_spawn_labels: Option<Vec<String>>,
+    max_concurrent_workers: usize,
+    max_concurrent_workers_source: String,
+    auto_spawn_interval: u64,
+    auto_spawn_interval_source: String,
+    silence_threshold_seconds: u64,
+    silence_threshold_source: String,
+    max_nudges: u32,
+    max_nudges_source: String,
+    nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)>,
+    has_local_overlay: bool,
+}
+
+impl ConfigDisplay {
+    fn load(repo_path: &Path) -> jig_core::Result<Self> {
+        let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
+        let global_config = GlobalConfig::load().unwrap_or_default();
+        let has_local_overlay = jig_toml.has_local_overlay;
+
+        let worktree_source = jig_toml.source_label("worktree");
+        let agent_source = jig_toml.source_label("agent");
+        let issues_source = jig_toml.source_label("issues");
+
+        let effective_base = jig_toml
+            .worktree
+            .base
+            .clone()
+            .or_else(|| global_config.default_base_branch.clone())
+            .unwrap_or_else(|| DEFAULT_BASE_BRANCH.to_string());
+
+        let effective_on_create = jig_toml.worktree.on_create.clone();
+
+        let global_spawn = &global_config.spawn;
+        let spawn = &jig_toml.spawn;
+
+        let spawn_source = jig_toml.source_label("spawn");
+        let (max_concurrent_workers, max_concurrent_workers_source) =
+            if spawn.max_concurrent_workers.is_some() {
+                (
+                    spawn.resolve_max_concurrent_workers(global_spawn),
+                    spawn_source.clone(),
+                )
+            } else {
+                (
+                    global_spawn.max_concurrent_workers,
+                    "global config".to_string(),
+                )
+            };
+
+        let (auto_spawn_interval, auto_spawn_interval_source) =
+            if spawn.auto_spawn_interval.is_some() {
+                (
+                    spawn.resolve_auto_spawn_interval(global_spawn),
+                    spawn_source,
+                )
+            } else {
+                (
+                    global_spawn.auto_spawn_interval,
+                    "global config".to_string(),
+                )
+            };
+
+        let health = &jig_toml.health;
+        let global_health = &global_config.health;
+        let health_source = jig_toml.source_label("health");
+
+        let (silence_threshold_seconds, silence_threshold_source) =
+            if health.silence_threshold_seconds.is_some() {
+                (
+                    health.resolve_silence_threshold(global_health),
+                    health_source.clone(),
+                )
+            } else {
+                (
+                    global_health.silence_threshold_seconds,
+                    "global config".to_string(),
+                )
+            };
+
+        let (max_nudges, max_nudges_source) = if health.max_nudges.is_some() {
+            (
+                health.resolve_max_nudges(global_health),
+                health_source.clone(),
+            )
+        } else {
+            (global_health.max_nudges, "global config".to_string())
+        };
+
+        let nudge_types = ["idle", "stalled", "ci", "review", "conflict", "bad_commits"];
+        let nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)> = nudge_types
+            .iter()
+            .map(|&nt| {
+                let resolved = health.resolve_for_nudge_type(nt, global_health);
+                let type_cfg = match nt {
+                    "idle" => &health.nudge.idle,
+                    "stalled" => &health.nudge.stalled,
+                    "ci" => &health.nudge.ci,
+                    "review" => &health.nudge.review,
+                    "conflict" => &health.nudge.conflict,
+                    "bad_commits" => &health.nudge.bad_commits,
+                    _ => &None,
+                };
+                let source = if type_cfg.is_some() {
+                    format!("{} [health.nudge]", health_source)
+                } else if health.max_nudges.is_some() || health.silence_threshold_seconds.is_some()
+                {
+                    format!("{} [health]", health_source)
+                } else {
+                    "global config".to_string()
+                };
+                (nt.to_string(), resolved, source)
+            })
+            .collect();
+
+        Ok(Self {
+            effective_base,
+            toml_base: jig_toml.worktree.base,
+            worktree_source,
+            global_base: global_config.default_base_branch,
+            effective_on_create,
+            toml_on_create: jig_toml.worktree.on_create,
+            agent_type: jig_toml.agent.agent_type,
+            agent_source,
+            issues_provider: jig_toml.issues.provider,
+            issues_directory: jig_toml.issues.directory,
+            issues_source,
+            linear: jig_toml.issues.linear,
+            auto_spawn_labels: jig_toml.issues.auto_spawn_labels,
+            max_concurrent_workers,
+            max_concurrent_workers_source,
+            auto_spawn_interval,
+            auto_spawn_interval_source,
+            silence_threshold_seconds,
+            silence_threshold_source,
+            max_nudges,
+            max_nudges_source,
+            nudge_type_configs,
+            has_local_overlay,
+        })
+    }
+}
+
+/// Update a key in jig.local.toml. Pass `None` as value to remove the key.
+fn update_local_toml(
+    repo_root: &std::path::Path,
+    section: &str,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), ConfigError> {
+    let local_path = repo_root.join(jig_core::config::JIG_LOCAL_TOML);
+    let mut doc: toml::Value = if local_path.exists() {
+        let content = std::fs::read_to_string(&local_path).map_err(CoreError::Io)?;
+        toml::from_str(&content).map_err(|e| CoreError::Custom(e.to_string()))?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    let table = doc.as_table_mut().unwrap();
+
+    match value {
+        Some(v) => {
+            let section_table = table
+                .entry(section)
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+                .as_table_mut()
+                .ok_or_else(|| CoreError::Custom(format!("[{}] is not a table", section)))?;
+            section_table.insert(key.to_string(), toml::Value::String(v.to_string()));
+        }
+        None => {
+            if let Some(section_val) = table.get_mut(section) {
+                if let Some(section_table) = section_val.as_table_mut() {
+                    section_table.remove(key);
+                    if section_table.is_empty() {
+                        table.remove(section);
+                    }
+                }
+            }
+        }
+    }
+
+    let content = toml::to_string_pretty(&doc).map_err(|e| CoreError::Custom(e.to_string()))?;
+    std::fs::write(&local_path, content).map_err(CoreError::Io)?;
+
+    Ok(())
 }

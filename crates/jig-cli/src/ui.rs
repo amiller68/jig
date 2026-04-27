@@ -10,8 +10,8 @@ use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 use crossterm::terminal;
 
-use jig_core::daemon::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
-use jig_core::spawn::TaskStatus;
+use crate::daemon::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
+use jig_core::worker::TmuxStatus;
 use jig_core::worker::WorkerStatus;
 
 // ---------------------------------------------------------------------------
@@ -308,14 +308,14 @@ pub fn format_health(info: &WorkerTickInfo) -> (String, Color) {
 /// Build a row of cells for a single worker.
 fn worker_row(w: &WorkerDisplayInfo) -> Vec<Cell> {
     let tmux_indicator = match w.tmux_status {
-        TaskStatus::Running => "●",
-        TaskStatus::Exited => "○",
-        TaskStatus::NoSession | TaskStatus::NoWindow => "✗",
+        TmuxStatus::Running => "●",
+        TmuxStatus::Exited => "○",
+        TmuxStatus::NoSession | TmuxStatus::NoWindow => "✗",
     };
     let tmux_color = match w.tmux_status {
-        TaskStatus::Running => Color::Green,
-        TaskStatus::Exited => Color::Yellow,
-        TaskStatus::NoSession | TaskStatus::NoWindow => Color::DarkGrey,
+        TmuxStatus::Running => Color::Green,
+        TmuxStatus::Exited => Color::Yellow,
+        TmuxStatus::NoSession | TmuxStatus::NoWindow => Color::DarkGrey,
     };
 
     let (state_text, state_color) = match w.worker_status {

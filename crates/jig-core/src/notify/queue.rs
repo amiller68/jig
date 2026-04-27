@@ -4,8 +4,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
+use crate::config::notifications_path;
 use crate::error::Result;
-use crate::global::global_state_dir;
 
 use super::{Notification, NotificationEvent};
 
@@ -18,7 +18,7 @@ impl NotificationQueue {
     /// Queue at the global state dir (`~/.config/jig/state/notifications.jsonl`).
     pub fn global() -> Result<Self> {
         Ok(Self {
-            path: global_state_dir()?.join("notifications.jsonl"),
+            path: notifications_path()?,
         })
     }
 

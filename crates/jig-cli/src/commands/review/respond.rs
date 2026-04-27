@@ -21,7 +21,7 @@ pub struct ReviewRespond {
 
 impl ReviewRespond {
     pub fn run_inner(&self, ctx: &RepoCtx) -> Result<ReviewOutput, ReviewError> {
-        let repo = ctx.repo()?;
+        let cfg = ctx.config()?;
         let cwd = std::env::current_dir()?;
 
         // Validate that the review file exists
@@ -45,7 +45,7 @@ impl ReviewRespond {
 
         // Make path relative for display
         let display_path = response_path
-            .strip_prefix(&repo.repo_root)
+            .strip_prefix(&cfg.repo_root)
             .unwrap_or(&response_path);
 
         ui::success(&format!("Response written to {}", display_path.display()));

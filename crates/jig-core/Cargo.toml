@@ -22,9 +22,8 @@ handlebars.workspace = true
 urlencoding.workspace = true
 regex.workspace = true
 ureq.workspace = true
-ctrlc.workspace = true
-flume.workspace = true
 git2.workspace = true
+strum = { version = "0.28.0", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
