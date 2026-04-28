@@ -118,7 +118,7 @@ impl List {
             first = false;
             out.push_str(&format!("{}:\n", ui::bold(&repo_name)));
             for wt in &worktrees {
-                out.push_str(&format!("  {}\n", wt.branch_name().to_string()));
+                out.push_str(&format!("  {}\n", wt.branch_name()));
             }
         }
         Ok(ListOutput(out))

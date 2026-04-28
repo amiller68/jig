@@ -35,7 +35,7 @@ impl Op for Kill {
         let cfg = ctx.config()?;
 
         if self.all {
-            let workers = Worker::discover(cfg);
+            let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
             if workers.is_empty() {
                 eprintln!("{}", ui::dim("No workers to kill."));
             }
@@ -48,7 +48,7 @@ impl Op for Kill {
         }
 
         let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
-        let workers = Worker::discover(cfg);
+        let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
         let worker = workers
             .iter()
             .find(|w| w.branch() == name)
@@ -63,7 +63,7 @@ impl Op for Kill {
         if self.all {
             let mut killed = 0;
             for cfg in &ctx.configs {
-                let workers = Worker::discover(cfg);
+                let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
                 for worker in &workers {
                     let _ = worker.kill();
                     worker.unregister()?;
@@ -79,7 +79,7 @@ impl Op for Kill {
 
         let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
         let cfg = ctx.config_for_worktree(name)?;
-        let workers = Worker::discover(cfg);
+        let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
         let worker = workers
             .iter()
             .find(|w| w.branch() == name)

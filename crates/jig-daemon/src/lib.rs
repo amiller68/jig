@@ -11,12 +11,10 @@
 
 pub mod actors;
 mod config;
-mod discovery;
 mod dispatch;
 mod display;
 pub mod lifecycle;
 mod pr;
-pub mod recovery;
 pub mod runtime;
 pub mod triage_tracker;
 
@@ -41,7 +39,6 @@ use jig_core::worker::events::{Event, EventKind, EventLog, TerminalKind, WorkerS
 use jig_core::worker::WorkerStatus;
 
 use actors::Actor;
-use discovery::discover_workers;
 
 pub use actors::spawn::SpawnableIssue;
 pub use config::{DaemonConfig, TickResult};
@@ -105,6 +102,23 @@ impl<'a> Daemon<'a> {
                 .map(|n| n.to_string_lossy() == repo_name)
                 .unwrap_or(false)
         })
+    }
+
+    /// Try to resume a worker whose tmux window is dead.
+    fn try_resume_worker(repo_root: &std::path::Path, worker_name: &str) -> Result<bool> {
+        let worker = jig_core::worker::Worker::from_branch(repo_root, worker_name.into());
+        if worker.has_tmux_window() {
+            return Ok(false);
+        }
+        let wt = worker.worktree()?;
+        let jig_config = JigToml::load(repo_root)?.unwrap_or_default();
+        let agent = jig_core::agents::Agent::from_name(&jig_config.agent.agent_type)
+            .unwrap_or_else(|| jig_core::agents::Agent::from_kind(jig_core::agents::AgentKind::Claude))
+            .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
+        let prompt = Prompt::new(jig_core::worker::SPAWN_PREAMBLE)
+            .task("You were interrupted. Resume your previous task.");
+        jig_core::worker::Worker::resume(&wt, &agent, prompt)?;
+        Ok(true)
     }
 
     /// Get tmux status for a worker (session:window alive check).
@@ -336,7 +350,7 @@ impl<'a> Daemon<'a> {
         // existing_workers is available for the inline first poll)
         let registry = RepoRegistry::load().unwrap_or_default();
 
-        let mut worker_list = discover_workers(&registry);
+        let mut worker_list = registry.discover_workers();
 
         // Filter to single repo if configured
         if let Some(ref filter) = self.daemon_config.repo_filter {
@@ -769,7 +783,7 @@ impl<'a> Daemon<'a> {
         }
 
         // 2. Trigger background sync if interval elapsed
-        if !self.daemon_config.skip_sync {
+        {
             let mut parent_branches = self.collect_parent_branches(&workers_state, &registry);
 
             // Also include parent branches from the issue actor response.
@@ -1113,11 +1127,7 @@ impl<'a> Daemon<'a> {
                 // Replace nudge actions with resume attempt
                 actions.retain(|a| !matches!(a, Action::Nudge { .. }));
                 if let Some(entry) = Self::find_repo_path(registry, repo_name) {
-                    match recovery::RecoveryScanner::try_resume_worker(
-                        &entry.path,
-                        repo_name,
-                        worker_name,
-                    ) {
+                    match Self::try_resume_worker(&entry.path, worker_name) {
                         Ok(true) => {
                             tracing::info!(worker = key, "worker resumed during steady-state tick");
                         }
@@ -1555,9 +1565,8 @@ impl<'a> Daemon<'a> {
                         "restart requested, attempting resume"
                     );
                     if let Some(entry) = Self::find_repo_path(registry, repo_name) {
-                        match recovery::RecoveryScanner::try_resume_worker(
+                        match Self::try_resume_worker(
                             &entry.path,
-                            repo_name,
                             worker_name,
                         ) {
                             Ok(true) => {
@@ -1740,16 +1749,33 @@ fn startup_recovery(global_config: &GlobalConfig) {
     // Auto-recover orphaned workers if enabled
     if global_config.daemon.auto_recover {
         let registry = RepoRegistry::load().unwrap_or_default();
-        let scanner = recovery::RecoveryScanner::new(&registry, &global_config.health);
-        let recovered = scanner.recover_all();
-        if !recovered.is_empty() {
-            tracing::info!(
-                count = recovered.len(),
-                "recovered orphaned workers on startup"
-            );
-            for (repo, worker) in &recovered {
-                tracing::info!(repo = %repo, worker = %worker, "recovered");
+        let mut recovered = Vec::new();
+        for entry in registry.repos() {
+            let repo_name = entry.path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let repo = match jig_core::git::Repo::open(&entry.path) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for worker in jig_core::worker::Worker::discover(&repo) {
+                if worker.is_orphaned() {
+                    let branch = worker.branch().to_string();
+                    match Daemon::try_resume_worker(&entry.path, &branch) {
+                        Ok(true) => {
+                            tracing::info!(repo = %repo_name, worker = %branch, "recovered");
+                            recovered.push((repo_name.clone(), branch));
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(repo = %repo_name, worker = %branch, error = %e, "recovery failed");
+                        }
+                    }
+                }
             }
+        }
+        if !recovered.is_empty() {
+            tracing::info!(count = recovered.len(), "recovered orphaned workers on startup");
         }
     }
 }
@@ -1818,15 +1844,12 @@ where
                         return Ok(quit.clone());
                     }
                     let keep_going = on_tick(&tick, &quit);
-                    if daemon_config.once || !keep_going {
+                    if !keep_going {
                         return Ok(quit.clone());
                     }
                 }
                 Err(e) => {
                     tracing::error!("tick failed: {}", e);
-                    if daemon_config.once {
-                        return Err(e);
-                    }
                     if quit.load(Ordering::Relaxed) {
                         return Ok(quit.clone());
                     }
@@ -1891,7 +1914,6 @@ mod tests {
     fn daemon_config_defaults() {
         let config = DaemonConfig::default();
         assert_eq!(config.interval_seconds, 30);
-        assert!(!config.once);
         assert_eq!(config.session_prefix, "jig-");
     }
 

@@ -116,6 +116,25 @@ impl RepoRegistry {
             .collect()
     }
 
+    /// Discover all workers across registered repos via git2 worktree listing.
+    pub fn discover_workers(&self) -> Vec<(String, String)> {
+        let mut result = Vec::new();
+        for entry in &self.repos {
+            let repo_name = match entry.path.file_name() {
+                Some(n) => n.to_string_lossy().to_string(),
+                None => continue,
+            };
+            let repo = match crate::git::Repo::open(&entry.path) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for worker in crate::worker::Worker::discover(&repo) {
+                result.push((repo_name.clone(), worker.branch().to_string()));
+            }
+        }
+        result
+    }
+
     fn find(&self, path: &Path) -> Option<&RepoEntry> {
         self.repos.iter().find(|e| e.path == path)
     }

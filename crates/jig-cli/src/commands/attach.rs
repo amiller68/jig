@@ -56,7 +56,7 @@ impl Op for Attach {
 fn attach(cfg: &Config, name: Option<&str>) -> Result<(), AttachError> {
     match name {
         Some(worker_name) => {
-            let workers = Worker::discover(cfg);
+            let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
             let worker = workers
                 .iter()
                 .find(|w| w.branch() == worker_name)

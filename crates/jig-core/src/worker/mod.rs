@@ -22,6 +22,7 @@ use crate::issues::issue::IssueRef;
 use crate::prompt::Prompt;
 use events::{Event, EventKind, EventLog, TerminalKind};
 
+// TODO (draft):this shouldnot be here
 pub const SPAWN_PREAMBLE: &str = r#"AUTONOMOUS MODE: You have been spawned by jig as a parallel worker in auto mode (--dangerously-skip-permissions). Work independently without human interaction.
 
 YOUR GOAL: Complete the task below and create a draft PR. Definition of done: code committed (conventional commits), draft PR created via `jig pr` or /draft, and issue marked complete (see completion instructions in the task). Call /review when ready.
@@ -360,13 +361,22 @@ impl Worker {
         }
     }
 
+    // ── Recovery ──
+
+    /// Whether this worker is orphaned: has an active event log status but no tmux window.
+    pub fn is_orphaned(&self) -> bool {
+        if self.has_tmux_window() {
+            return false;
+        }
+        match self.worker_status() {
+            Some(s) => !s.is_terminal() && s != WorkerStatus::Initializing && s != WorkerStatus::Created,
+            None => false,
+        }
+    }
+
     // ── Discovery ──
 
-    pub fn discover(cfg: &crate::config::Config) -> Vec<Self> {
-        let repo = match Repo::open(&cfg.repo_root) {
-            Ok(r) => r,
-            Err(_) => return vec![],
-        };
+    pub fn discover(repo: &Repo) -> Vec<Self> {
         let mut workers: Vec<Self> = repo
             .list_worktrees()
             .unwrap_or_default()

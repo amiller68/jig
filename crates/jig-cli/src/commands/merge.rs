@@ -54,7 +54,7 @@ impl Op for Merge {
         ));
 
         // Clean up worker state
-        let workers = Worker::discover(cfg);
+        let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
         if let Some(worker) = workers.iter().find(|w| w.branch() == self.name.as_str()) {
             worker.unregister()?;
             let _ = worker.kill();

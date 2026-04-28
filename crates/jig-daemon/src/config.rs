@@ -9,12 +9,8 @@ use super::display::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
 pub struct DaemonConfig {
     /// How often to poll, in seconds.
     pub interval_seconds: u64,
-    /// Whether to run once and exit (vs. looping).
-    pub once: bool,
     /// Tmux session prefix (default: "jig-").
     pub session_prefix: String,
-    /// Skip `git fetch` on each tick (unused with actors — kept for API compat).
-    pub skip_sync: bool,
     /// If set, only process workers for this repo name.
     pub repo_filter: Option<String>,
 }
@@ -23,9 +19,7 @@ impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
             interval_seconds: 30,
-            once: false,
             session_prefix: "jig-".to_string(),
-            skip_sync: false,
             repo_filter: None,
         }
     }

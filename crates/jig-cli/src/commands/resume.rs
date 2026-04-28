@@ -56,18 +56,10 @@ impl Op for Resume {
             .into());
         }
 
-        // Read original context from spawn event if no override provided
-        let effective_context = if let Some(ref ctx_override) = self.context {
-            ctx_override.clone()
-        } else {
-            let repo_name = cfg
-                .repo_root
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            jig_daemon::recovery::RecoveryScanner::read_spawn_context(&repo_name, &self.name)
-                .unwrap_or_else(|| "You were interrupted. Resume your previous task.".to_string())
-        };
+        let effective_context = self
+            .context
+            .clone()
+            .unwrap_or_else(|| "You were interrupted. Resume your previous task.".to_string());
 
         let jig_config = config::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
         let agent = agents::Agent::from_name(&jig_config.agent.agent_type)

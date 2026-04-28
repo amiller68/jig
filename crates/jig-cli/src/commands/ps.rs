@@ -66,8 +66,6 @@ impl Ps {
         }
 
         let daemon_config = DaemonConfig {
-            once: true,
-            skip_sync: true,
             repo_filter,
             ..Default::default()
         };
@@ -205,8 +203,6 @@ fn run_watch(
 ) {
     let daemon_config = DaemonConfig {
         interval_seconds: interval,
-        once: false,
-        skip_sync: false,
         repo_filter,
         ..Default::default()
     };
