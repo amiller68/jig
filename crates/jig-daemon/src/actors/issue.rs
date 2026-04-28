@@ -5,7 +5,7 @@
 //! integration branch on `origin` idempotently and flips the parent to
 //! InProgress — without spawning a worker.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use jig_core::config::Config;
 use jig_core::git::Branch;
@@ -13,26 +13,112 @@ use jig_core::git::Repo;
 use jig_core::issues::issue::{Issue, IssueFilter, IssueStatus};
 use jig_core::issues::providers::IssueProvider;
 use jig_core::issues::ProviderKind;
-use super::messages::{
-    IssueRequest, IssueResponse, ParentBranchResult, SpawnableIssue, TriageIssue,
-};
 
-/// Spawn the issue actor thread. Returns immediately.
-pub fn spawn(
-    rx: flume::Receiver<IssueRequest>,
-    tx: flume::Sender<IssueResponse>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("jig-issues".into())
-        .spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let result = process_request(&req);
-                if tx.send(result).is_err() {
-                    break;
+use crate::actors::Actor;
+use crate::actors::spawn::SpawnableIssue;
+use crate::actors::triage::TriageIssue;
+
+/// Request sent to the issue actor to poll for auto-spawnable issues.
+pub struct IssueRequest {
+    /// (repo_root, base_branch) for each registered repo.
+    pub repos: Vec<(PathBuf, String)>,
+    /// Active workers as (repo_name, worker_name) pairs for per-repo budgeting.
+    pub existing_workers: Vec<(String, String)>,
+}
+
+/// Response from the issue actor containing both spawnable and triageable issues.
+pub struct IssueResponse {
+    /// Issues eligible for normal auto-spawn (status=Planned).
+    pub spawnable: Vec<SpawnableIssue>,
+    /// Issues eligible for triage (status=Triage, repo has triage enabled).
+    pub triageable: Vec<TriageIssue>,
+    /// Parent integration branches created or verified this poll.
+    pub parent_branches: Vec<ParentBranchResult>,
+}
+
+/// Result of creating (or skipping) a parent integration branch.
+#[derive(Debug, Clone)]
+pub struct ParentBranchResult {
+    pub repo_root: PathBuf,
+    pub repo_name: String,
+    pub issue_id: String,
+    pub branch_name: String,
+    pub created: bool,
+    pub status_updated: bool,
+    pub error: Option<String>,
+}
+
+pub struct IssueActor {
+    tx: flume::Sender<IssueRequest>,
+    rx: flume::Receiver<IssueResponse>,
+    pending: bool,
+    first_poll_done: bool,
+}
+
+impl Actor for IssueActor {
+    type Request = IssueRequest;
+    type Response = IssueResponse;
+
+    const NAME: &'static str = "jig-issues";
+    const QUEUE_SIZE: usize = 1;
+
+    fn handle(req: IssueRequest) -> IssueResponse {
+        process_request(&req)
+    }
+
+    fn send(&mut self, req: IssueRequest) -> bool {
+        if self.pending {
+            return false;
+        }
+        if self.tx.try_send(req).is_ok() {
+            self.pending = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn drain(&mut self) -> Vec<IssueResponse> {
+        match self.rx.try_recv() {
+            Ok(response) => {
+                self.pending = false;
+                if !response.spawnable.is_empty() {
+                    tracing::info!(count = response.spawnable.len(), "found spawnable issues");
                 }
+                if !response.triageable.is_empty() {
+                    tracing::info!(count = response.triageable.len(), "found triageable issues");
+                }
+                vec![response]
             }
-        })
-        .expect("failed to spawn issue actor thread")
+            Err(_) => vec![],
+        }
+    }
+
+    fn from_channels(
+        tx: flume::Sender<IssueRequest>,
+        rx: flume::Receiver<IssueResponse>,
+    ) -> Self {
+        Self {
+            tx,
+            rx,
+            pending: false,
+            first_poll_done: false,
+        }
+    }
+}
+
+impl IssueActor {
+    pub fn is_pending(&self) -> bool {
+        self.pending
+    }
+
+    pub fn should_first_poll(&self) -> bool {
+        !self.first_poll_done
+    }
+
+    pub fn mark_first_poll_done(&mut self) {
+        self.first_poll_done = true;
+    }
 }
 
 /// Collect spawnable issues from a provider, respecting the budget and skipping
@@ -53,10 +139,21 @@ fn collect_spawnable(
         }
     };
 
+    let repo = match Repo::open(repo_root) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            tracing::debug!(repo = %repo_name, error = %e, "failed to open repo for child-spawnable check");
+            None
+        }
+    };
+
     // Filter out child issues whose parent isn't ready
     let issues: Vec<_> = issues
         .into_iter()
-        .filter(|issue| is_child_spawnable(issue, provider, repo_root))
+        .filter(|issue| match &repo {
+            Some(r) => is_child_spawnable(issue, provider, r),
+            None => issue.parent().is_none(),
+        })
         .collect();
 
     let provider_kind = provider.kind();
@@ -212,7 +309,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
                 remaining_budget,
                 &req.existing_workers,
             );
-            spawnable.retain(|si| !is_active_parent(&si.issue));
+            spawnable.retain(|si| si.issue.children().is_empty());
             all_spawnable.extend(spawnable);
         }
     }
@@ -228,7 +325,7 @@ pub(crate) fn process_request(req: &IssueRequest) -> IssueResponse {
 ///
 /// Non-child issues always pass. Child issues require their parent to be
 /// `InProgress` and to have pushed a branch to the remote.
-fn is_child_spawnable(issue: &Issue, provider: &IssueProvider, repo_root: &Path) -> bool {
+fn is_child_spawnable(issue: &Issue, provider: &IssueProvider, repo: &Repo) -> bool {
     let Some(parent_ref) = issue.parent() else {
         return true;
     };
@@ -255,7 +352,7 @@ fn is_child_spawnable(issue: &Issue, provider: &IssueProvider, repo_root: &Path)
         return false;
     }
 
-    if !remote_branch_exists(repo_root, parent.branch()) {
+    if !repo.remote_branch_exists(parent.branch()) {
         tracing::debug!(
             issue = %issue.id(),
             parent = %parent_ref,
@@ -273,16 +370,8 @@ fn remote_branch_exists(repo_root: &Path, branch: &str) -> bool {
     let Ok(repo) = Repo::open(repo_root) else {
         return false;
     };
-    let result = repo
-        .inner()
-        .find_branch(&format!("origin/{branch}"), git2::BranchType::Remote);
-    result.is_ok()
-}
-
-/// Returns `true` if the issue has children. Parent issues are excluded from
-/// normal auto-spawn.
-fn is_active_parent(issue: &Issue) -> bool {
-    !issue.children().is_empty()
+    let b: Branch = branch.into();
+    repo.remote_branch_exists(&b)
 }
 
 /// Ensure parent integration branches exist on origin for all eligible parent
@@ -519,27 +608,15 @@ mod tests {
     }
 
     #[test]
-    fn is_active_parent_with_backlog_child() {
+    fn parent_with_children_excluded() {
         let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".into()]);
-        assert!(is_active_parent(&parent));
+        assert!(!parent.children().is_empty());
     }
 
     #[test]
-    fn is_active_parent_with_in_progress_child() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".into()]);
-        assert!(is_active_parent(&parent));
-    }
-
-    #[test]
-    fn is_active_parent_even_if_children_complete() {
-        let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".into()]);
-        assert!(is_active_parent(&parent));
-    }
-
-    #[test]
-    fn is_not_active_parent_no_children() {
+    fn childless_issue_not_excluded() {
         let issue = make_issue("ENG-100", IssueStatus::Planned, vec![]);
-        assert!(!is_active_parent(&issue));
+        assert!(issue.children().is_empty());
     }
 
     #[test]
@@ -598,13 +675,13 @@ mod tests {
     #[test]
     fn active_parent_excluded_from_spawnable() {
         let parent = make_issue("ENG-100", IssueStatus::Planned, vec!["ENG-101".into()]);
-        assert!(is_active_parent(&parent));
+        assert!(!parent.children().is_empty());
     }
 
     #[test]
     fn child_issue_not_active_parent() {
         let child = make_child_issue("ENG-101", IssueStatus::Planned, "ENG-100");
-        assert!(!is_active_parent(&child));
+        assert!(child.children().is_empty());
     }
 
     // -- Blocked-by DAG walking tests for parent-child children ---------------
@@ -795,6 +872,8 @@ mod tests {
     #[test]
     fn is_child_spawnable_requires_parent_in_progress() {
         let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        let repo = Repo::open(tmp.path()).unwrap();
         let child = make_child_issue("ENG-101", IssueStatus::Planned, "ENG-100");
 
         // Parent is Planned → child not spawnable
@@ -803,7 +882,7 @@ mod tests {
             issues: vec![parent_planned, child.clone()],
         }
         .into_provider();
-        assert!(!is_child_spawnable(&child, &provider, tmp.path()));
+        assert!(!is_child_spawnable(&child, &provider, &repo));
 
         // Parent InProgress but no remote branch → false
         let parent_ip = make_issue("ENG-100", IssueStatus::InProgress, vec!["ENG-101".into()]);
@@ -811,7 +890,7 @@ mod tests {
             issues: vec![parent_ip, child.clone()],
         }
         .into_provider();
-        assert!(!is_child_spawnable(&child, &provider, tmp.path()));
+        assert!(!is_child_spawnable(&child, &provider, &repo));
 
         // Non-child issue → always true
         let standalone = make_issue("ENG-200", IssueStatus::Planned, vec![]);
@@ -819,7 +898,7 @@ mod tests {
             issues: vec![standalone.clone()],
         }
         .into_provider();
-        assert!(is_child_spawnable(&standalone, &provider, tmp.path()));
+        assert!(is_child_spawnable(&standalone, &provider, &repo));
     }
 
     /// Verify that blocked-by gating in `collect_spawnable` works for standalone
@@ -1051,8 +1130,9 @@ mod tests {
             issues: vec![parent_ip, child.clone()],
         }
         .into_provider();
+        let repo = Repo::open(&repo_root).unwrap();
         assert!(
-            is_child_spawnable(&child, &provider, &repo_root),
+            is_child_spawnable(&child, &provider, &repo),
             "child should be spawnable after parent branch is pushed"
         );
     }

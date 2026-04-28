@@ -59,7 +59,7 @@ fn attach(cfg: &Config, name: Option<&str>) -> Result<(), AttachError> {
             let workers = Worker::discover(cfg);
             let worker = workers
                 .iter()
-                .find(|w| w.name() == worker_name)
+                .find(|w| w.branch() == worker_name)
                 .ok_or_else(|| {
                     jig_core::Error::Custom(format!("worker '{}' not found", worker_name))
                 })?;

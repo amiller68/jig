@@ -1,50 +1,91 @@
 //! Review actor — runs ephemeral Claude Code sessions to review worker code.
-//!
-//! Follows the actor pattern: a background thread with flume channels that
-//! receives `ReviewRequest`s, runs an AI review, and returns `ReviewComplete`s.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use jig_core::agents;
 use jig_core::review;
 
-use super::messages::{ReviewComplete, ReviewRequest};
+use crate::actors::Actor;
 
-/// Spawn the review actor thread. Returns immediately.
-///
-/// The actor blocks on `rx.recv()` waiting for review requests, runs each
-/// review via an ephemeral agent session, and sends `ReviewComplete` back.
-pub fn spawn(
-    rx: flume::Receiver<ReviewRequest>,
-    tx: flume::Sender<ReviewComplete>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("jig-review".into())
-        .spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let result = run_review(&req);
-                if tx.send(result).is_err() {
-                    break;
-                }
-            }
-        })
-        .expect("failed to spawn review actor thread")
+pub struct ReviewRequest {
+    pub worker_key: String,
+    pub worktree_path: PathBuf,
+    pub base_branch: String,
 }
 
-/// Run a single review cycle for a worker.
-fn run_review(req: &ReviewRequest) -> ReviewComplete {
-    match run_review_inner(req) {
-        Ok(()) => ReviewComplete {
-            worker_key: req.worker_key.clone(),
-            error: None,
-        },
-        Err(msg) => {
-            tracing::warn!(worker = %req.worker_key, "review failed: {}", msg);
-            ReviewComplete {
-                worker_key: req.worker_key.clone(),
-                error: Some(msg),
+pub struct ReviewComplete {
+    pub worker_key: String,
+    pub error: Option<String>,
+}
+
+pub struct ReviewActor {
+    tx: flume::Sender<ReviewRequest>,
+    rx: flume::Receiver<ReviewComplete>,
+    pending: HashMap<String, bool>,
+}
+
+impl Actor for ReviewActor {
+    type Request = ReviewRequest;
+    type Response = ReviewComplete;
+
+    const NAME: &'static str = "jig-review";
+    const QUEUE_SIZE: usize = 4;
+
+    fn handle(req: ReviewRequest) -> ReviewComplete {
+        match run_review_inner(&req) {
+            Ok(()) => ReviewComplete {
+                worker_key: req.worker_key,
+                error: None,
+            },
+            Err(msg) => {
+                tracing::warn!(worker = %req.worker_key, "review failed: {}", msg);
+                ReviewComplete {
+                    worker_key: req.worker_key,
+                    error: Some(msg),
+                }
             }
         }
+    }
+
+    fn send(&mut self, req: ReviewRequest) -> bool {
+        if self.pending.contains_key(&req.worker_key) {
+            return false;
+        }
+        let key = req.worker_key.clone();
+        if self.tx.try_send(req).is_ok() {
+            self.pending.insert(key, true);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn drain(&mut self) -> Vec<ReviewComplete> {
+        let mut results = Vec::new();
+        while let Ok(resp) = self.rx.try_recv() {
+            self.pending.remove(&resp.worker_key);
+            results.push(resp);
+        }
+        results
+    }
+
+    fn from_channels(
+        tx: flume::Sender<ReviewRequest>,
+        rx: flume::Receiver<ReviewComplete>,
+    ) -> Self {
+        Self {
+            tx,
+            rx,
+            pending: HashMap::new(),
+        }
+    }
+}
+
+impl ReviewActor {
+    pub fn is_pending(&self, worker_key: &str) -> bool {
+        self.pending.contains_key(worker_key)
     }
 }
 
@@ -56,7 +97,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
         return Err(format!("worktree not found: {}", worktree_path.display()));
     }
 
-    // Get branch name from git
     let branch_output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(worktree_path)
@@ -68,7 +108,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
         .trim()
         .to_string();
 
-    // Compute diff
     let diff_output = Command::new("git")
         .args(["diff", &format!("{}...HEAD", base_branch)])
         .current_dir(worktree_path)
@@ -82,7 +121,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
         return Err("no diff to review".to_string());
     }
 
-    // Read review history
     let history_files = review::review_history(worktree_path);
     let mut history_text = String::new();
     for file in &history_files {
@@ -95,10 +133,8 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
         }
     }
 
-    // Count reviews before execution
     let count_before = review::review_count(worktree_path);
 
-    // Build the review prompt
     let prior_reviews = if history_text.is_empty() {
         "(none)".to_string()
     } else {
@@ -127,7 +163,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
          6. If jig review submit reports a format error, fix your output and retry",
     );
 
-    // Build the ephemeral command
     let agent = agents::Agent::from_name("claude").ok_or("claude agent not found")?;
     let cmd = agent.ephemeral_command(
         &prompt,
@@ -143,7 +178,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
 
     tracing::info!(worker = %req.worker_key, "running review agent");
 
-    // Execute in worktree directory
     let output = Command::new("sh")
         .arg("-c")
         .arg(&cmd)
@@ -162,7 +196,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
         ));
     }
 
-    // Check if a new review file appeared
     let count_after = review::review_count(worktree_path);
     if count_after <= count_before {
         return Err("review agent ran but did not submit a review".to_string());
@@ -180,7 +213,6 @@ fn run_review_inner(req: &ReviewRequest) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn review_request_fields() {
@@ -217,7 +249,7 @@ mod tests {
             worktree_path: PathBuf::from("/tmp/nonexistent-worktree-path"),
             base_branch: "origin/main".to_string(),
         };
-        let result = run_review(&req);
+        let result = ReviewActor::handle(req);
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("worktree not found"));
     }

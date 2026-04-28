@@ -51,7 +51,7 @@ impl Remove {
     fn remove_from_cfg(&self, cfg: &Config) -> Result<NoOutput, RemoveError> {
         let git_repo = Repo::open(&cfg.repo_root)?;
         let worktrees = git_repo.list_worktrees()?;
-        let names: Vec<String> = worktrees.iter().map(|wt| wt.name()).collect();
+        let names: Vec<String> = worktrees.iter().map(|wt| wt.branch_name().to_string()).collect();
 
         // Find matching worktrees
         let pattern = Pattern::new(&self.pattern)?;

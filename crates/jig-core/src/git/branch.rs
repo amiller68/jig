@@ -48,6 +48,24 @@ impl From<Branch> for String {
     }
 }
 
+impl PartialEq<str> for Branch {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for Branch {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<String> for Branch {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

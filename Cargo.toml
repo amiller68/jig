@@ -57,4 +57,5 @@ predicates = "3"
 
 # Internal crates
 jig-core = { path = "crates/jig-core" }
+jig-daemon = { path = "crates/jig-daemon" }
 jig-cli = { path = "crates/jig-cli" }

@@ -94,7 +94,7 @@ fn nuke_repo(cfg: &jig_core::Config) -> Result<(), NukeError> {
         if wt.remove(true).is_err() {
             let _ = std::fs::remove_dir_all(wt.path());
         }
-        ui::success(&format!("Removed worktree '{}'", ui::highlight(&wt.name())));
+        ui::success(&format!("Removed worktree '{}'", ui::highlight(&wt.branch_name())));
     }
 
     // 4. Clear global worker entries for this repo

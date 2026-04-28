@@ -12,9 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 jig-core.workspace = true
+jig-daemon.workspace = true
 clap.workspace = true
-ctrlc.workspace = true
-flume.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 clap_complete.workspace = true

@@ -906,12 +906,11 @@ dependencies = [
  "colored",
  "comfy-table",
  "crossterm",
- "ctrlc",
  "dirs",
- "flume",
  "git2",
  "glob",
  "jig-core",
+ "jig-daemon",
  "nix",
  "predicates",
  "serde",
@@ -946,6 +945,21 @@ dependencies = [
  "urlencoding",
  "uuid",
  "which",
+]
+
+[[package]]
+name = "jig-daemon"
+version = "1.12.0"
+dependencies = [
+ "chrono",
+ "ctrlc",
+ "flume",
+ "git2",
+ "jig-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

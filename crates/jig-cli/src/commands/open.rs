@@ -95,7 +95,7 @@ impl Open {
                 if opened {
                     ui::success(&format!(
                         "Opened '{}' in new tab",
-                        ui::highlight(&wt.name())
+                        ui::highlight(&wt.branch_name())
                     ));
                 }
             }

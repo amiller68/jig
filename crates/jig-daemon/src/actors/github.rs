@@ -1,28 +1,101 @@
 //! GitHub actor — runs PR discovery and lifecycle checks in a background thread.
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use jig_core::config::registry::RepoRegistry;
 use jig_core::github::{self, GitHubClient};
 
-use super::messages::{GitHubRequest, GitHubResponse};
+use crate::actors::Actor;
 
-/// Spawn the GitHub actor thread. Returns immediately.
-///
-/// Processes one `GitHubRequest` at a time (sequential to respect API rate limits).
-pub fn spawn(
-    rx: flume::Receiver<GitHubRequest>,
-    tx: flume::Sender<GitHubResponse>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("jig-github".into())
-        .spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let response = process_request(&req);
-                if tx.send(response).is_err() {
-                    break;
-                }
+pub struct GitHubRequest {
+    pub worker_key: String,
+    pub repo_name: String,
+    pub branch: String,
+    pub pr_url: Option<String>,
+    pub previous_is_draft: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitHubResponse {
+    pub worker_key: String,
+    pub pr_url: Option<String>,
+    pub pr_checks: Vec<(String, bool)>,
+    pub pr_error: Option<String>,
+    pub pr_merged: bool,
+    pub pr_closed: bool,
+    pub is_draft: bool,
+    pub review_feedback_count: Option<u32>,
+}
+
+const GITHUB_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+pub struct GitHubActor {
+    tx: flume::Sender<GitHubRequest>,
+    rx: flume::Receiver<GitHubResponse>,
+    cache: HashMap<String, GitHubResponse>,
+    last_requested: HashMap<String, Instant>,
+}
+
+impl Actor for GitHubActor {
+    type Request = GitHubRequest;
+    type Response = GitHubResponse;
+
+    const NAME: &'static str = "jig-github";
+    const QUEUE_SIZE: usize = 16;
+
+    fn handle(req: GitHubRequest) -> GitHubResponse {
+        process_request(&req)
+    }
+
+    fn send(&mut self, req: GitHubRequest) -> bool {
+        if let Some(last) = self.last_requested.get(&req.worker_key) {
+            if last.elapsed() < GITHUB_POLL_INTERVAL {
+                return false;
             }
-        })
-        .expect("failed to spawn github actor thread")
+        }
+        let key = req.worker_key.clone();
+        if self.tx.try_send(req).is_ok() {
+            self.last_requested.insert(key, Instant::now());
+            true
+        } else {
+            false
+        }
+    }
+
+    fn drain(&mut self) -> Vec<GitHubResponse> {
+        let mut results = Vec::new();
+        while let Ok(resp) = self.rx.try_recv() {
+            self.cache.insert(resp.worker_key.clone(), resp.clone());
+            results.push(resp);
+        }
+        results
+    }
+
+    fn from_channels(
+        tx: flume::Sender<GitHubRequest>,
+        rx: flume::Receiver<GitHubResponse>,
+    ) -> Self {
+        Self {
+            tx,
+            rx,
+            cache: HashMap::new(),
+            last_requested: HashMap::new(),
+        }
+    }
+}
+
+impl GitHubActor {
+    pub fn get_cached(&self, worker_key: &str) -> Option<&GitHubResponse> {
+        self.cache.get(worker_key)
+    }
+
+    pub fn previous_is_draft(&self, worker_key: &str) -> bool {
+        self.cache
+            .get(worker_key)
+            .map(|r| r.is_draft)
+            .unwrap_or(false)
+    }
 }
 
 fn process_request(req: &GitHubRequest) -> GitHubResponse {
@@ -43,7 +116,6 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
         }
     };
 
-    // PR discovery if no URL known
     let pr_url = match &req.pr_url {
         Some(url) => Some(url.clone()),
         None => match client.get_pr_for_branch(&req.branch) {
@@ -76,7 +148,6 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
         };
     };
 
-    // Extract PR number
     let pr_number = match pr_url
         .rsplit('/')
         .next()
@@ -97,7 +168,6 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
         }
     };
 
-    // Check PR state
     let pr_state_info = match client.get_pr_state(pr_number) {
         Ok(s) => s,
         Err(e) => {
@@ -149,7 +219,6 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
             for (name, result) in checks {
                 match result {
                     Ok(check) => {
-                        // Extract review feedback count from the review check
                         if name == "reviews" {
                             let comments = check.review_comment_count.unwrap_or(0);
                             let changes_req = check.changes_requested_count.unwrap_or(0);

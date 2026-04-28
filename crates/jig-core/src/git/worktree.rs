@@ -102,13 +102,14 @@ impl Worktree {
         self.repo.root().expect("worktrees always have a workdir")
     }
 
-    pub fn name(&self) -> String {
+    pub fn branch_name(&self) -> Branch {
         let worktrees_path = self.repo.worktrees_path();
-        self.path()
+        let path = self.path();
+        let name = path
             .strip_prefix(&worktrees_path)
             .expect("worktree path must be under worktrees dir")
-            .to_string_lossy()
-            .to_string()
+            .to_string_lossy();
+        Branch::new(name.as_ref())
     }
 
     pub fn repo_root(&self) -> PathBuf {

@@ -72,7 +72,7 @@ TASK:
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Worker {
     pub(crate) id: Uuid,
-    pub(crate) name: String,
+    pub(crate) branch: Branch,
     pub(crate) path: WorktreeRef,
     pub(crate) issue_ref: Option<IssueRef>,
 
@@ -84,7 +84,7 @@ impl From<&Worktree> for Worker {
     fn from(wt: &Worktree) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name: wt.name(),
+            branch: wt.branch_name(),
             path: wt.as_ref(),
             issue_ref: None,
             auto_spawned: false,
@@ -93,14 +93,26 @@ impl From<&Worktree> for Worker {
 }
 
 impl Worker {
+    /// Construct a worker handle from a repo root path and branch name.
+    pub fn from_branch(repo_root: &Path, branch: Branch) -> Self {
+        let worktree_path = repo_root.join(crate::config::JIG_DIR).join(&*branch);
+        Self {
+            id: Uuid::nil(),
+            branch,
+            path: WorktreeRef::new(worktree_path),
+            issue_ref: None,
+            auto_spawned: false,
+        }
+    }
+
     // ── Accessors ──
 
     pub fn id(&self) -> Uuid {
         self.id
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn branch(&self) -> &Branch {
+        &self.branch
     }
 
     pub fn path(&self) -> &Path {
@@ -120,7 +132,7 @@ impl Worker {
     pub fn tmux_window(&self) -> Result<TmuxWindow> {
         let wt = self.path.open()?;
         let session = format!("jig-{}", wt.repo_name());
-        Ok(TmuxWindow::new(session, &self.name))
+        Ok(TmuxWindow::new(session, &*self.branch))
     }
 
     pub fn has_tmux_window(&self) -> bool {
@@ -135,7 +147,7 @@ impl Worker {
 
     pub fn event_log(&self) -> Result<EventLog> {
         let repo_name = self.repo_name();
-        let log = EventLog::for_worker(&repo_name, &self.name)?;
+        let log = EventLog::for_worker(&repo_name, &self.branch)?;
         Ok(log)
     }
 
@@ -193,7 +205,7 @@ impl Worker {
 
         let worker = Self {
             id: Uuid::new_v4(),
-            name: wt.name(),
+            branch: wt.branch_name(),
             path: wt.as_ref(),
             issue_ref,
             auto_spawned: auto,
@@ -212,7 +224,7 @@ impl Worker {
     pub fn resume(wt: &Worktree, agent: &Agent, prompt: Prompt) -> Result<Self> {
         let worker = Self {
             id: Uuid::new_v4(),
-            name: wt.name(),
+            branch: wt.branch_name(),
             path: wt.as_ref(),
             issue_ref: None,
             auto_spawned: false,
@@ -279,14 +291,14 @@ impl Worker {
                         WorkerStatus::Initializing => {
                             return Err(crate::error::Error::Custom(format!(
                                 "worker '{}' is still initializing (running on-create hook)",
-                                self.name
+                                self.branch
                             )));
                         }
                         WorkerStatus::Failed => {
                             let reason = self.fail_reason().unwrap_or("unknown".into());
                             return Err(crate::error::Error::Custom(format!(
                                 "worker '{}' failed during setup: {}",
-                                self.name, reason
+                                self.branch, reason
                             )));
                         }
                         _ => {}
@@ -295,7 +307,7 @@ impl Worker {
             }
             return Err(crate::error::Error::Custom(format!(
                 "worker '{}' not found",
-                self.name
+                self.branch
             )));
         }
         window.attach()?;
@@ -351,37 +363,17 @@ impl Worker {
     // ── Discovery ──
 
     pub fn discover(cfg: &crate::config::Config) -> Vec<Self> {
-        let worktrees_dir = &cfg.worktrees_path;
-        if !worktrees_dir.exists() {
-            return vec![];
-        }
-
-        let entries = match std::fs::read_dir(worktrees_dir) {
-            Ok(e) => e,
+        let repo = match Repo::open(&cfg.repo_root) {
+            Ok(r) => r,
             Err(_) => return vec![],
         };
-
-        let mut workers = Vec::new();
-
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') || !entry.path().is_dir() {
-                continue;
-            }
-            if !entry.path().join(".git").exists() {
-                continue;
-            }
-
-            workers.push(Self {
-                id: Uuid::nil(),
-                name,
-                path: WorktreeRef::new(entry.path()),
-                issue_ref: None,
-                auto_spawned: false,
-            });
-        }
-
-        workers.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut workers: Vec<Self> = repo
+            .list_worktrees()
+            .unwrap_or_default()
+            .iter()
+            .map(Self::from)
+            .collect();
+        workers.sort_by(|a, b| a.branch.cmp(&b.branch));
         workers
     }
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::Args;
 
 use jig_core::config::GlobalConfig;
-use crate::daemon::{self, DaemonConfig, RuntimeConfig};
+use jig_daemon::{DaemonConfig, RuntimeConfig};
 
 use crate::op::{NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -40,7 +40,7 @@ impl Op for Daemon {
         ui::success(&format!("Daemon started (polling every {}s)", interval));
         eprintln!("{}", ui::dim("Press Ctrl+C to stop."));
 
-        daemon::run_with(&config, RuntimeConfig::default(), |_tick, _quit| {
+        jig_daemon::run_with(&config, RuntimeConfig::default(), |_tick, _quit| {
             std::thread::sleep(Duration::from_secs(interval));
             true
         })?;

@@ -10,7 +10,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{self, disable_raw_mode};
 
 use jig_core::config::JigToml;
-use crate::daemon::{DaemonConfig, RuntimeConfig, TickResult, TimerInfo};
+use jig_daemon::{DaemonConfig, RuntimeConfig, TickResult};
 
 use crate::op::{GlobalCtx, NoOutput, Op, RepoCtx};
 use crate::ui;
@@ -74,7 +74,7 @@ impl Ps {
 
         let mut display = vec![];
         let mut triage_display = vec![];
-        crate::daemon::run_with(&daemon_config, runtime_config, |tick, _| {
+        jig_daemon::run_with(&daemon_config, runtime_config, |tick, _| {
             display.clone_from(&tick.worker_display);
             triage_display.clone_from(&tick.triage_display);
             false
@@ -123,8 +123,7 @@ impl Ps {
 
         RuntimeConfig {
             max_concurrent_workers,
-            auto_spawn_interval: spawn_config.resolve_auto_spawn_interval(&global_config.spawn),
-            sync_interval: 60,
+            poll_interval: spawn_config.resolve_auto_spawn_interval(&global_config.spawn),
         }
     }
 }
@@ -261,7 +260,7 @@ fn run_watch(
         });
     }
 
-    let result = crate::daemon::run_with(&daemon_config, runtime_config, |tick, quit| {
+    let result = jig_daemon::run_with(&daemon_config, runtime_config, |tick, quit| {
         // The background thread sets quit_for_thread; propagate to the daemon's quit flag
         if quit_for_thread.load(Ordering::Relaxed) {
             quit.store(true, Ordering::Relaxed);
@@ -311,7 +310,10 @@ fn run_watch(
                         )
                     };
                     let nudge_section = format_nudge_messages(&tick.nudge_messages);
-                    let timer_section = format_timer_info(&tick.timer_info);
+                    let timer_section = format!(
+                        "  poll: {}",
+                        ui::format_duration_short(tick.poll_remaining_secs)
+                    );
                     let triage_section = if triage_output.is_empty() {
                         String::new()
                     } else {
@@ -427,19 +429,4 @@ fn format_nudge_messages(messages: &[(String, String, String)]) -> String {
         ));
     }
     format!("\n{}\n", lines.join("\n"))
-}
-
-/// Format timer info for the footer line.
-fn format_timer_info(timer: &Option<TimerInfo>) -> String {
-    let Some(timer) = timer else {
-        return String::new();
-    };
-    let mut parts = vec![format!(
-        "sync: {}",
-        ui::format_duration_short(timer.sync_remaining)
-    )];
-    if let Some(poll) = timer.poll_remaining {
-        parts.push(format!("poll: {}", ui::format_duration_short(poll)));
-    }
-    format!("  {}", parts.join("  "))
 }

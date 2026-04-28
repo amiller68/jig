@@ -65,7 +65,7 @@ impl Op for Resume {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            crate::daemon::recovery::RecoveryScanner::read_spawn_context(&repo_name, &self.name)
+            jig_daemon::recovery::RecoveryScanner::read_spawn_context(&repo_name, &self.name)
                 .unwrap_or_else(|| "You were interrupted. Resume your previous task.".to_string())
         };
 

@@ -78,10 +78,33 @@ impl Repo {
     }
 
     // ------------------------------------------------------------------
+    // Remote operations
+    // ------------------------------------------------------------------
+
+    /// Fetch from a remote. If `refspecs` is empty, fetches all refs.
+    pub fn fetch(&self, remote: &str, refspecs: &[&str]) -> Result<()> {
+        let mut remote = self.inner.find_remote(remote)?;
+        remote.fetch(refspecs, None, None)?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
     // Branch operations
     // ------------------------------------------------------------------
 
     /// Check if a branch exists (local or remote).
+    pub fn remote_branch_exists(&self, branch: &Branch) -> bool {
+        let name: &str = branch;
+        let remote_ref = if name.starts_with("origin/") {
+            name.to_string()
+        } else {
+            format!("origin/{}", name)
+        };
+        self.inner
+            .find_branch(&remote_ref, git2::BranchType::Remote)
+            .is_ok()
+    }
+
     pub fn branch_exists(&self, branch: &Branch) -> Result<bool> {
         let name: &str = branch;
         let local = name.strip_prefix("origin/").unwrap_or(name);

@@ -44,7 +44,7 @@ impl Op for Exit {
         let cfg = ctx.config()?;
 
         let wt = Worktree::current()?;
-        let name = wt.name();
+        let name = wt.branch_name();
 
         wt.remove(self.force)?;
 

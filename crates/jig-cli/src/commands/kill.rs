@@ -42,7 +42,7 @@ impl Op for Kill {
             for worker in &workers {
                 let _ = worker.kill();
                 worker.unregister()?;
-                ui::success(&format!("Killed '{}'", ui::highlight(worker.name())));
+                ui::success(&format!("Killed '{}'", ui::highlight(worker.branch())));
             }
             return Ok(NoOutput);
         }
@@ -51,7 +51,7 @@ impl Op for Kill {
         let workers = Worker::discover(cfg);
         let worker = workers
             .iter()
-            .find(|w| w.name() == name)
+            .find(|w| w.branch() == name)
             .ok_or_else(|| jig_core::Error::Custom(format!("worker '{}' not found", name)))?;
         let _ = worker.kill();
         worker.unregister()?;
@@ -67,7 +67,7 @@ impl Op for Kill {
                 for worker in &workers {
                     let _ = worker.kill();
                     worker.unregister()?;
-                    ui::success(&format!("Killed '{}'", ui::highlight(worker.name())));
+                    ui::success(&format!("Killed '{}'", ui::highlight(worker.branch())));
                     killed += 1;
                 }
             }
@@ -82,7 +82,7 @@ impl Op for Kill {
         let workers = Worker::discover(cfg);
         let worker = workers
             .iter()
-            .find(|w| w.name() == name)
+            .find(|w| w.branch() == name)
             .ok_or_else(|| jig_core::Error::Custom(format!("worker '{}' not found", name)))?;
         let _ = worker.kill();
         worker.unregister()?;

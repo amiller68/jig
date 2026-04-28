@@ -185,7 +185,7 @@ impl<'a> RecoveryScanner<'a> {
             return None;
         }
 
-        let event_log = EventLog::for_worker(repo_name, w.name()).ok()?;
+        let event_log = EventLog::for_worker(repo_name, w.branch()).ok()?;
         let events = event_log.read_all().ok()?;
         if events.is_empty() {
             return None;
@@ -196,7 +196,7 @@ impl<'a> RecoveryScanner<'a> {
         if Self::should_recover(state.status) {
             Some(OrphanedWorker {
                 repo_name: repo_name.to_string(),
-                worker_name: w.name().to_string(),
+                worker_name: w.branch().to_string(),
                 status: state.status,
                 worker: w.clone(),
             })

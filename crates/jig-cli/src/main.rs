@@ -5,7 +5,6 @@ mod op;
 
 mod cli;
 mod commands;
-pub(crate) mod daemon;
 mod ui;
 
 use std::io::IsTerminal;

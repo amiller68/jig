@@ -1,17 +1,111 @@
 //! Triage actor — runs ephemeral triage agents as direct subprocesses.
-//!
-//! Unlike normal workers (which run in tmux windows), triage workers are
-//! one-shot read-only agents that don't need interactive sessions. This actor
-//! receives `TriageRequest`s, spawns each triage as a `std::process::Command`
-//! subprocess, and returns `TriageComplete`s with per-issue results.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use jig_core::agents;
 use jig_core::config::{self, Config};
-use jig_core::issues::Issue;
+use jig_core::issues::{Issue, ProviderKind};
 
-use super::messages::{TriageComplete, TriageIssue, TriageRequest, TriageResult};
+use crate::actors::Actor;
+
+/// A triage issue to run as a direct subprocess.
+#[derive(Debug, Clone)]
+pub struct TriageIssue {
+    /// Repo root path.
+    pub repo_root: PathBuf,
+    /// The parsed issue.
+    pub issue: Issue,
+    /// Derived worker name (e.g., "triage-jig-38").
+    pub worker_name: String,
+    /// Provider kind for status updates.
+    pub provider_kind: ProviderKind,
+}
+
+/// Request sent to the triage actor to run triage subprocesses.
+pub struct TriageRequest {
+    pub issues: Vec<TriageIssue>,
+}
+
+/// Result of a single triage subprocess.
+pub struct TriageResult {
+    /// Worker name (e.g., "triage-jig-38").
+    pub worker_name: String,
+    /// Repo name for notifications.
+    pub repo_name: String,
+    /// Issue ID for tracker cleanup.
+    pub issue_id: String,
+    /// Error message if the triage failed, None on success.
+    pub error: Option<String>,
+}
+
+/// Response from the triage actor.
+pub struct TriageComplete {
+    pub results: Vec<TriageResult>,
+}
+
+pub struct TriageActor {
+    tx: flume::Sender<TriageRequest>,
+    rx: flume::Receiver<TriageComplete>,
+    pending: bool,
+}
+
+impl Actor for TriageActor {
+    type Request = TriageRequest;
+    type Response = TriageComplete;
+
+    const NAME: &'static str = "jig-triage";
+    const QUEUE_SIZE: usize = 1;
+
+    fn handle(req: TriageRequest) -> TriageComplete {
+        let mut results = Vec::new();
+
+        for issue in &req.issues {
+            let result = run_single(issue);
+            results.push(result);
+        }
+
+        TriageComplete { results }
+    }
+
+    fn send(&mut self, req: TriageRequest) -> bool {
+        if self.pending {
+            return false;
+        }
+        if self.tx.try_send(req).is_ok() {
+            self.pending = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn drain(&mut self) -> Vec<TriageComplete> {
+        match self.rx.try_recv() {
+            Ok(result) => {
+                self.pending = false;
+                vec![result]
+            }
+            Err(_) => vec![],
+        }
+    }
+
+    fn from_channels(
+        tx: flume::Sender<TriageRequest>,
+        rx: flume::Receiver<TriageComplete>,
+    ) -> Self {
+        Self {
+            tx,
+            rx,
+            pending: false,
+        }
+    }
+}
+
+impl TriageActor {
+    pub fn is_pending(&self) -> bool {
+        self.pending
+    }
+}
 
 const TRIAGE_PROMPT: &str = r#"You are triaging issue {{issue_id}}: {{issue_title}}
 
@@ -60,31 +154,6 @@ Structure your findings as:
 
 const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)"];
 
-/// Spawn the triage actor thread. Returns immediately.
-pub fn spawn(
-    rx: flume::Receiver<TriageRequest>,
-    tx: flume::Sender<TriageComplete>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("jig-triage".into())
-        .spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let mut results = Vec::new();
-
-                for issue in &req.issues {
-                    let result = run_single(issue);
-                    results.push(result);
-                }
-
-                if tx.send(TriageComplete { results }).is_err() {
-                    break;
-                }
-            }
-        })
-        .expect("failed to spawn triage actor thread")
-}
-
-/// Run a single triage subprocess and produce a result.
 fn run_single(issue: &TriageIssue) -> TriageResult {
     let repo_name = issue
         .repo_root
@@ -128,7 +197,6 @@ fn run_single(issue: &TriageIssue) -> TriageResult {
     }
 }
 
-/// Render the triage prompt for an issue.
 fn render_triage_prompt(repo_root: &Path, issue: &Issue) -> jig_core::error::Result<String> {
     let repo_name = repo_root
         .file_name()
@@ -144,7 +212,6 @@ fn render_triage_prompt(repo_root: &Path, issue: &Issue) -> jig_core::error::Res
         .render()
 }
 
-/// Run a triage agent as a direct subprocess (blocking).
 pub(crate) fn run_triage_subprocess(
     repo_root: &Path,
     issue: &Issue,
@@ -196,7 +263,6 @@ mod tests {
     use super::*;
     use jig_core::git::Branch;
     use jig_core::issues::{IssuePriority, IssueStatus, ProviderKind};
-    use std::path::PathBuf;
 
     fn make_triage_issue(id: &str, worker: &str) -> TriageIssue {
         TriageIssue {

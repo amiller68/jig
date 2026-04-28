@@ -9,22 +9,15 @@
 //! 6. Trigger issue poll for auto-spawn
 //! 7. Auto-spawn eligible workers
 
+pub mod actors;
+mod config;
 mod discovery;
 mod dispatch;
 mod display;
-pub mod github_actor;
-pub mod issue_actor;
 pub mod lifecycle;
-pub mod messages;
-pub mod nudge_actor;
 mod pr;
-pub mod prune_actor;
 pub mod recovery;
-pub mod review_actor;
 pub mod runtime;
-pub mod spawn_actor;
-pub mod sync_actor;
-pub mod triage_actor;
 pub mod triage_tracker;
 
 use std::collections::{HashMap, HashSet};
@@ -47,65 +40,13 @@ use jig_core::worker::TmuxStatus;
 use jig_core::worker::events::{Event, EventKind, EventLog, TerminalKind, WorkerState};
 use jig_core::worker::WorkerStatus;
 
+use actors::Actor;
 use discovery::discover_workers;
 
-
+pub use actors::spawn::SpawnableIssue;
+pub use config::{DaemonConfig, TickResult};
 pub use display::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
-pub use messages::SpawnableIssue;
-pub use runtime::{DaemonRuntime, RuntimeConfig, TimerInfo};
-
-/// Configuration for the daemon loop.
-#[derive(Debug, Clone)]
-pub struct DaemonConfig {
-    /// How often to poll, in seconds.
-    pub interval_seconds: u64,
-    /// Whether to run once and exit (vs. looping).
-    pub once: bool,
-    /// Tmux session prefix (default: "jig-").
-    pub session_prefix: String,
-    /// Skip `git fetch` on each tick (unused with actors — kept for API compat).
-    pub skip_sync: bool,
-    /// If set, only process workers for this repo name.
-    pub repo_filter: Option<String>,
-}
-
-impl Default for DaemonConfig {
-    fn default() -> Self {
-        Self {
-            interval_seconds: 30,
-            once: false,
-            session_prefix: "jig-".to_string(),
-            skip_sync: false,
-            repo_filter: None,
-        }
-    }
-}
-
-/// Result of a single daemon tick.
-#[derive(Debug, Default)]
-pub struct TickResult {
-    pub workers_checked: usize,
-    pub actions_dispatched: usize,
-    pub nudges_sent: usize,
-    pub notifications_sent: usize,
-    pub errors: Vec<String>,
-    /// Per-worker PR health info, keyed by "repo/worker".
-    pub worker_info: HashMap<String, WorkerTickInfo>,
-    /// Issues auto-spawned this tick (completed).
-    pub auto_spawned: Vec<String>,
-    /// Worker names currently being spawned in the background.
-    pub spawning: Vec<String>,
-    /// Workers pruned (worktree removed) this tick.
-    pub pruned: Vec<String>,
-    /// Pre-computed display data for the render callback (zero I/O).
-    pub worker_display: Vec<WorkerDisplayInfo>,
-    /// Pre-computed display data for in-flight triages.
-    pub triage_display: Vec<TriageDisplayInfo>,
-    /// Nudge messages delivered this tick: (worker_name, nudge_type, message_text).
-    pub nudge_messages: Vec<(String, String, String)>,
-    /// Timer info for the daemon's sync and poll intervals.
-    pub timer_info: Option<TimerInfo>,
-}
+pub use runtime::{DaemonRuntime, RuntimeConfig};
 
 /// The daemon orchestrator — holds references to shared infrastructure.
 pub struct Daemon<'a> {
@@ -227,7 +168,7 @@ impl<'a> Daemon<'a> {
         &self,
         workers_state: &WorkersState,
         registry: &RepoRegistry,
-        runtime: &DaemonRuntime,
+        runtime: &mut DaemonRuntime,
     ) {
         // Build a set of parent branches that child workers depend on.
         let mut parent_branches: HashSet<(String, String)> = HashSet::new();
@@ -257,7 +198,7 @@ impl<'a> Daemon<'a> {
                 }
             });
 
-            let (worker_name, branch_name) = match parent_worker {
+            let (worker_name, _branch_name) = match parent_worker {
                 Some(pw) => pw,
                 None => continue,
             };
@@ -295,26 +236,21 @@ impl<'a> Daemon<'a> {
                         );
 
                         // Nudge the parent worker to let it know about new commits
-                        let session_name =
-                            format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                        let window = TmuxWindow::new(&session_name, &worker_name);
+                        let worker = jig_core::worker::Worker::from_branch(
+                            &repo_entry.path,
+                            worker_name.as_str().into(),
+                        );
+                        if worker.has_tmux_window() {
+                            let prompt = Prompt::new(
+                                "Child work has been merged into your branch. \
+                                 New commits are available. Run `git log --oneline -5` \
+                                 to see what changed.",
+                            )
+                            .named("parent_update");
 
-                        if window.exists() {
-                            let key = format!("{}/{}", repo_name, worker_name);
-                            let message = "Child work has been merged into your branch. \
-                                           New commits are available. Run `git log --oneline -5` \
-                                           to see what changed."
-                                .to_string();
-
-                            runtime.send_nudge(messages::NudgeRequest {
-                                session: session_name,
-                                window: branch_name,
-                                message,
-                                nudge_type_key: "parent_update".to_string(),
-                                is_stuck: false,
-                                repo_name: repo_name.to_string(),
-                                worker_name: worker_name.to_string(),
-                                worker_key: key,
+                            runtime.nudge.send(actors::nudge::NudgeRequest {
+                                worker,
+                                prompt,
                             });
                         }
                     }
@@ -410,14 +346,14 @@ impl<'a> Daemon<'a> {
         tracing::debug!(count = worker_list.len(), "discovered workers");
 
         // 1. Drain all pending actor responses (non-blocking)
-        runtime.drain_sync();
+        runtime.sync.drain().into_iter().next();
 
         // Parent-update phase: after sync, check if parent worktrees have new
         // remote commits (from child PR merges) and pull them in.
         self.update_parent_worktrees(&workers_state, &registry, runtime);
 
-        runtime.drain_github();
-        let issue_response = runtime.drain_issues();
+        runtime.github.drain();
+        let issue_response = runtime.issues.drain().into_iter().next();
         let mut spawnable = issue_response
             .as_ref()
             .map(|r| r.spawnable.clone())
@@ -428,7 +364,7 @@ impl<'a> Daemon<'a> {
             .unwrap_or_default();
         // Accumulate parent branch results from both async and inline-poll
         // paths so the sync actor can fetch their tracking refs.
-        let mut parent_branch_results: Vec<messages::ParentBranchResult> = issue_response
+        let mut parent_branch_results: Vec<actors::issue::ParentBranchResult> = issue_response
             .as_ref()
             .map(|r| r.parent_branches.clone())
             .unwrap_or_default();
@@ -451,8 +387,8 @@ impl<'a> Daemon<'a> {
         // Repo isolation: `filtered_repos` respects `repo_filter`, so when
         // `jig ps -w` runs within a single repo only that repo is polled.
         // Workers are never spawned for repos outside the filter scope.
-        if spawnable.is_empty() && runtime.should_first_poll() {
-            runtime.mark_first_poll_done();
+        if spawnable.is_empty() && runtime.issues.should_first_poll() {
+            runtime.issues.mark_first_poll_done();
 
             let repos: Vec<(std::path::PathBuf, String)> = registry
                 .filtered_repos(self.daemon_config.repo_filter.as_deref())
@@ -465,11 +401,11 @@ impl<'a> Daemon<'a> {
                 .collect();
 
             if !repos.is_empty() {
-                let req = messages::IssueRequest {
+                let req = actors::issue::IssueRequest {
                     repos,
                     existing_workers: worker_list.clone(),
                 };
-                let response = issue_actor::process_request(&req);
+                let response = actors::issue::process_request(&req);
                 spawnable = response.spawnable;
                 triageable = response.triageable;
                 // Log parent branch results from inline poll
@@ -504,13 +440,13 @@ impl<'a> Daemon<'a> {
             let now = chrono::Utc::now().timestamp();
 
             // Filter triageable issues to those not already being triaged
-            triageable.retain(|issue| !runtime.triage_tracker().is_active(issue.issue.id()));
+            triageable.retain(|issue| !runtime.triage_tracker.is_active(issue.issue.id()));
 
             // Stuck triage detection: check each active triage against its
             // repo's configured timeout (from [triage] timeout_seconds).
             let stuck_ids: Vec<(String, String, String)> = {
                 let mut stuck = Vec::new();
-                for entry in runtime.triage_tracker().stuck_entries() {
+                for entry in runtime.triage_tracker.stuck_entries() {
                     // Load per-repo triage timeout
                     let timeout = Self::find_repo_path(&registry, &entry.repo_name)
                         .and_then(|re| JigToml::load(&re.path).ok().flatten())
@@ -552,7 +488,7 @@ impl<'a> Daemon<'a> {
                 // tracker entry is cleared so a fresh triage can be dispatched
                 // on a later tick. In-flight subprocess is owned by the
                 // triage_actor and will be reported via drain_triage().
-                runtime.triage_tracker_mut().remove(issue_id);
+                runtime.triage_tracker.remove(issue_id);
             }
 
             // Triage worker completion is now handled by drain_triage() above —
@@ -560,11 +496,10 @@ impl<'a> Daemon<'a> {
         }
 
         // Drain nudge completions from previous tick
-        for nudge_result in runtime.drain_nudges() {
+        for nudge_result in runtime.nudge.drain() {
             if let Some(err) = nudge_result.error {
                 tracing::warn!(
                     worker = %nudge_result.worker_key,
-                    nudge_type = %nudge_result.nudge_type_key,
                     "nudge delivery error: {}",
                     err
                 );
@@ -572,7 +507,7 @@ impl<'a> Daemon<'a> {
         }
 
         // Drain review completions from previous tick
-        for review_result in runtime.drain_reviews() {
+        for review_result in runtime.review.drain() {
             if let Some(err) = review_result.error {
                 tracing::warn!(
                     worker = %review_result.worker_key,
@@ -608,7 +543,7 @@ impl<'a> Daemon<'a> {
             match verdict {
                 Some(ReviewVerdict::Approve) => {
                     // Mark PR ready for review
-                    if let Some(cached) = runtime.get_cached_pr(worker_key) {
+                    if let Some(cached) = runtime.github.get_cached(worker_key) {
                         if let Some(ref pr_url) = cached.pr_url {
                             if let Some(pr_number) = pr_url.rsplit('/').next() {
                                 let repo_path =
@@ -680,7 +615,7 @@ impl<'a> Daemon<'a> {
 
                     // Emit notification
                     let pr_url = runtime
-                        .get_cached_pr(worker_key)
+                        .github.get_cached(worker_key)
                         .and_then(|c| c.pr_url.clone());
                     let event = NotificationEvent::ReviewApproved {
                         repo: rname.to_string(),
@@ -695,78 +630,48 @@ impl<'a> Daemon<'a> {
                     }
                 }
                 Some(ReviewVerdict::ChangesRequested) => {
-                    // Dispatch AutoReview nudge to the implementation agent
-                    let session_name = format!("{}{}", self.daemon_config.session_prefix, rname);
-                    let branch = workers_state
-                        .get_worker(worker_key)
-                        .map(|e| e.branch.clone())
-                        .unwrap_or_else(|| wname.to_string());
-                    let window = TmuxWindow::new(&session_name, &branch);
+                    let repo_path = Self::find_repo_path(&registry, rname).map(|e| e.path.clone());
+                    if let Some(rp) = repo_path {
+                        let branch: jig_core::git::Branch = wname.into();
+                        let worker = jig_core::worker::Worker::from_branch(&rp, branch);
 
-                    if window.exists() {
-                        // Load review config to get max_rounds
-                        let review_cfg = Self::find_repo_path(&registry, rname)
-                            .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
-                            .map(|t| t.review)
-                            .unwrap_or_default();
+                        if worker.has_tmux_window() {
+                            let review_cfg = Self::find_repo_path(&registry, rname)
+                                .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                                .map(|t| t.review)
+                                .unwrap_or_default();
 
-                        let round = review_count(&worktree_path);
-                        let max_rounds = review_cfg.max_rounds;
+                            let round = review_count(&worktree_path);
+                            let max_rounds = review_cfg.max_rounds;
 
-                        // Build nudge context with review-specific fields
-                        let repo_health = Self::load_repo_health_config(&registry, rname);
-                        let resolve = Self::make_nudge_resolver(&repo_health, &self.config.health);
-                        let resolved = resolve("auto_review");
+                            let repo_health = Self::load_repo_health_config(&registry, rname);
+                            let resolve = Self::make_nudge_resolver(&repo_health, &self.config.health);
+                            let resolved = resolve("auto_review");
 
-                        let event_log_result = EventLog::for_worker(rname, wname);
-                        let effective_health =
-                            Self::effective_health_config(&repo_health, &self.config.health);
+                            let effective_health =
+                                Self::effective_health_config(&repo_health, &self.config.health);
 
-                        if let Ok(event_log) = event_log_result {
-                            if let Ok(events) = event_log.read_all() {
-                                let state = WorkerState::reduce(&events, &effective_health);
-                                let count = state.nudge_counts.get("auto_review").copied().unwrap_or(0);
-                                let review_file = format!("{:03}.md", round);
-                                let message = match Prompt::new(pr::TEMPLATE_AUTO_REVIEW)
-                                    .named("auto_review")
-                                    .var_num("nudge_count", count + 1)
-                                    .var_num("max_nudges", resolved.max)
-                                    .var_bool("is_final_nudge", count + 1 >= resolved.max)
-                                    .var_num("review_round", round)
-                                    .var_num("max_rounds", max_rounds)
-                                    .var_bool("is_final_round", round >= max_rounds)
-                                    .var("review_file", &review_file)
-                                    .var_num("review_number", round)
-                                    .render()
-                                {
-                                    Ok(msg) => msg,
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            worker = %worker_key,
-                                            "auto-review nudge template render failed: {}", e
-                                        );
-                                        // Update last_reviewed_sha even on template failure
-                                        if let Some(sha) = &head_sha {
-                                            if let Some(entry) =
-                                                workers_state.workers.get_mut(worker_key)
-                                            {
-                                                entry.last_reviewed_sha = Some(sha.clone());
-                                            }
-                                        }
-                                        continue;
-                                    }
-                                };
+                            if let Ok(event_log) = EventLog::for_worker(rname, wname) {
+                                if let Ok(events) = event_log.read_all() {
+                                    let state = WorkerState::reduce(&events, &effective_health);
+                                    let count = state.nudge_counts.get("auto_review").copied().unwrap_or(0);
+                                    let review_file = format!("{:03}.md", round);
+                                    let prompt = Prompt::new(pr::TEMPLATE_AUTO_REVIEW)
+                                        .named("auto_review")
+                                        .var_num("nudge_count", count + 1)
+                                        .var_num("max_nudges", resolved.max)
+                                        .var_bool("is_final_nudge", count + 1 >= resolved.max)
+                                        .var_num("review_round", round)
+                                        .var_num("max_rounds", max_rounds)
+                                        .var_bool("is_final_round", round >= max_rounds)
+                                        .var("review_file", &review_file)
+                                        .var_num("review_number", round);
 
-                                runtime.send_nudge(messages::NudgeRequest {
-                                    session: session_name,
-                                    window: branch,
-                                    message,
-                                    nudge_type_key: "auto_review".to_string(),
-                                    is_stuck: false,
-                                    repo_name: rname.to_string(),
-                                    worker_name: wname.to_string(),
-                                    worker_key: worker_key.to_string(),
-                                });
+                                    runtime.nudge.send(actors::nudge::NudgeRequest {
+                                        worker,
+                                        prompt,
+                                    });
+                                }
                             }
                         }
                     }
@@ -788,7 +693,7 @@ impl<'a> Daemon<'a> {
         }
 
         // Drain prune results from previous tick
-        if let Some(prune_complete) = runtime.drain_prune() {
+        if let Some(prune_complete) = runtime.prune.drain().into_iter().next() {
             for pr in prune_complete.results {
                 if let Some(err) = pr.error {
                     result.errors.push(format!("prune {}: {}", pr.key, err));
@@ -799,7 +704,7 @@ impl<'a> Daemon<'a> {
         }
 
         // Drain spawn results from previous tick
-        if let Some(spawn_complete) = runtime.drain_spawn() {
+        if let Some(spawn_complete) = runtime.spawn.drain().into_iter().next() {
             for sr in spawn_complete.results {
                 if let Some(err) = sr.error {
                     result
@@ -824,10 +729,10 @@ impl<'a> Daemon<'a> {
         }
 
         // Drain triage results from previous tick
-        if let Some(triage_complete) = runtime.drain_triage() {
+        if let Some(triage_complete) = runtime.triage.drain().into_iter().next() {
             for tr in triage_complete.results {
                 // Remove from tracker regardless of success/failure
-                runtime.triage_tracker_mut().remove(&tr.issue_id);
+                runtime.triage_tracker.remove(&tr.issue_id);
 
                 if let Some(err) = tr.error {
                     tracing::warn!(
@@ -893,11 +798,42 @@ impl<'a> Daemon<'a> {
                 }
             }
 
-            runtime.maybe_trigger_sync(
-                &registry,
-                self.daemon_config.repo_filter.as_deref(),
-                parent_branches,
-            );
+            if runtime.poll_is_due() {
+                let filtered = registry.filtered_repos(self.daemon_config.repo_filter.as_deref());
+
+                let sync_repos: Vec<(String, std::path::PathBuf, String)> = filtered
+                    .iter()
+                    .filter_map(|entry| {
+                        let name = entry.path.file_name()?.to_string_lossy().to_string();
+                        let base = Config::resolve_base_branch_for(&entry.path)
+                            .unwrap_or_else(|_| jig_core::config::DEFAULT_BASE_BRANCH.to_string());
+                        Some((name, entry.path.clone(), base))
+                    })
+                    .collect();
+                if !sync_repos.is_empty() {
+                    runtime.sync.send(actors::sync::SyncRequest {
+                        repos: sync_repos,
+                        parent_branches,
+                    });
+                }
+
+                let poll_repos: Vec<(std::path::PathBuf, String)> = filtered
+                    .iter()
+                    .map(|entry| {
+                        let base = Config::resolve_base_branch_for(&entry.path)
+                            .unwrap_or_else(|_| jig_core::config::DEFAULT_BASE_BRANCH.to_string());
+                        (entry.path.clone(), base)
+                    })
+                    .collect();
+                if !poll_repos.is_empty() {
+                    runtime.issues.send(actors::issue::IssueRequest {
+                        repos: poll_repos,
+                        existing_workers: worker_list.clone(),
+                    });
+                }
+
+                runtime.mark_polled();
+            }
         }
 
         // 3. Process each worker
@@ -946,7 +882,7 @@ impl<'a> Daemon<'a> {
 
         // Live path: send prune targets from Cleanup actions
         if !live_prune_targets.is_empty() {
-            runtime.send_prune(live_prune_targets);
+            runtime.prune.send(actors::prune::PruneRequest { targets: live_prune_targets });
         }
 
         // Filter out terminal workers and workers with no tmux session
@@ -964,7 +900,7 @@ impl<'a> Daemon<'a> {
         // Build triage display from tracker
         {
             let now = chrono::Utc::now().timestamp();
-            for entry in runtime.triage_tracker().active_entries() {
+            for entry in runtime.triage_tracker.active_entries() {
                 let model = Self::find_repo_path(&registry, &entry.repo_name)
                     .and_then(|re| JigToml::load(&re.path).ok().flatten())
                     .map(|toml| toml.triage.model.clone())
@@ -989,17 +925,17 @@ impl<'a> Daemon<'a> {
 
         // Recovery path: scan github cache for merged/closed PRs with worktrees still on disk.
         // This catches workers whose PRs were merged/closed while the daemon was off.
-        if !runtime.prune_pending() {
+        if !runtime.prune.is_pending() {
             let mut prune_targets = Vec::new();
             for (repo_name, worker_name) in &worker_list {
                 let key = format!("{}/{}", repo_name, worker_name);
-                if let Some(cached) = runtime.get_cached_pr(&key) {
+                if let Some(cached) = runtime.github.get_cached(&key) {
                     if cached.pr_merged || cached.pr_closed {
                         if let Some(entry) = Self::find_repo_path(&registry, repo_name) {
                             let worktree_path =
                                 jig_core::config::worktree_path(&entry.path, worker_name);
                             if worktree_path.exists() {
-                                prune_targets.push(messages::PruneTarget {
+                                prune_targets.push(actors::prune::PruneTarget {
                                     repo_path: entry.path.clone(),
                                     repo_name: repo_name.clone(),
                                     worker_name: worker_name.clone(),
@@ -1009,19 +945,12 @@ impl<'a> Daemon<'a> {
                     }
                 }
             }
-            runtime.send_prune(prune_targets);
+            runtime.prune.send(actors::prune::PruneRequest { targets: prune_targets });
         }
 
-        // 4. Trigger issue poll if auto-spawn enabled (scoped to repo_filter)
-        runtime.maybe_trigger_issue_poll(
-            &registry,
-            &worker_list,
-            self.daemon_config.repo_filter.as_deref(),
-        );
-
-        // 5. Send spawnable issues to background spawn actor (non-blocking).
+        // 4. Send spawnable issues to background spawn actor (non-blocking).
         if !spawnable.is_empty() {
-            runtime.send_spawn(spawnable);
+            runtime.spawn.send(actors::spawn::SpawnRequest { issues: spawnable });
         }
 
         // 6. Send triageable issues to background triage actor (subprocess, non-blocking).
@@ -1038,7 +967,7 @@ impl<'a> Daemon<'a> {
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                runtime.triage_tracker_mut().register(
+                runtime.triage_tracker.register(
                     ti.issue.id().to_string(),
                     triage_tracker::TriageEntry {
                         worker_name: ti.worker_name.clone(),
@@ -1048,11 +977,11 @@ impl<'a> Daemon<'a> {
                     },
                 );
             }
-            runtime.send_triage(triageable);
+            runtime.triage.send(actors::triage::TriageRequest { issues: triageable });
         }
 
-        result.spawning = runtime.spawning_workers().to_vec();
-        result.timer_info = Some(runtime.timer_info());
+        result.spawning = runtime.spawn.spawning_workers().to_vec();
+        result.poll_remaining_secs = runtime.poll_remaining_secs();
 
         Ok(result)
     }
@@ -1073,7 +1002,7 @@ impl<'a> Daemon<'a> {
         usize,
         WorkerTickInfo,
         WorkerDisplayInfo,
-        Vec<messages::PruneTarget>,
+        Vec<actors::prune::PruneTarget>,
         Vec<(String, String)>,
     )> {
         // Load per-repo health config
@@ -1094,7 +1023,7 @@ impl<'a> Daemon<'a> {
         let mut worker_tick_info = WorkerTickInfo::default();
         let mut is_draft = false;
 
-        if let Some(cached) = runtime.get_cached_pr(key) {
+        if let Some(cached) = runtime.github.get_cached(key) {
             worker_tick_info.has_pr = cached.pr_url.is_some();
             if let Some(ref err) = cached.pr_error {
                 worker_tick_info.pr_error = Some(err.clone());
@@ -1118,7 +1047,13 @@ impl<'a> Daemon<'a> {
 
         // Request PR check for next tick if worker is active
         if !new_state.status.is_terminal() {
-            runtime.request_pr_check(key, repo_name, &branch_name, new_state.pr_url.as_deref());
+            runtime.github.send(actors::github::GitHubRequest {
+                worker_key: key.to_string(),
+                repo_name: repo_name.to_string(),
+                branch: branch_name.clone(),
+                pr_url: new_state.pr_url.clone(),
+                previous_is_draft: runtime.github.previous_is_draft(key),
+            });
         }
 
         // Re-read state with potential PrOpened event
@@ -1203,7 +1138,7 @@ impl<'a> Daemon<'a> {
         let mut current_review_feedback_count: Option<u32> = None;
 
         // Handle merged/closed PR from cached data
-        if let Some(cached) = runtime.get_cached_pr(key) {
+        if let Some(cached) = runtime.github.get_cached(key) {
             current_review_feedback_count = cached.review_feedback_count;
 
             if cached.pr_merged && self.config.github.auto_cleanup_merged {
@@ -1364,7 +1299,7 @@ impl<'a> Daemon<'a> {
                 .map(|t| t.review)
                 .unwrap_or_default();
 
-            if review_config.enabled && is_draft && !runtime.review_pending(key) {
+            if review_config.enabled && is_draft && !runtime.review.is_pending(key) {
                 let last_reviewed = workers_state
                     .get_worker(key)
                     .and_then(|e| e.last_reviewed_sha.as_deref());
@@ -1387,7 +1322,7 @@ impl<'a> Daemon<'a> {
                     if needs_review && !at_max {
                         let base = Config::resolve_base_branch_for(&entry.path)
                             .unwrap_or_else(|_| jig_core::config::DEFAULT_BASE_BRANCH.to_string());
-                        runtime.send_review(messages::ReviewRequest {
+                        runtime.review.send(actors::review::ReviewRequest {
                             worker_key: key.to_string(),
                             worktree_path,
                             base_branch: format!("origin/{}", base),
@@ -1519,11 +1454,11 @@ impl<'a> Daemon<'a> {
         key: &str,
         event_log: &EventLog,
         registry: &RepoRegistry,
-        runtime: &DaemonRuntime,
+        runtime: &mut DaemonRuntime,
     ) -> (
         usize,
         usize,
-        Vec<messages::PruneTarget>,
+        Vec<actors::prune::PruneTarget>,
         Vec<(String, String)>,
     ) {
         let mut nudge_count = 0;
@@ -1537,15 +1472,18 @@ impl<'a> Daemon<'a> {
                     worker_id: _,
                     message,
                     nudge_key,
-                    is_stuck,
+                    is_stuck: _,
                     is_pr_nudge,
                 } => {
-                    let session_name =
-                        format!("{}{}", self.daemon_config.session_prefix, repo_name);
-                    let window = TmuxWindow::new(&session_name, branch_name.to_string());
+                    let worker = jig_core::worker::Worker::from_branch(
+                        &Self::find_repo_path(registry, repo_name)
+                            .map(|e| e.path.clone())
+                            .unwrap_or_default(),
+                        branch_name.into(),
+                    );
 
-                    if window.exists() {
-                        if !is_pr_nudge && !window.is_running() {
+                    if worker.has_tmux_window() {
+                        if !is_pr_nudge && !worker.is_agent_running() {
                             tracing::debug!(
                                 worker = key,
                                 "no command running in pane, skipping nudge"
@@ -1553,25 +1491,17 @@ impl<'a> Daemon<'a> {
                             continue;
                         }
 
-                        nudge_messages
-                            .push((nudge_key.clone(), message.clone()));
-                        runtime.send_nudge(messages::NudgeRequest {
-                            session: session_name,
-                            window: branch_name.to_string(),
-                            message: message.clone(),
-                            nudge_type_key: nudge_key.clone(),
-                            is_stuck: *is_stuck,
-                            repo_name: repo_name.to_string(),
-                            worker_name: worker_name.to_string(),
-                            worker_key: key.to_string(),
+                        nudge_messages.push((nudge_key.clone(), message.clone()));
+                        let prompt = Prompt::new(message).named(nudge_key);
+                        runtime.nudge.send(actors::nudge::NudgeRequest {
+                            worker,
+                            prompt,
                         });
                         nudge_count += 1;
                     } else {
                         tracing::debug!(
                             worker = key,
                             nudge_key = %nudge_key,
-                            session = %format!("{}{}", self.daemon_config.session_prefix, repo_name),
-                            window = %branch_name,
                             "tmux window not found, skipping nudge"
                         );
                     }
@@ -1670,7 +1600,7 @@ impl<'a> Daemon<'a> {
 
                     // Queue worktree for pruning
                     if let Some(entry) = Self::find_repo_path(registry, repo_name) {
-                        prune_targets.push(messages::PruneTarget {
+                        prune_targets.push(actors::prune::PruneTarget {
                             repo_path: entry.path.clone(),
                             repo_name: repo_name.to_string(),
                             worker_name: worker_id.clone(),
@@ -1925,7 +1855,7 @@ fn entry_to_worker_state(entry: &WorkerEntry) -> WorkerState {
         pr_url: entry.pr_url.clone(),
         nudge_counts: entry.nudge_counts.clone(),
         last_nudge_at: HashMap::new(),
-        issue_ref: entry.issue.as_ref().map(|s| IssueRef::new(s)),
+        issue_ref: entry.issue.as_ref().map(IssueRef::new),
         started_at: Some(entry.started_at),
         last_event_at: Some(entry.last_event_at),
     }
@@ -1977,8 +1907,7 @@ mod tests {
     fn runtime_config_defaults() {
         let config = RuntimeConfig::default();
         assert_eq!(config.max_concurrent_workers, 3);
-        assert_eq!(config.auto_spawn_interval, 120);
-        assert_eq!(config.sync_interval, 60);
+        assert_eq!(config.poll_interval, 60);
     }
 
     /// Helper: mirrors the review nudge reset logic from process_worker.

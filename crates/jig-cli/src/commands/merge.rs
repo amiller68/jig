@@ -55,7 +55,7 @@ impl Op for Merge {
 
         // Clean up worker state
         let workers = Worker::discover(cfg);
-        if let Some(worker) = workers.iter().find(|w| w.name() == self.name) {
+        if let Some(worker) = workers.iter().find(|w| w.branch() == self.name.as_str()) {
             worker.unregister()?;
             let _ = worker.kill();
         }

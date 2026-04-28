@@ -10,7 +10,7 @@ use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 use crossterm::terminal;
 
-use crate::daemon::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
+use jig_daemon::{TriageDisplayInfo, WorkerDisplayInfo, WorkerTickInfo};
 use jig_core::worker::TmuxStatus;
 use jig_core::worker::WorkerStatus;
 

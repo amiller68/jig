@@ -125,7 +125,7 @@ impl Op for Pr {
 fn resolve_base(repo_root: &std::path::Path, cfg: &jig_core::Config) -> Result<String, PrError> {
     // Try to detect if we're in a jig worktree
     let worktree_name = match Worktree::current() {
-        Ok(wt) => wt.name(),
+        Ok(wt) => wt.branch_name(),
         Err(_) => return Ok(cfg.base_branch()),
     };
 

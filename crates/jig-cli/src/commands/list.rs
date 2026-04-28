@@ -55,7 +55,7 @@ impl Op for List {
         let cfg = ctx.config()?;
         let git_repo = Repo::open(&cfg.repo_root)?;
         let worktrees = git_repo.list_worktrees()?;
-        let names: Vec<String> = worktrees.iter().map(|wt| wt.name()).collect();
+        let names: Vec<String> = worktrees.iter().map(|wt| wt.branch_name().to_string()).collect();
         if names.is_empty() {
             eprintln!("No worktrees found");
         }
@@ -118,7 +118,7 @@ impl List {
             first = false;
             out.push_str(&format!("{}:\n", ui::bold(&repo_name)));
             for wt in &worktrees {
-                out.push_str(&format!("  {}\n", wt.name()));
+                out.push_str(&format!("  {}\n", wt.branch_name().to_string()));
             }
         }
         Ok(ListOutput(out))
@@ -132,7 +132,7 @@ impl List {
             if wts.is_empty() {
                 continue;
             }
-            let worktrees: Vec<String> = wts.iter().map(|wt| wt.name()).collect();
+            let worktrees: Vec<String> = wts.iter().map(|wt| wt.branch_name().to_string()).collect();
             let repo_name = cfg
                 .repo_root
                 .file_name()
