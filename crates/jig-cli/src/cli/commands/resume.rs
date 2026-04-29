@@ -1,0 +1,90 @@
+//! Resume command — relaunch a dead worker's agent session
+
+use clap::Args;
+
+use crate::config;
+use crate::worker::TmuxWorker as Worker;
+use jig_core::agents;
+use jig_core::{Error, Prompt, Worktree};
+
+use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::ui;
+
+/// Resume a dead worker by relaunching its agent session
+#[derive(Args, Debug, Clone)]
+pub struct Resume {
+    /// Worker name to resume
+    pub name: String,
+
+    /// Override the task context for the resumed session
+    #[arg(long, short)]
+    pub context: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResumeError {
+    #[error(transparent)]
+    Core(#[from] Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::GitError),
+}
+
+impl Op for Resume {
+    type Error = ResumeError;
+    type Output = NoOutput;
+
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+        let cfg = ctx.config()?;
+
+        // Open existing worktree
+        let wt_path = cfg.worktrees_path.join(&self.name);
+        if !wt_path.exists() {
+            return Err(Error::WorktreeNotFound(self.name.clone()).into());
+        }
+        let wt = Worktree::open(&wt_path)?;
+
+        // Error if tmux window already exists
+        let pre = Worker::from(&wt);
+        if pre.has_mux_window() {
+            ui::failure(&format!(
+                "Worker '{}' already has a tmux window. Use '{}' to attach.",
+                ui::highlight(&self.name),
+                ui::highlight(&format!("jig attach {}", self.name))
+            ));
+            return Err(Error::Custom(format!(
+                "Worker '{}' already running — use `jig attach` instead",
+                self.name
+            ))
+            .into());
+        }
+
+        let effective_context = self
+            .context
+            .clone()
+            .unwrap_or_else(|| "You were interrupted. Resume your previous task.".to_string());
+
+        let jig_config = config::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
+        let agent = agents::Agent::from_name(&jig_config.agent.agent_type)
+            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude))
+            .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
+
+        let prompt =
+            Prompt::new(crate::worker::SPAWN_PREAMBLE).var("task_context", &effective_context);
+
+        Worker::resume(&wt, &agent, prompt)?;
+
+        ui::success(&format!(
+            "Resumed worker '{}' in tmux",
+            ui::highlight(&self.name)
+        ));
+
+        eprintln!();
+        eprintln!(
+            "  Use '{}' to attach",
+            ui::highlight(&format!("jig attach {}", self.name))
+        );
+        eprintln!("  Use '{}' to check status", ui::highlight("jig ps"));
+
+        Ok(NoOutput)
+    }
+}

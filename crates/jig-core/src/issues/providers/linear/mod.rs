@@ -1,17 +1,15 @@
 //! Linear issue provider.
 //!
 //! Fetches issues from the Linear GraphQL API, mapping them to jig's
-//! `Issue` type. Auth comes from a named profile in the global config.
+//! `Issue` type.
 
 pub mod client;
 mod provider;
 
-use crate::config::GlobalConfig;
-use crate::config::LinearIssuesConfig;
 use crate::error::Result;
 
 use crate::issues::issue::{Issue, IssueFilter, IssueStatus};
-use client::{LinearClient, LinearError};
+use client::LinearClient;
 
 /// Issue provider backed by the Linear API.
 pub struct LinearProvider {
@@ -26,57 +24,19 @@ impl LinearProvider {
     /// The provider kind for Linear issues.
     pub const PROVIDER_KIND: super::ProviderKind = super::ProviderKind::Linear;
 
-    /// Build a provider from repo and global config.
+    /// Create a provider with resolved config values.
     ///
-    /// Looks up the named profile in `global_config` to resolve the API key.
-    /// Per-repo fields override profile-level defaults.
-    pub fn from_config(
-        global_config: &GlobalConfig,
-        linear_config: &LinearIssuesConfig,
+    /// If `assignee` is `"me"`, resolves to the authenticated user's ID
+    /// via the Linear API.
+    pub fn new(
+        api_key: &str,
+        team: String,
+        projects: Vec<String>,
+        assignee: Option<String>,
+        labels: Vec<String>,
     ) -> Result<Self> {
-        let profile = global_config
-            .linear
-            .profiles
-            .get(&linear_config.profile)
-            .ok_or_else(|| {
-                LinearError::Other(format!(
-                    "Linear profile '{}' not found in global config (~/.config/jig/config.toml)",
-                    linear_config.profile,
-                ))
-            })?;
+        let client = LinearClient::new(api_key);
 
-        // Resolution: per-repo jig.toml > profile default > omitted.
-        let team = linear_config
-            .team
-            .clone()
-            .or_else(|| profile.team.clone())
-            .ok_or_else(|| {
-                LinearError::Other(
-                    "Linear team key is required — set 'team' in [issues.linear] in jig.toml or in the profile in ~/.config/jig/config.toml"
-                        .to_string(),
-                )
-            })?;
-
-        let projects = if linear_config.projects.is_empty() {
-            profile.projects.clone()
-        } else {
-            linear_config.projects.clone()
-        };
-
-        let labels = if linear_config.labels.is_empty() {
-            profile.labels.clone()
-        } else {
-            linear_config.labels.clone()
-        };
-
-        let assignee = linear_config
-            .assignee
-            .clone()
-            .or_else(|| profile.assignee.clone());
-
-        let client = LinearClient::new(&profile.api_key);
-
-        // Resolve "me" to the authenticated user's ID.
         let assignee = match assignee.as_deref() {
             Some("me") => {
                 let viewer_id = client.viewer_id()?;

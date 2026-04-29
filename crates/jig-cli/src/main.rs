@@ -1,18 +1,20 @@
 //! jig CLI - Git worktree manager for parallel Claude Code sessions
 
-#[macro_use]
-mod op;
-
 mod cli;
-mod commands;
-mod ui;
+pub mod config;
+pub mod daemon;
+pub mod hooks;
+pub mod notify;
+pub mod worker;
 
 use std::io::IsTerminal;
 
 use clap::Parser;
 
+use cli::op::{GlobalCtx, Op, RepoCtx};
+use cli::ui;
 use cli::Cli;
-use op::{GlobalCtx, Op, RepoCtx};
+use config::{Config, RepoRegistry};
 
 fn main() {
     // Initialize tracing
@@ -42,7 +44,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Best-effort global directory setup
-    let _ = jig_core::ensure_global_dirs();
+    let _ = config::ensure_global_dirs();
 
     match cli.command {
         None => {
@@ -51,21 +53,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(ref command) => {
             let output = if cli.global {
-                let registry = jig_core::RepoRegistry::load().unwrap_or_default();
+                let registry = RepoRegistry::load().unwrap_or_default();
                 let configs: Vec<_> = registry
                     .repos()
                     .iter()
                     .filter(|e| e.path.exists())
-                    .filter_map(|e| jig_core::Config::from_path(&e.path).ok())
+                    .filter_map(|e| Config::from_path(&e.path).ok())
                     .collect();
                 let ctx = GlobalCtx { configs };
                 command.run_global(&ctx)?
             } else {
-                let config = jig_core::Config::from_cwd().ok();
+                let config = Config::from_cwd().ok();
 
                 // Best-effort auto-registration and pruning of current repo
                 if let Some(ref cfg) = config {
-                    if let Ok(mut registry) = jig_core::RepoRegistry::load() {
+                    if let Ok(mut registry) = RepoRegistry::load() {
                         let _ = registry.register(cfg.repo_root.clone());
                         let pruned = registry.prune();
                         if cli.verbose && !pruned.is_empty() {

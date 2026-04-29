@@ -3,7 +3,7 @@
 //! Public API is the [`Agent`] struct — a concrete handle wrapping a
 //! trait-object backend. Call [`Agent::from_kind`] or [`Agent::from_name`].
 
-mod claude;
+pub mod claude;
 
 use std::fmt;
 use std::path::Path;

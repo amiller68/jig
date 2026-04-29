@@ -19,6 +19,8 @@ pub use error::GitError;
 pub use repo::Repo;
 pub use worktree::{Worktree, WorktreeRef};
 
+pub const WORKTREES_DIR: &str = ".jig";
+
 use std::io::Write;
 use std::path::Path;
 

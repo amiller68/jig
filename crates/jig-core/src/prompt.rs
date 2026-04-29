@@ -31,11 +31,6 @@ impl Prompt {
 
     // -- Chainable builders --------------------------------------------------
 
-    pub fn task(mut self, text: &str) -> Self {
-        self.set_var("task_context", text);
-        self
-    }
-
     pub fn var(mut self, key: &str, value: impl Into<String>) -> Self {
         self.set_var(key, &value.into());
         self
@@ -98,7 +93,7 @@ mod tests {
     #[test]
     fn render_with_task() {
         let result = Prompt::new("TASK: {{task_context}}")
-            .task("Fix the bug")
+            .var("task_context", "Fix the bug")
             .render()
             .unwrap();
 

@@ -37,7 +37,7 @@ impl Op for Create {
     type Error = CreateError;
     type Output = CreateOutput;
 
-    fn execute(&self, ctx: &OpContext) -> Result<Self::Output, Self::Error> {
+    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
         // ...
     }
 }
@@ -46,18 +46,28 @@ impl Op for Create {
 ## Module Organization
 
 - **Workspace structure**: Separate crates for different concerns
-  - `jig-core` — Pure library with no I/O assumptions
-  - `jig-cli` — CLI binary, depends on jig-core
+  - `jig-core` — Pure library: git, GitHub, issues, mux, agents, prompt
+  - `jig-cli` — CLI binary with config, daemon, worker, hooks, notify
 
-- **Within crates**: One module per domain concept
-  - `git.rs` — Git operations via git2 (libgit2) `Repo` wrapper
-  - `worktree.rs` — High-level worktree abstraction
-  - `config.rs` — Configuration loading and management
-  - `worker.rs` — Worker state and lifecycle
+- **jig-core modules**: One submodule directory per domain
+  - `git/` — Git operations via git2: `Repo`, `Worktree`, `Branch`, `WorktreeRef`
+  - `mux/` — Multiplexer traits (`MuxSession`, `MuxWindow`) + tmux implementation
+  - `issues/` — Issue provider trait + Linear implementation
+  - `agents/` — Agent adapters (Claude Code)
+  - `github/` — GitHub API client and queries
+  - `prompt/` — Handlebars-based prompt rendering
 
-- **Commands**: One file per CLI command in `crates/jig-cli/src/commands/`
-  - Each command implements the `Op` trait from `crates/jig-cli/src/op.rs`
-  - Commands are registered via `command_enum!` macro in `cli.rs`
+- **jig-cli modules**:
+  - `cli/` — CLI framework: `op.rs` (Op trait + command_enum! macro), `ui.rs` (rendering), `commands/` (one file per command)
+  - `config/` — Configuration loading and management
+  - `worker/` — Worker state, lifecycle, events
+  - `daemon/` — Background daemon with actor threads
+  - `hooks/` — Git and agent hook management
+  - `notify/` — Notification system
+
+- **Commands**: One file per CLI command in `crates/jig-cli/src/cli/commands/`
+  - Each command implements the `Op` trait from `crates/jig-cli/src/cli/op.rs`
+  - Commands are registered via `command_enum!` macro in `cli/mod.rs`
   - Doc comments on Args struct become CLI help text (no duplication)
 
 ## Naming Conventions
@@ -71,7 +81,7 @@ impl Op for Create {
 ## Output Conventions
 
 - **stderr**: Status messages, progress, errors (with color)
-  - Use shared helpers from `crates/jig-cli/src/ui.rs` instead of inline `colored` calls
+  - Use shared helpers from `crates/jig-cli/src/cli/ui.rs` instead of inline `colored` calls
   - `ui::success("msg")` — green ✓ prefix
   - `ui::progress("msg")` — cyan → prefix
   - `ui::warning("msg")` — yellow ! prefix
@@ -127,40 +137,27 @@ fn test_create_worktree() {
 
 ## Actor Pattern (Daemon)
 
-The daemon uses background actor threads for blocking I/O. Each actor follows the same pattern:
-
-- **Messages**: Request/response structs in `daemon/messages.rs`
-- **Actor**: A `spawn()` function that takes `flume::Receiver<Request>` and `flume::Sender<Response>`, returns `JoinHandle<()>`
-- **Runtime**: Channels and methods (`send_*`, `drain_*`) in `daemon/runtime.rs`
-- **Wiring**: Drained at the top of each tick, triggered when needed
+The daemon (`crates/jig-cli/src/daemon/`) uses background actor threads for blocking I/O. Each actor implements the `Actor` trait:
 
 ```rust
-// In <name>_actor.rs
-pub fn spawn(
-    rx: flume::Receiver<FooRequest>,
-    tx: flume::Sender<FooComplete>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("jig-foo".into())
-        .spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let result = do_work(&req);
-                if tx.send(result).is_err() {
-                    break;
-                }
-            }
-        })
-        .expect("failed to spawn foo actor thread")
+pub trait Actor: Default + Send + Sync + 'static {
+    type Request: Send + 'static;
+    type Response: Send + 'static;
+
+    const NAME: &'static str;
+    const QUEUE_SIZE: usize;
+
+    fn handle(&self, req: Self::Request) -> Self::Response;
 }
 ```
 
+Actors are managed via `ActorHandle<A>`, which owns the channel pair, background thread, and pending state.
+
 Key conventions:
-- Actor owns its own resources (e.g., `TmuxClient`, `GitHubClient`)
+- Actor owns its own resources (e.g., `GitHubClient`)
 - Communication is non-blocking on the tick thread (`try_send`, `try_recv`)
 - Drop requests on backpressure when appropriate (nudges are best-effort)
 - Bounded channels prevent unbounded memory growth
-
-Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `prune_actor`, `nudge_actor`, `review_actor`, `triage_actor`.
 
 ## Common Idioms
 
@@ -168,6 +165,10 @@ Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `pru
   - Instance methods for operations requiring repo context (branch, worktree, merge)
   - Associated functions for path-scoped operations (diff, status, commits ahead)
   - Errors propagate via `#[from] git2::Error` in the `Error` enum
+
+- **Multiplexer abstraction**: `MuxSession` and `MuxWindow` traits in `jig-core/src/mux/`
+  - `Worker<W: MuxWindow = TmuxWindow>` is generic over the mux backend
+  - Use `TmuxWorker` type alias for the concrete tmux-backed worker
 
 - **Path handling**: Use `PathBuf` for owned paths, `&Path` for references
   - Canonicalize paths before displaying to users
@@ -182,6 +183,6 @@ Current actors: `sync_actor`, `github_actor`, `issue_actor`, `spawn_actor`, `pru
   - Commands call `ctx.config()?` to get `&Config`, pass it to jig-core functions
   - Methods on Config: `base_branch()`, `session_name()`, `issue_provider()`, `linear_provider()`
 
-- **Agent adapters**: Use `AgentAdapter` struct for agent-specific behavior
-  - Defined in `crates/jig-core/src/adapter.rs`
+- **Agent adapters**: Use `Agent` struct for agent-specific behavior
+  - Defined in `crates/jig-core/src/agents/`
   - Currently supports Claude Code, extensible for others

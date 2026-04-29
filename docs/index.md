@@ -20,7 +20,7 @@ Find the right doc by what you're working on. The **Sources** column tells you w
 
 | Document | Summary | Sources |
 |----------|---------|---------|
-| [PATTERNS.md](./PATTERNS.md) | Error handling, Op trait, module layout, output conventions, actor pattern, naming | `crates/jig-cli/src/op.rs`, `crates/jig-cli/src/ui.rs`, `crates/jig-core/src/error.rs`, `crates/jig-core/src/adapter.rs` |
+| [PATTERNS.md](./PATTERNS.md) | Error handling, Op trait, module layout, output conventions, actor pattern, naming | `crates/jig-cli/src/cli/op.rs`, `crates/jig-cli/src/cli/ui.rs`, `crates/jig-core/src/error.rs` |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Commit format, PR workflow, agent constraints | — |
 | [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | CI gate: build, test, clippy, fmt commands | — |
 
@@ -28,21 +28,20 @@ Find the right doc by what you're working on. The **Sources** column tells you w
 
 | Document | Summary | Sources |
 |----------|---------|---------|
-| [daemon.md](./daemon.md) | Tick loop, actor threads, nudging, auto-spawn, auto-prune, PR monitoring | `crates/jig-core/src/daemon/*.rs` |
-| [Parent-Child Epics](./parent-child.md) | Parent-as-integrator model, auto vs manual children, wrap-up flow, migration | `crates/jig-core/src/spawn.rs`, `crates/jig-cli/src/commands/spawn.rs`, `crates/jig-cli/src/commands/pr.rs`, `crates/jig-core/src/daemon/issue_actor.rs` |
-| [Automated Review](./review/index.md) | Review agent, data model, trigger flow, comment routing | `crates/jig-core/src/review.rs`, `crates/jig-core/src/daemon/review_actor.rs`, `crates/jig-cli/src/commands/review/*.rs` |
-| [CLI Output Formatting](./cli/ui/STDOUT-FORMATTING.md) | Op trait pattern, Display impls, comfy-table usage, color conventions | `crates/jig-cli/src/op.rs`, `crates/jig-cli/src/ui.rs`, `crates/jig-cli/src/commands/*.rs` |
+| [daemon.md](./daemon.md) | Tick loop, actor threads, nudging, auto-spawn, auto-prune, PR monitoring | `crates/jig-cli/src/daemon/` |
+| [Parent-Child Epics](./parent-child.md) | Parent-as-integrator model, auto vs manual children, wrap-up flow, migration | `crates/jig-cli/src/cli/commands/spawn.rs`, `crates/jig-cli/src/cli/commands/pr.rs`, `crates/jig-cli/src/daemon/` |
+| [CLI Output Formatting](./cli/ui/STDOUT-FORMATTING.md) | Op trait pattern, Display impls, comfy-table usage, color conventions | `crates/jig-cli/src/cli/op.rs`, `crates/jig-cli/src/cli/ui.rs`, `crates/jig-cli/src/cli/commands/*.rs` |
 
 ### CLI Usage
 
 | Document | Summary | Sources |
 |----------|---------|---------|
-| [Shell Integration](./cli/usage/shell-integration.md) | Shell function, tab completion, `-o` flag, troubleshooting | `crates/jig-cli/src/commands/shell_init.rs`, `crates/jig-cli/src/commands/shell_setup.rs` |
-| [Worktrees](./cli/usage/worktrees.md) | Create, open, remove worktrees; glob patterns; nested paths | `crates/jig-cli/src/commands/create.rs`, `crates/jig-cli/src/commands/remove.rs`, `crates/jig-core/src/worktree.rs` |
-| [Orchestration](./cli/usage/orchestration.md) | Multi-agent workflow: spawn, monitor, review, merge workers | `crates/jig-cli/src/commands/spawn.rs`, `crates/jig-cli/src/commands/merge.rs`, `crates/jig-cli/src/commands/review.rs` |
-| [Configuration](./cli/usage/configuration.md) | jig.toml, jig.local.toml, global config, on-create hooks, file copying | `crates/jig-core/src/config.rs`, `crates/jig-core/src/global/*.rs` |
-| [Init](./cli/usage/init.md) | `jig init` bootstrapping, --audit, --backup, template system | `crates/jig-cli/src/commands/init.rs`, `templates/` |
-| [Linear Integration](./cli/usage/linear-integration.md) | Linear API setup, status/priority mapping, label-based auto-spawn | `crates/jig-core/src/issues/linear.rs` |
+| [Shell Integration](./cli/usage/shell-integration.md) | Shell function, tab completion, `-o` flag, troubleshooting | `crates/jig-cli/src/cli/commands/shell_init.rs`, `crates/jig-cli/src/cli/commands/shell_setup.rs` |
+| [Worktrees](./cli/usage/worktrees.md) | Create, open, remove worktrees; glob patterns; nested paths | `crates/jig-cli/src/cli/commands/create.rs`, `crates/jig-cli/src/cli/commands/remove.rs`, `crates/jig-core/src/git/worktree.rs` |
+| [Orchestration](./cli/usage/orchestration.md) | Multi-agent workflow: spawn, monitor, review, merge workers | `crates/jig-cli/src/cli/commands/spawn.rs`, `crates/jig-cli/src/cli/commands/merge.rs`, `crates/jig-cli/src/cli/commands/review.rs` |
+| [Configuration](./cli/usage/configuration.md) | jig.toml, jig.local.toml, global config, on-create hooks, file copying | `crates/jig-cli/src/config/` |
+| [Init](./cli/usage/init.md) | `jig init` bootstrapping, --audit, --backup, template system | `crates/jig-cli/src/cli/commands/init.rs`, `templates/` |
+| [Linear Integration](./cli/usage/linear-integration.md) | Linear API setup, status/priority mapping, label-based auto-spawn | `crates/jig-core/src/issues/providers/linear/` |
 
 ### Operations
 

@@ -23,6 +23,8 @@ urlencoding.workspace = true
 regex.workspace = true
 ureq.workspace = true
 git2.workspace = true
+flume.workspace = true
+url.workspace = true
 strum = { version = "0.28.0", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]

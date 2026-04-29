@@ -125,7 +125,10 @@ impl TryFrom<&str> for CommitMessage {
             if paren_end + 1 != after_paren.len() {
                 return Err(ParseError::TrailingAfterScope(prefix.to_string()));
             }
-            (type_str.parse()?, Some(after_paren[..paren_end].to_string()))
+            (
+                type_str.parse()?,
+                Some(after_paren[..paren_end].to_string()),
+            )
         } else {
             (prefix.parse()?, None)
         };

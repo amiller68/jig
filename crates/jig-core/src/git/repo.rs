@@ -7,8 +7,6 @@ use super::commit::Oid;
 use super::diff::Diff;
 use super::error::{GitError, Result};
 
-use crate::config;
-
 /// Wrapper around `git2::Repository` providing jig-specific git operations.
 pub struct Repo {
     inner: git2::Repository,
@@ -74,7 +72,7 @@ impl Repo {
 
     /// Jig worktrees directory (`.jig/` under clone root).
     pub fn worktrees_path(&self) -> PathBuf {
-        self.clone_path().join(config::JIG_DIR)
+        self.clone_path().join(super::WORKTREES_DIR)
     }
 
     // ------------------------------------------------------------------
@@ -488,6 +486,30 @@ impl Repo {
             .map_err(|e| GitError::PushFailed(format!("push origin {local} failed: {e}")))?;
 
         Ok(())
+    }
+
+    /// Create a local branch from `origin/{base}` and push it to origin.
+    ///
+    /// Tolerates a pre-existing local branch (pushes the existing one).
+    pub fn create_and_push_branch(&self, branch: &Branch, base: &Branch) -> Result<()> {
+        let base_ref: &str = base;
+        let base_local = base_ref.strip_prefix("origin/").unwrap_or(base_ref);
+        let remote_ref = format!("origin/{}", base_local);
+
+        let reference = self
+            .inner
+            .find_branch(&remote_ref, git2::BranchType::Remote)
+            .map_err(|e| GitError::BranchNotFound(format!("{}: {}", remote_ref, e)))?;
+        let commit = reference.get().peel_to_commit()?;
+
+        let branch_str: &str = branch;
+        match self.inner.branch(branch_str, &commit, false) {
+            Ok(_) => {}
+            Err(e) if e.code() == git2::ErrorCode::Exists => {}
+            Err(e) => return Err(e.into()),
+        }
+
+        self.push_branch(branch)
     }
 
     // ------------------------------------------------------------------

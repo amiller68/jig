@@ -906,20 +906,25 @@ dependencies = [
  "colored",
  "comfy-table",
  "crossterm",
+ "ctrlc",
  "dirs",
+ "flume",
  "git2",
  "glob",
+ "handlebars",
  "jig-core",
- "jig-daemon",
  "nix",
  "predicates",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "toml",
  "tracing",
  "tracing-subscriber",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -928,6 +933,7 @@ version = "1.12.0"
 dependencies = [
  "chrono",
  "dirs",
+ "flume",
  "git2",
  "glob",
  "handlebars",
@@ -942,25 +948,10 @@ dependencies = [
  "toml",
  "tracing",
  "ureq",
+ "url",
  "urlencoding",
  "uuid",
  "which",
-]
-
-[[package]]
-name = "jig-daemon"
-version = "1.12.0"
-dependencies = [
- "chrono",
- "ctrlc",
- "flume",
- "git2",
- "jig-core",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
- "url",
 ]
 
 [[package]]

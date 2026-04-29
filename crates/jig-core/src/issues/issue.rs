@@ -223,9 +223,7 @@ impl Issue {
 
     /// Build a [`Prompt`] from this issue, resolving the parent if present.
     pub fn to_prompt(&self, template: &str, provider: &IssueProvider) -> Prompt {
-        let parent = self
-            .parent()
-            .and_then(|r| provider.get(r).ok().flatten());
+        let parent = self.parent().and_then(|r| provider.get(r).ok().flatten());
 
         let parent_section = match &parent {
             Some(p) => format!(
@@ -246,7 +244,7 @@ impl Issue {
         );
 
         Prompt::new(template)
-            .task(&task_context)
+            .var("task_context", &task_context)
             .var("issue_id", self.id().to_string())
             .var("issue_title", self.title())
             .var("issue_body", self.body())

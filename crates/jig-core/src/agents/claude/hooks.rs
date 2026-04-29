@@ -6,7 +6,17 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::hooks::AGENT_HOOK_SCRIPTS;
+
+/// Agent hook scripts — event plumbing installed into the agent's hook system.
+/// Each entry is (event_name, script_content).
+pub const AGENT_HOOK_SCRIPTS: &[(&str, &str)] = &[
+    ("PostToolUse", include_str!("agent_scripts/PostToolUse.sh")),
+    (
+        "Notification",
+        include_str!("agent_scripts/Notification.sh"),
+    ),
+    ("Stop", include_str!("agent_scripts/Stop.sh")),
+];
 
 fn hooks_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| crate::Error::Custom("no home directory".into()))?;

@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 jig-core.workspace = true
-jig-daemon.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -28,7 +27,13 @@ dirs.workspace = true
 git2.workspace = true
 crossterm.workspace = true
 chrono.workspace = true
+ctrlc.workspace = true
 toml.workspace = true
+uuid.workspace = true
+url.workspace = true
+flume.workspace = true
+sha2.workspace = true
+handlebars.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["process"] }

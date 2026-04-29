@@ -20,7 +20,7 @@ pub enum Error {
     MissingDependency(String),
 
     #[error(transparent)]
-    Tmux(#[from] crate::host::tmux::TmuxError),
+    Tmux(#[from] crate::mux::tmux::TmuxError),
 
     #[error(transparent)]
     Git(#[from] crate::git::GitError),

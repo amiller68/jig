@@ -64,9 +64,8 @@ mod tests {
 
     #[test]
     fn parse_breaking_footer() {
-        let msg =
-            CommitMessage::try_from("feat: change api\n\nBREAKING CHANGE: old API removed")
-                .unwrap();
+        let msg = CommitMessage::try_from("feat: change api\n\nBREAKING CHANGE: old API removed")
+            .unwrap();
         assert!(msg.breaking);
         assert_eq!(msg.footers.len(), 1);
         assert_eq!(msg.footers[0].token, "BREAKING CHANGE");
