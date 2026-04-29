@@ -131,7 +131,11 @@ fn collect_spawnable(
     budget: usize,
     existing_workers: &[(String, String)],
 ) -> Vec<SpawnableIssue> {
-    let issues = match provider.list_spawnable(labels) {
+    let filter = IssueFilter {
+        status: Some(IssueStatus::Planned),
+        ..Default::default()
+    };
+    let issues = match provider.list(&filter) {
         Ok(issues) => issues,
         Err(e) => {
             tracing::debug!(repo = %repo_name, error = %e, "failed to list spawnable issues");
@@ -147,9 +151,10 @@ fn collect_spawnable(
         }
     };
 
-    // Filter out child issues whose parent isn't ready
     let issues: Vec<_> = issues
         .into_iter()
+        .filter(|i| labels.is_empty() || i.auto(labels))
+        .filter(|i| provider.may_spawn(i.id()))
         .filter(|issue| match &repo {
             Some(r) => is_child_spawnable(issue, provider, r),
             None => issue.parent().is_none(),
@@ -194,7 +199,10 @@ fn collect_triageable(
     repo_name: &str,
     budget: usize,
 ) -> Vec<TriageIssue> {
-    let triageable = match provider.list_triageable() {
+    let triageable = match provider.list(&IssueFilter {
+        status: Some(IssueStatus::Triage),
+        ..Default::default()
+    }) {
         Ok(issues) => issues,
         Err(e) => {
             tracing::debug!(repo = %repo_name, error = %e, "failed to list triageable issues");

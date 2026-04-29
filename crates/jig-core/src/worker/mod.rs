@@ -5,8 +5,10 @@
 //! handle) is resolved on demand — we never serialize what we can derive.
 
 pub mod events;
+pub mod state;
 mod status;
 
+pub use state::{WorkerEntry, WorkersState};
 pub use status::{TmuxStatus, WorkerStatus};
 
 use std::path::Path;
@@ -122,6 +124,10 @@ impl Worker {
 
     pub fn issue_ref(&self) -> Option<&IssueRef> {
         self.issue_ref.as_ref()
+    }
+
+    pub fn worker_key(&self) -> String {
+        format!("{}/{}", self.repo_name(), self.branch)
     }
 
     pub fn worktree(&self) -> Result<Worktree> {
@@ -387,9 +393,12 @@ impl Worker {
         workers
     }
 
-    fn repo_name(&self) -> String {
-        self.worktree()
-            .map(|wt| wt.repo_name())
-            .unwrap_or_else(|_| "unknown".to_string())
+    pub fn repo_name(&self) -> String {
+        self.path
+            .parent()
+            .and_then(|jig_dir| jig_dir.parent())
+            .and_then(|root| root.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
     }
 }

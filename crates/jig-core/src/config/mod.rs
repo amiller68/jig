@@ -10,7 +10,6 @@ pub mod hooks;
 pub mod paths;
 pub mod registry;
 pub mod repo;
-pub mod state;
 
 use std::path::{Path, PathBuf};
 
@@ -37,7 +36,7 @@ pub use repo::{
     NudgeTypeConfig, NudgeTypeConfigs, RepoHealthConfig, ResolvedNudgeConfig, ReviewConfig,
     SpawnConfig, TriageConfig, WorktreeConfig,
 };
-pub use state::{WorkerEntry, WorkersState};
+pub use crate::worker::state::{WorkerEntry, WorkersState};
 
 /// Directory name for jig-managed worktrees (relative to repo root)
 pub const JIG_DIR: &str = ".jig";

@@ -3,29 +3,66 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use jig_core::config::registry::RepoRegistry;
-use jig_core::github::{self, GitHubClient};
+use url::Url;
+
+use jig_core::github::{self, GitHubClient, PrState};
+use jig_core::worker::Worker;
 
 use crate::actors::Actor;
 
 pub struct GitHubRequest {
-    pub worker_key: String,
-    pub repo_name: String,
-    pub branch: String,
-    pub pr_url: Option<String>,
-    pub previous_is_draft: bool,
+    pub worker: Worker,
 }
 
 #[derive(Debug, Clone)]
 pub struct GitHubResponse {
-    pub worker_key: String,
-    pub pr_url: Option<String>,
-    pub pr_checks: Vec<(String, bool)>,
-    pub pr_error: Option<String>,
-    pub pr_merged: bool,
-    pub pr_closed: bool,
-    pub is_draft: bool,
-    pub review_feedback_count: Option<u32>,
+    pub worker: Worker,
+    pub status: PrStatus,
+}
+
+#[derive(Debug, Clone)]
+pub enum PrStatus {
+    NoPr,
+    Error {
+        pr_url: Option<Url>,
+        error: String,
+    },
+    Merged {
+        pr_url: Url,
+    },
+    Closed {
+        pr_url: Url,
+    },
+    Open {
+        pr_url: Url,
+        is_draft: bool,
+        checks: PrChecks,
+        review_feedback_count: u32,
+    },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PrChecks {
+    pub ci: Option<bool>,
+    pub conflicts: Option<bool>,
+    pub reviews: Option<bool>,
+    pub commits: Option<bool>,
+}
+
+impl PrChecks {
+    pub fn problems(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.ci == Some(true) { out.push("ci"); }
+        if self.conflicts == Some(true) { out.push("conflicts"); }
+        if self.reviews == Some(true) { out.push("reviews"); }
+        if self.commits == Some(true) { out.push("commits"); }
+        out
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ci.is_none() && self.conflicts.is_none()
+            && self.reviews.is_none() && self.commits.is_none()
+    }
 }
 
 const GITHUB_POLL_INTERVAL: Duration = Duration::from_secs(60);
@@ -45,16 +82,16 @@ impl Actor for GitHubActor {
     const QUEUE_SIZE: usize = 16;
 
     fn handle(req: GitHubRequest) -> GitHubResponse {
-        process_request(&req)
+        process_request(req)
     }
 
     fn send(&mut self, req: GitHubRequest) -> bool {
-        if let Some(last) = self.last_requested.get(&req.worker_key) {
+        let key = req.worker.worker_key();
+        if let Some(last) = self.last_requested.get(&key) {
             if last.elapsed() < GITHUB_POLL_INTERVAL {
                 return false;
             }
         }
-        let key = req.worker_key.clone();
         if self.tx.try_send(req).is_ok() {
             self.last_requested.insert(key, Instant::now());
             true
@@ -66,7 +103,7 @@ impl Actor for GitHubActor {
     fn drain(&mut self) -> Vec<GitHubResponse> {
         let mut results = Vec::new();
         while let Ok(resp) = self.rx.try_recv() {
-            self.cache.insert(resp.worker_key.clone(), resp.clone());
+            self.cache.insert(resp.worker.worker_key(), resp.clone());
             results.push(resp);
         }
         results
@@ -89,81 +126,76 @@ impl GitHubActor {
     pub fn get_cached(&self, worker_key: &str) -> Option<&GitHubResponse> {
         self.cache.get(worker_key)
     }
-
-    pub fn previous_is_draft(&self, worker_key: &str) -> bool {
-        self.cache
-            .get(worker_key)
-            .map(|r| r.is_draft)
-            .unwrap_or(false)
-    }
 }
 
-fn process_request(req: &GitHubRequest) -> GitHubResponse {
-    let registry = RepoRegistry::load().unwrap_or_default();
-    let client = match make_client(&req.repo_name, &registry) {
-        Some(c) => c,
-        None => {
+fn process_request(req: GitHubRequest) -> GitHubResponse {
+    let worker_key = req.worker.worker_key();
+    let branch = req.worker.branch().to_string();
+
+    let client = match GitHubClient::from_repo_path(req.worker.path()) {
+        Ok(c) => c,
+        Err(_) => {
             return GitHubResponse {
-                worker_key: req.worker_key.clone(),
-                pr_url: req.pr_url.clone(),
-                pr_checks: vec![],
-                pr_error: Some("GitHub client unavailable".to_string()),
-                pr_merged: false,
-                pr_closed: false,
-                is_draft: req.previous_is_draft,
-                review_feedback_count: None,
+                worker: req.worker,
+                status: PrStatus::Error {
+                    pr_url: None,
+                    error: "GitHub client unavailable".to_string(),
+                },
             };
         }
     };
 
-    let pr_url = match &req.pr_url {
-        Some(url) => Some(url.clone()),
-        None => match client.get_pr_for_branch(&req.branch) {
-            Ok(Some(pr_info)) => {
-                tracing::info!(
-                    worker = %req.worker_key,
-                    pr_url = %pr_info.url,
-                    "discovered PR for branch"
-                );
-                Some(pr_info.url)
+    let pr_url = match client.get_pr_for_branch(&branch) {
+        Ok(Some(pr_info)) => {
+            tracing::info!(
+                worker = %worker_key,
+                pr_url = %pr_info.url,
+                "discovered PR for branch"
+            );
+            match Url::parse(&pr_info.url) {
+                Ok(url) => url,
+                Err(_) => {
+                    return GitHubResponse {
+                        worker: req.worker,
+                        status: PrStatus::Error {
+                            pr_url: None,
+                            error: format!("invalid PR URL: {}", pr_info.url),
+                        },
+                    };
+                }
             }
-            Ok(None) => None,
-            Err(e) => {
-                tracing::debug!(worker = %req.worker_key, error = %e, "PR discovery failed");
-                None
-            }
-        },
-    };
-
-    let Some(pr_url) = &pr_url else {
-        return GitHubResponse {
-            worker_key: req.worker_key.clone(),
-            pr_url: None,
-            pr_checks: vec![],
-            pr_error: None,
-            pr_merged: false,
-            pr_closed: false,
-            is_draft: false,
-            review_feedback_count: None,
-        };
+        }
+        Ok(None) => {
+            return GitHubResponse {
+                worker: req.worker,
+                status: PrStatus::NoPr,
+            };
+        }
+        Err(e) => {
+            tracing::debug!(worker = %worker_key, error = %e, "PR discovery failed");
+            return GitHubResponse {
+                worker: req.worker,
+                status: PrStatus::Error {
+                    pr_url: None,
+                    error: e.to_string(),
+                },
+            };
+        }
     };
 
     let pr_number = match pr_url
-        .rsplit('/')
-        .next()
+        .path_segments()
+        .and_then(|mut s| s.next_back())
         .and_then(|s| s.parse::<u64>().ok())
     {
         Some(n) => n,
         None => {
             return GitHubResponse {
-                worker_key: req.worker_key.clone(),
-                pr_url: Some(pr_url.clone()),
-                pr_checks: vec![],
-                pr_error: Some("invalid PR URL".to_string()),
-                pr_merged: false,
-                pr_closed: false,
-                is_draft: req.previous_is_draft,
-                review_feedback_count: None,
+                worker: req.worker,
+                status: PrStatus::Error {
+                    pr_url: Some(pr_url),
+                    error: "could not parse PR number from URL".to_string(),
+                },
             };
         }
     };
@@ -172,89 +204,54 @@ fn process_request(req: &GitHubRequest) -> GitHubResponse {
         Ok(s) => s,
         Err(e) => {
             return GitHubResponse {
-                worker_key: req.worker_key.clone(),
-                pr_url: Some(pr_url.clone()),
-                pr_checks: vec![],
-                pr_error: Some(e.to_string()),
-                pr_merged: false,
-                pr_closed: false,
-                is_draft: req.previous_is_draft,
-                review_feedback_count: None,
+                worker: req.worker,
+                status: PrStatus::Error {
+                    pr_url: Some(pr_url),
+                    error: e.to_string(),
+                },
             };
         }
     };
 
-    match pr_state_info.state {
-        github::PrState::Merged => GitHubResponse {
-            worker_key: req.worker_key.clone(),
-            pr_url: Some(pr_url.clone()),
-            pr_checks: vec![],
-            pr_error: None,
-            pr_merged: true,
-            pr_closed: false,
-            is_draft: false,
-            review_feedback_count: None,
-        },
-        github::PrState::Closed => GitHubResponse {
-            worker_key: req.worker_key.clone(),
-            pr_url: Some(pr_url.clone()),
-            pr_checks: vec![],
-            pr_error: None,
-            pr_merged: false,
-            pr_closed: true,
-            is_draft: false,
-            review_feedback_count: None,
-        },
-        github::PrState::Open => {
-            let checks: Vec<(&str, Result<github::PrCheck, _>)> = vec![
-                ("ci", github::check_ci(&client, &req.branch)),
-                ("conflicts", github::check_conflicts(&client, pr_number)),
-                ("reviews", github::check_reviews(&client, pr_number)),
-                ("commits", github::check_commits(&client, pr_number)),
-            ];
+    let status = match pr_state_info.state {
+        PrState::Merged => PrStatus::Merged { pr_url },
+        PrState::Closed => PrStatus::Closed { pr_url },
+        PrState::Open => {
+            let mut checks = PrChecks::default();
+            let mut review_feedback_count: u32 = 0;
 
-            let mut pr_checks: Vec<(String, bool)> = Vec::new();
-            let mut review_feedback_count: Option<u32> = None;
-
-            for (name, result) in checks {
-                match result {
-                    Ok(check) => {
-                        if name == "reviews" {
-                            let comments = check.review_comment_count.unwrap_or(0);
-                            let changes_req = check.changes_requested_count.unwrap_or(0);
-                            review_feedback_count = Some(comments + changes_req);
-                        }
-                        pr_checks.push((name.to_string(), check.has_problem));
-                    }
-                    Err(e) => {
-                        tracing::debug!(check = name, error = %e, "PR check failed");
-                    }
+            match github::check_ci(&client, &branch) {
+                Ok(c) => checks.ci = Some(c.has_problem),
+                Err(e) => tracing::debug!(error = %e, "CI check failed"),
+            }
+            match github::check_conflicts(&client, pr_number) {
+                Ok(c) => checks.conflicts = Some(c.has_problem),
+                Err(e) => tracing::debug!(error = %e, "conflicts check failed"),
+            }
+            match github::check_reviews(&client, pr_number) {
+                Ok(c) => {
+                    review_feedback_count = c.review_comment_count.unwrap_or(0)
+                        + c.changes_requested_count.unwrap_or(0);
+                    checks.reviews = Some(c.has_problem);
                 }
+                Err(e) => tracing::debug!(error = %e, "reviews check failed"),
+            }
+            match github::check_commits(&client, pr_number) {
+                Ok(c) => checks.commits = Some(c.has_problem),
+                Err(e) => tracing::debug!(error = %e, "commits check failed"),
             }
 
-            GitHubResponse {
-                worker_key: req.worker_key.clone(),
-                pr_url: Some(pr_url.clone()),
-                pr_checks,
-                pr_error: None,
-                pr_merged: false,
-                pr_closed: false,
+            PrStatus::Open {
+                pr_url,
                 is_draft: pr_state_info.is_draft,
+                checks,
                 review_feedback_count,
             }
         }
-    }
-}
+    };
 
-fn make_client(repo_name: &str, registry: &RepoRegistry) -> Option<GitHubClient> {
-    registry
-        .repos()
-        .iter()
-        .find(|e| {
-            e.path
-                .file_name()
-                .map(|n| n.to_string_lossy() == repo_name)
-                .unwrap_or(false)
-        })
-        .and_then(|entry| GitHubClient::from_repo_path(&entry.path).ok())
+    GitHubResponse {
+        worker: req.worker,
+        status,
+    }
 }

@@ -165,12 +165,7 @@ fn format_tick_log(tick: &TickResult) -> Vec<String> {
         if let Some(err) = &info.pr_error {
             lines.push(format!("[{}]   {} PR: {}", now, key, err));
         } else if !info.pr_checks.is_empty() {
-            let problems: Vec<&str> = info
-                .pr_checks
-                .iter()
-                .filter(|(_, bad)| *bad)
-                .map(|(name, _)| name.as_str())
-                .collect();
+            let problems = info.pr_checks.problems();
             if problems.is_empty() {
                 lines.push(format!("[{}]   {} PR: ok", now, key));
             } else {

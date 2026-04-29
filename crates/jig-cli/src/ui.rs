@@ -291,13 +291,7 @@ pub fn format_health(info: &WorkerTickInfo) -> (String, Color) {
         return ("-".to_string(), Color::DarkGrey);
     }
 
-    let problems: Vec<&str> = info
-        .pr_checks
-        .iter()
-        .filter(|(_, has_problem)| *has_problem)
-        .map(|(name, _)| name.as_str())
-        .collect();
-
+    let problems = info.pr_checks.problems();
     if problems.is_empty() {
         ("ok".to_string(), Color::Green)
     } else {

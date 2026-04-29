@@ -6,6 +6,8 @@
 use jig_core::worker::TmuxStatus;
 use jig_core::worker::WorkerStatus;
 
+use crate::actors::github::PrChecks;
+
 /// Pre-computed display data for a single worker.
 #[derive(Debug, Clone)]
 pub struct WorkerDisplayInfo {
@@ -37,7 +39,7 @@ pub struct TriageDisplayInfo {
 /// Per-worker PR health info collected during a tick.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerTickInfo {
-    pub pr_checks: Vec<(String, bool)>,
+    pub pr_checks: PrChecks,
     pub pr_error: Option<String>,
     pub has_pr: bool,
 }

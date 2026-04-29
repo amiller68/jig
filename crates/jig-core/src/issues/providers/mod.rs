@@ -6,7 +6,7 @@ use std::fmt;
 
 use crate::error::Result;
 
-use super::issue::{Issue, IssueFilter, IssueStatus};
+use super::issue::{Issue, IssueFilter, IssueRef, IssueStatus};
 
 /// Identifies the type of issue provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -63,29 +63,12 @@ impl IssueProvider {
         self.inner.update_status(id, status)
     }
 
-    /// List issues eligible for auto-spawning (status=Planned).
-    pub fn list_spawnable(&self, spawn_labels: &[String]) -> Result<Vec<Issue>> {
-        let all = self.list(&IssueFilter {
-            status: Some(IssueStatus::Planned),
-            ..Default::default()
-        })?;
-        Ok(all
-            .into_iter()
-            .filter(|i| spawn_labels.is_empty() || i.auto(spawn_labels))
-            .filter(|i| self.is_spawnable_with_deps(i))
-            .collect())
-    }
-
-    /// List issues eligible for triage (status=Triage).
-    pub fn list_triageable(&self) -> Result<Vec<Issue>> {
-        self.list(&IssueFilter {
-            status: Some(IssueStatus::Triage),
-            ..Default::default()
-        })
-    }
-
     /// Check whether all dependencies of an issue are satisfied (Complete).
-    pub fn is_spawnable_with_deps(&self, issue: &Issue) -> bool {
+    pub fn may_spawn(&self, id: &IssueRef) -> bool {
+        let issue = match self.get(id) {
+            Ok(Some(issue)) => issue,
+            _ => return false,
+        };
         issue.depends_on().iter().all(|dep_id| {
             matches!(self.get(dep_id), Ok(Some(dep)) if *dep.status() == IssueStatus::Complete)
         })

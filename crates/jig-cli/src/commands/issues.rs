@@ -243,12 +243,12 @@ impl Issues {
         if self.blocked {
             issues
                 .into_iter()
-                .filter(|i| !provider.is_spawnable_with_deps(i))
+                .filter(|i| !provider.may_spawn(i.id()))
                 .collect()
         } else if self.unblocked {
             issues
                 .into_iter()
-                .filter(|i| provider.is_spawnable_with_deps(i))
+                .filter(|i| provider.may_spawn(i.id()))
                 .collect()
         } else {
             issues
@@ -288,8 +288,12 @@ impl Issues {
         let spawn_labels = cfg.repo.issues.auto_spawn_labels.clone();
         let all_issues = if self.auto {
             let labels = spawn_labels.as_deref().unwrap_or(&[]);
-            let spawnable = provider.list_spawnable(labels)?;
-            // Apply additional filters on top of spawnable results
+            let mut spawnable = provider.list(&IssueFilter {
+                status: Some(IssueStatus::Planned),
+                ..Default::default()
+            })?;
+            spawnable.retain(|i| labels.is_empty() || i.auto(labels));
+            spawnable.retain(|i| provider.may_spawn(i.id()));
             filter.apply(spawnable)
         } else {
             provider.list(&filter)?
@@ -316,7 +320,12 @@ impl Issues {
             let spawn_labels = cfg.repo.issues.auto_spawn_labels.clone();
             let repo_issues = if self.auto {
                 let labels = spawn_labels.as_deref().unwrap_or(&[]);
-                let spawnable = provider.list_spawnable(labels)?;
+                let mut spawnable = provider.list(&IssueFilter {
+                    status: Some(IssueStatus::Planned),
+                    ..Default::default()
+                })?;
+                spawnable.retain(|i| labels.is_empty() || i.auto(labels));
+                spawnable.retain(|i| provider.may_spawn(i.id()));
                 filter.apply(spawnable)
             } else {
                 provider.list(&filter)?

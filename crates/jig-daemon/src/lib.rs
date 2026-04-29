@@ -34,6 +34,9 @@ use jig_core::issues::issue::IssueRef;
 use jig_core::notify::{NotificationEvent, Notifier};
 use jig_core::prompt::Prompt;
 use jig_core::review::{latest_verdict, review_count, ReviewVerdict};
+use jig_core::worker::Worker;
+
+use actors::github::PrStatus;
 use jig_core::worker::TmuxStatus;
 use jig_core::worker::events::{Event, EventKind, EventLog, TerminalKind, WorkerState};
 use jig_core::worker::WorkerStatus;
@@ -558,8 +561,15 @@ impl<'a> Daemon<'a> {
                 Some(ReviewVerdict::Approve) => {
                     // Mark PR ready for review
                     if let Some(cached) = runtime.github.get_cached(worker_key) {
-                        if let Some(ref pr_url) = cached.pr_url {
-                            if let Some(pr_number) = pr_url.rsplit('/').next() {
+                        let pr_url = match &cached.status {
+                            PrStatus::Merged { pr_url }
+                            | PrStatus::Closed { pr_url }
+                            | PrStatus::Open { pr_url, .. } => Some(pr_url),
+                            PrStatus::Error { pr_url, .. } => pr_url.as_ref(),
+                            PrStatus::NoPr => None,
+                        };
+                        if let Some(pr_url) = pr_url {
+                            if let Some(pr_number) = pr_url.path_segments().and_then(|mut s| s.next_back()) {
                                 let repo_path =
                                     Self::find_repo_path(&registry, rname).map(|e| e.path.clone());
                                 if let Some(rp) = repo_path {
@@ -630,7 +640,12 @@ impl<'a> Daemon<'a> {
                     // Emit notification
                     let pr_url = runtime
                         .github.get_cached(worker_key)
-                        .and_then(|c| c.pr_url.clone());
+                        .and_then(|c| match &c.status {
+                            PrStatus::Merged { pr_url }
+                            | PrStatus::Closed { pr_url }
+                            | PrStatus::Open { pr_url, .. } => Some(pr_url.to_string()),
+                            _ => None,
+                        });
                     let event = NotificationEvent::ReviewApproved {
                         repo: rname.to_string(),
                         worker: wname.to_string(),
@@ -944,7 +959,7 @@ impl<'a> Daemon<'a> {
             for (repo_name, worker_name) in &worker_list {
                 let key = format!("{}/{}", repo_name, worker_name);
                 if let Some(cached) = runtime.github.get_cached(&key) {
-                    if cached.pr_merged || cached.pr_closed {
+                    if matches!(cached.status, PrStatus::Merged { .. } | PrStatus::Closed { .. }) {
                         if let Some(entry) = Self::find_repo_path(&registry, repo_name) {
                             let worktree_path =
                                 jig_core::config::worktree_path(&entry.path, worker_name);
@@ -1038,22 +1053,36 @@ impl<'a> Daemon<'a> {
         let mut is_draft = false;
 
         if let Some(cached) = runtime.github.get_cached(key) {
-            worker_tick_info.has_pr = cached.pr_url.is_some();
-            if let Some(ref err) = cached.pr_error {
-                worker_tick_info.pr_error = Some(err.clone());
-            }
-            worker_tick_info.pr_checks = cached.pr_checks.clone();
-            is_draft = cached.is_draft;
-
-            // If PR was discovered by the actor but we don't have it in events, emit PrOpened
-            if cached.pr_url.is_some() && new_state.pr_url.is_none() {
-                if let Some(ref url) = cached.pr_url {
-                    let pr_number = url.rsplit('/').next().unwrap_or("0");
-                    if let Err(e) = event_log.append(&Event::now(EventKind::PrOpened {
-                        pr_url: url.clone(),
-                        pr_number: pr_number.to_string(),
-                    })) {
-                        tracing::warn!(worker = key, error = %e, "failed to emit PrOpened event");
+            match &cached.status {
+                PrStatus::NoPr => {}
+                PrStatus::Error { error, .. } => {
+                    worker_tick_info.has_pr = false;
+                    worker_tick_info.pr_error = Some(error.clone());
+                }
+                PrStatus::Merged { pr_url } | PrStatus::Closed { pr_url } => {
+                    worker_tick_info.has_pr = true;
+                    if new_state.pr_url.is_none() {
+                        let pr_number = pr_url.path_segments()
+                            .and_then(|mut s| s.next_back())
+                            .unwrap_or("0");
+                        let _ = event_log.append(&Event::now(EventKind::PrOpened {
+                            pr_url: pr_url.to_string(),
+                            pr_number: pr_number.to_string(),
+                        }));
+                    }
+                }
+                PrStatus::Open { pr_url, is_draft: draft, checks, .. } => {
+                    worker_tick_info.has_pr = true;
+                    worker_tick_info.pr_checks = checks.clone();
+                    is_draft = *draft;
+                    if new_state.pr_url.is_none() {
+                        let pr_number = pr_url.path_segments()
+                            .and_then(|mut s| s.next_back())
+                            .unwrap_or("0");
+                        let _ = event_log.append(&Event::now(EventKind::PrOpened {
+                            pr_url: pr_url.to_string(),
+                            pr_number: pr_number.to_string(),
+                        }));
                     }
                 }
             }
@@ -1061,13 +1090,10 @@ impl<'a> Daemon<'a> {
 
         // Request PR check for next tick if worker is active
         if !new_state.status.is_terminal() {
-            runtime.github.send(actors::github::GitHubRequest {
-                worker_key: key.to_string(),
-                repo_name: repo_name.to_string(),
-                branch: branch_name.clone(),
-                pr_url: new_state.pr_url.clone(),
-                previous_is_draft: runtime.github.previous_is_draft(key),
-            });
+            if let Some(entry) = Self::find_repo_path(registry, repo_name) {
+                let worker = Worker::from_branch(&entry.path, worker_name.into());
+                runtime.github.send(actors::github::GitHubRequest { worker });
+            }
         }
 
         // Re-read state with potential PrOpened event
@@ -1147,90 +1173,87 @@ impl<'a> Daemon<'a> {
         // Track review feedback count for nudge reset logic
         let mut current_review_feedback_count: Option<u32> = None;
 
-        // Handle merged/closed PR from cached data
+        // Handle PR status from cached data
         if let Some(cached) = runtime.github.get_cached(key) {
-            current_review_feedback_count = cached.review_feedback_count;
-
-            if cached.pr_merged && self.config.github.auto_cleanup_merged {
-                actions.push(Action::Cleanup {
-                    worker_id: worker_name.to_string(),
-                });
-                actions.push(Action::Notify {
-                    worker_id: worker_name.to_string(),
-                    message: "PR merged, worker cleaned up".to_string(),
-                    kind: NotifyKind::WorkCompleted {
-                        pr_url: cached.pr_url.clone(),
-                    },
-                });
-
-                // Auto-complete linked issue if configured
-                let auto_complete = Self::find_repo_path(registry, repo_name)
-                    .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
-                    .map(|t| t.issues.auto_complete_on_merge)
-                    .unwrap_or(false);
-                if auto_complete {
-                    if let Some(issue_id) = new_state.issue_ref.as_ref() {
-                        actions.push(Action::UpdateIssueStatus {
+            match &cached.status {
+                PrStatus::Merged { pr_url } => {
+                    if self.config.github.auto_cleanup_merged {
+                        actions.push(Action::Cleanup {
                             worker_id: worker_name.to_string(),
-                            issue_id: issue_id.to_string(),
                         });
-                    }
-                }
-            } else if cached.pr_closed {
-                actions.push(Action::Notify {
-                    worker_id: worker_name.to_string(),
-                    message: "PR closed without merge".to_string(),
-                    kind: NotifyKind::NeedsIntervention,
-                });
-                if self.config.github.auto_cleanup_closed {
-                    actions.push(Action::Cleanup {
-                        worker_id: worker_name.to_string(),
-                    });
-                }
-            } else if cached.is_draft {
-                // Reset review nudge count if new feedback arrived
-                let stored_count = workers_state
-                    .get_worker(key)
-                    .and_then(|e| e.review_feedback_count);
-                if let Some(current) = cached.review_feedback_count {
-                    let previous = stored_count.unwrap_or(0);
-                    if current > previous {
-                        tracing::info!(
-                            worker = key,
-                            previous,
-                            current,
-                            "new review feedback detected, resetting review nudge count"
-                        );
-                        new_state.nudge_counts.remove("review");
-                        if let Some(ref pr_url) = cached.pr_url {
-                            actions.push(Action::Notify {
-                                worker_id: worker_name.to_string(),
-                                message: format!(
-                                    "New review feedback on PR ({}→{} items)",
-                                    previous, current
-                                ),
-                                kind: NotifyKind::FeedbackReceived {
-                                    pr_url: pr_url.clone(),
-                                },
-                            });
+                        actions.push(Action::Notify {
+                            worker_id: worker_name.to_string(),
+                            message: "PR merged, worker cleaned up".to_string(),
+                            kind: NotifyKind::WorkCompleted {
+                                pr_url: Some(pr_url.to_string()),
+                            },
+                        });
+
+                        let auto_complete = Self::find_repo_path(registry, repo_name)
+                            .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                            .map(|t| t.issues.auto_complete_on_merge)
+                            .unwrap_or(false);
+                        if auto_complete {
+                            if let Some(issue_id) = new_state.issue_ref.as_ref() {
+                                actions.push(Action::UpdateIssueStatus {
+                                    worker_id: worker_name.to_string(),
+                                    issue_id: issue_id.to_string(),
+                                });
+                            }
                         }
                     }
                 }
-
-                // Draft PR — dispatch nudges from cached check results
-                // Non-draft PRs are in human review, skip nudges.
-                let auto_review_enabled = Self::find_repo_path(registry, repo_name)
-                    .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
-                    .map(|t| t.review.enabled)
-                    .unwrap_or(false);
-                let base = Self::find_repo_path(registry, repo_name)
-                    .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
-                    .and_then(|t| t.worktree.base)
-                    .unwrap_or_else(|| jig_core::config::DEFAULT_BASE_BRANCH.to_string());
-                for (check_name, has_problem) in &cached.pr_checks {
-                    if !has_problem {
-                        continue;
+                PrStatus::Closed { .. } => {
+                    actions.push(Action::Notify {
+                        worker_id: worker_name.to_string(),
+                        message: "PR closed without merge".to_string(),
+                        kind: NotifyKind::NeedsIntervention,
+                    });
+                    if self.config.github.auto_cleanup_closed {
+                        actions.push(Action::Cleanup {
+                            worker_id: worker_name.to_string(),
+                        });
                     }
+                }
+                PrStatus::Open { pr_url, is_draft: true, checks, review_feedback_count } => {
+                    current_review_feedback_count = Some(*review_feedback_count);
+
+                    // Reset review nudge count if new feedback arrived
+                    let stored_count = workers_state
+                        .get_worker(key)
+                        .and_then(|e| e.review_feedback_count);
+                    let previous = stored_count.unwrap_or(0);
+                    if *review_feedback_count > previous {
+                        tracing::info!(
+                            worker = key,
+                            previous,
+                            current = review_feedback_count,
+                            "new review feedback detected, resetting review nudge count"
+                        );
+                        new_state.nudge_counts.remove("review");
+                        actions.push(Action::Notify {
+                            worker_id: worker_name.to_string(),
+                            message: format!(
+                                "New review feedback on PR ({}→{} items)",
+                                previous, review_feedback_count
+                            ),
+                            kind: NotifyKind::FeedbackReceived {
+                                pr_url: pr_url.to_string(),
+                            },
+                        });
+                    }
+
+                    // Draft PR — dispatch nudges from cached check results
+                    // Non-draft PRs are in human review, skip nudges.
+                    let auto_review_enabled = Self::find_repo_path(registry, repo_name)
+                        .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                        .map(|t| t.review.enabled)
+                        .unwrap_or(false);
+                    let base = Self::find_repo_path(registry, repo_name)
+                        .and_then(|entry| JigToml::load(&entry.path).ok().flatten())
+                        .and_then(|t| t.worktree.base)
+                        .unwrap_or_else(|| jig_core::config::DEFAULT_BASE_BRANCH.to_string());
+                    for check_name in checks.problems() {
                     if check_name == "reviews" && auto_review_enabled {
                         continue;
                     }
@@ -1271,7 +1294,7 @@ impl<'a> Daemon<'a> {
                         .var_num("max_nudges", resolved.max)
                         .var_bool("is_final_nudge", count + 1 >= resolved.max);
 
-                    match check_name.as_str() {
+                    match check_name {
                         "ci" => {
                             // details are stored in cached checks — not available here,
                             // use empty list (CI details come from the health check)
@@ -1298,6 +1321,8 @@ impl<'a> Daemon<'a> {
                         });
                     }
                 }
+                }
+                _ => {}
             }
         }
 

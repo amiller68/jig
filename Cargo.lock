@@ -960,6 +960,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+ "url",
 ]
 
 [[package]]

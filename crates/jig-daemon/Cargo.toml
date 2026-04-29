@@ -14,6 +14,7 @@ chrono.workspace = true
 tracing.workspace = true
 ctrlc.workspace = true
 flume.workspace = true
+url.workspace = true
 git2.workspace = true
 
 [dev-dependencies]
