@@ -5,9 +5,9 @@ use std::fmt;
 use clap::Args;
 use comfy_table::{Cell, Color};
 
-use crate::config::RepoRegistry;
+use crate::context::RepoRegistry;
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
 use crate::cli::ui;
 
 /// List tracked repositories
@@ -36,7 +36,7 @@ impl Op for Repos {
     type Error = ReposError;
     type Output = ReposOutput;
 
-    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         let registry = RepoRegistry::load()?;
         let entries: Vec<ReposListEntry> = registry
             .repos()

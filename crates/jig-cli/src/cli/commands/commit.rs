@@ -4,10 +4,10 @@ use std::io::{self, Read as _};
 
 use clap::{Args, Subcommand};
 
-use crate::config::JigToml;
 use jig_core::git::conventional::ValidationConfig;
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
+use crate::context::RepoConfig;
 use crate::cli::ui;
 
 /// Validate and work with conventional commits
@@ -56,10 +56,10 @@ impl Op for Commit {
     type Error = CommitError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         match &self.command {
             CommitCommand::Validate { rev, stdin, file } => {
-                run_validate(ctx, rev, *stdin, file.as_deref())
+                run_validate(rev, *stdin, file.as_deref())
             }
             CommitCommand::Examples => {
                 print_examples();
@@ -70,7 +70,6 @@ impl Op for Commit {
 }
 
 fn run_validate(
-    ctx: &RepoCtx,
     rev: &str,
     stdin: bool,
     file: Option<&str>,
@@ -82,7 +81,7 @@ fn run_validate(
     } else if let Some(path) = file {
         std::fs::read_to_string(path)?
     } else {
-        let cfg = ctx.config()?;
+        let cfg = RepoConfig::from_cwd()?;
         let git_repo = git2::Repository::open(&cfg.repo_root)?;
         let obj = git_repo.revparse_single(rev)?;
         let commit = obj
@@ -94,12 +93,7 @@ fn run_validate(
             .to_string()
     };
 
-    let config = if let Some(cfg) = ctx.config.as_ref() {
-        let jig_toml = JigToml::load(&cfg.repo_root)?.unwrap_or_default();
-        jig_toml.commits.to_validation_config()
-    } else {
-        ValidationConfig::default()
-    };
+    let config = ValidationConfig::default();
 
     match config.parse_and_validate(&message) {
         Ok((msg, errors)) => {

@@ -4,7 +4,7 @@ use std::convert::Infallible;
 
 use clap::Args;
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
 use crate::cli::ui;
 
 /// Show version information
@@ -15,7 +15,7 @@ impl Op for Version {
     type Error = Infallible;
     type Output = NoOutput;
 
-    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         eprintln!(
             "{} {}",
             ui::bold("jig"),

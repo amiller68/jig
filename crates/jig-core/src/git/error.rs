@@ -29,6 +29,9 @@ pub enum GitError {
     #[error("push failed: {0}")]
     PushFailed(String),
 
+    #[error("hook failed: {0}")]
+    HookFailed(String),
+
     #[error(transparent)]
     Git2(#[from] git2::Error),
 

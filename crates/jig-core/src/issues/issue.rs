@@ -222,7 +222,10 @@ impl Issue {
     }
 
     /// Build a [`Prompt`] from this issue, resolving the parent if present.
-    pub fn to_prompt(&self, template: &str, provider: &IssueProvider) -> Prompt {
+    ///
+    /// The returned prompt's template is the fully-formed task context string.
+    /// Callers render it and inject the result into their own framing template.
+    pub fn to_prompt(&self, provider: &IssueProvider) -> Prompt {
         let parent = self.parent().and_then(|r| provider.get(r).ok().flatten());
 
         let parent_section = match &parent {
@@ -243,12 +246,7 @@ impl Issue {
             self.body(),
         );
 
-        Prompt::new(template)
-            .var("task_context", &task_context)
-            .var("issue_id", self.id().to_string())
-            .var("issue_title", self.title())
-            .var("issue_body", self.body())
-            .var_list("issue_labels", self.labels().to_vec())
+        Prompt::new(&task_context)
     }
 
     /// Whether this issue matches the given filter.

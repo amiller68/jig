@@ -2,15 +2,33 @@
 
 use std::collections::HashMap;
 
-use crate::config::HealthConfig;
-use crate::worker::WorkerStatus;
+use url::Url;
+
+use jig_core::Reducible;
+
+use crate::context::{Config, RepoEntry};
+use crate::worker::{MuxStatus, WorkerStatus};
+use crate::worker::checks::PrChecks;
+use jig_core::git::Branch;
 use jig_core::issues::issue::IssueRef;
 
 use super::schema::{Event, EventKind, TerminalKind};
 
-/// Rich derived state for a worker, computed by replaying events.
+/// Per-worker PR health info collected during a tick.
+#[derive(Debug, Clone, Default)]
+pub struct PrHealth {
+    pub pr_checks: PrChecks,
+    pub pr_error: Option<String>,
+    pub has_pr: bool,
+}
+
+/// Full worker state — event-log reduction + runtime enrichment.
+///
+/// Core fields are set by [`Reducible::apply`]. Runtime fields (`repo`,
+/// `mux_status`, `commits_ahead`, etc.) are filled in by [`Worker::tick()`].
 #[derive(Debug, Clone)]
 pub struct WorkerState {
+    // ── Event-derived ───────────────────────────────────────────
     pub status: WorkerStatus,
     pub branch: Option<String>,
     pub commit_count: u32,
@@ -21,6 +39,40 @@ pub struct WorkerState {
     pub issue_ref: Option<IssueRef>,
     pub started_at: Option<i64>,
     pub last_event_at: Option<i64>,
+    pub review_feedback_count: u32,
+    pub pr_ci_passed: Option<bool>,
+    pub pr_ci_failures: Vec<String>,
+    pub pr_has_conflicts: Option<bool>,
+    pub pr_review_comment_count: u32,
+    pub pr_changes_requested: u32,
+    pub pr_bad_commits: Vec<String>,
+    pub is_draft: bool,
+
+    // ── Runtime (set by tick) ───────────────────────────────────
+    pub repo: Option<RepoEntry>,
+    pub name: String,
+    pub resolved_branch: Branch,
+    pub mux_status: MuxStatus,
+    pub commits_ahead: usize,
+    pub is_dirty: bool,
+    pub parsed_pr_url: Option<Url>,
+    pub pr_health: PrHealth,
+    pub max_nudges: u32,
+    pub nudge_cooldown_remaining: Option<u64>,
+}
+
+impl WorkerState {
+    pub fn repo_name(&self) -> String {
+        self.repo
+            .as_ref()
+            .and_then(|r| r.path.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    pub fn nudge_count(&self) -> u32 {
+        self.nudge_counts.values().sum()
+    }
 }
 
 impl Default for WorkerState {
@@ -36,91 +88,31 @@ impl Default for WorkerState {
             issue_ref: None,
             started_at: None,
             last_event_at: None,
+            review_feedback_count: 0,
+            pr_ci_passed: None,
+            pr_ci_failures: Vec::new(),
+            pr_has_conflicts: None,
+            pr_review_comment_count: 0,
+            pr_changes_requested: 0,
+            pr_bad_commits: Vec::new(),
+            is_draft: false,
+
+            repo: None,
+            name: String::new(),
+            resolved_branch: Branch::new("unknown"),
+            mux_status: MuxStatus::default(),
+            commits_ahead: 0,
+            is_dirty: false,
+            parsed_pr_url: None,
+            pr_health: PrHealth::default(),
+            max_nudges: 0,
+            nudge_cooldown_remaining: None,
         }
     }
 }
 
 impl WorkerState {
-    /// Reduce an event stream into a WorkerState.
-    pub fn reduce(events: &[Event], config: &HealthConfig) -> Self {
-        let mut state = Self::default();
-
-        for event in events {
-            state.apply(event);
-        }
-
-        state.check_silence(config);
-        state
-    }
-
-    fn apply(&mut self, event: &Event) {
-        if self.started_at.is_none() {
-            self.started_at = Some(event.ts);
-        }
-        self.last_event_at = Some(event.ts);
-
-        // Terminal events are sticky
-        if let EventKind::Terminal { terminal, .. } = &event.kind {
-            self.status = match terminal {
-                TerminalKind::Merged => WorkerStatus::Merged,
-                TerminalKind::Approved => WorkerStatus::Approved,
-                TerminalKind::Failed => WorkerStatus::Failed,
-                TerminalKind::Archived => WorkerStatus::Archived,
-            };
-            return;
-        }
-
-        if self.status.is_terminal() {
-            return;
-        }
-
-        match &event.kind {
-            EventKind::Create { .. } => {
-                self.status = WorkerStatus::Created;
-            }
-            EventKind::Initializing { branch, .. } => {
-                self.status = WorkerStatus::Initializing;
-                self.branch = Some(branch.clone());
-            }
-            EventKind::Spawn { branch, issue, .. } => {
-                self.status = WorkerStatus::Spawned;
-                self.branch = Some(branch.clone());
-                self.issue_ref = Some(issue.clone());
-            }
-            EventKind::Resume => {
-                self.status = WorkerStatus::Spawned;
-            }
-            EventKind::ToolUseStart | EventKind::ToolUseEnd => {
-                self.status = WorkerStatus::Running;
-            }
-            EventKind::Commit { .. } => {
-                self.status = WorkerStatus::Running;
-                self.commit_count += 1;
-                self.last_commit_at = Some(event.ts);
-            }
-            EventKind::Push { .. } => {
-                self.status = WorkerStatus::Running;
-            }
-            EventKind::Notification => {
-                self.status = WorkerStatus::WaitingInput;
-            }
-            EventKind::Stop => {
-                self.status = WorkerStatus::Idle;
-            }
-            EventKind::PrOpened { pr_url, .. } => {
-                self.status = WorkerStatus::WaitingReview;
-                self.pr_url = Some(pr_url.clone());
-            }
-            EventKind::Nudge { nudge_type, .. } => {
-                *self.nudge_counts.entry(nudge_type.clone()).or_insert(0) += 1;
-                self.last_nudge_at.insert(nudge_type.clone(), event.ts);
-            }
-            EventKind::CiStatus => {}
-            EventKind::Terminal { .. } => unreachable!(),
-        }
-    }
-
-    fn check_silence(&mut self, config: &HealthConfig) {
+    pub fn check_silence(&mut self, config: &Config) {
         if self.status.is_terminal() {
             return;
         }
@@ -140,17 +132,122 @@ impl WorkerState {
     }
 }
 
+impl Reducible for Event {
+    type State = WorkerState;
+
+    fn apply(state: &mut WorkerState, event: &Event) {
+        if state.started_at.is_none() {
+            state.started_at = Some(event.ts);
+        }
+        state.last_event_at = Some(event.ts);
+
+        // Terminal events are sticky
+        if let EventKind::Terminal { terminal, .. } = &event.kind {
+            state.status = match terminal {
+                TerminalKind::Merged => WorkerStatus::Merged,
+                TerminalKind::Approved => WorkerStatus::Approved,
+                TerminalKind::Failed => WorkerStatus::Failed,
+                TerminalKind::Archived => WorkerStatus::Archived,
+            };
+            return;
+        }
+
+        if state.status.is_terminal() {
+            return;
+        }
+
+        match &event.kind {
+            EventKind::Create { .. } => {
+                state.status = WorkerStatus::Created;
+            }
+            EventKind::Initializing { branch, .. } => {
+                state.status = WorkerStatus::Initializing;
+                state.branch = Some(branch.clone());
+            }
+            EventKind::Spawn { branch, issue, .. } => {
+                state.status = WorkerStatus::Spawned;
+                state.branch = Some(branch.clone());
+                state.issue_ref = Some(issue.clone());
+            }
+            EventKind::Resume => {
+                state.status = WorkerStatus::Spawned;
+            }
+            EventKind::ToolUseStart | EventKind::ToolUseEnd => {
+                state.status = WorkerStatus::Running;
+            }
+            EventKind::Commit { .. } => {
+                state.status = WorkerStatus::Running;
+                state.commit_count += 1;
+                state.last_commit_at = Some(event.ts);
+            }
+            EventKind::Push { .. } => {
+                state.status = WorkerStatus::Running;
+            }
+            EventKind::Notification => {
+                state.status = WorkerStatus::WaitingInput;
+            }
+            EventKind::Stop => {
+                state.status = WorkerStatus::Idle;
+            }
+            EventKind::PrOpened { pr_url, .. } => {
+                state.status = WorkerStatus::WaitingReview;
+                state.pr_url = Some(pr_url.clone());
+            }
+            EventKind::Nudge { nudge_type, .. } => {
+                *state.nudge_counts.entry(nudge_type.clone()).or_insert(0) += 1;
+                state.last_nudge_at.insert(nudge_type.clone(), event.ts);
+            }
+            EventKind::CiStatus => {}
+            EventKind::PrCiStatus { passed, failures } => {
+                state.pr_ci_passed = Some(*passed);
+                state.pr_ci_failures = failures.clone();
+            }
+            EventKind::PrConflict { has_conflict } => {
+                state.pr_has_conflicts = Some(*has_conflict);
+            }
+            EventKind::PrReviewFeedback {
+                comment_count,
+                changes_requested,
+            } => {
+                state.pr_review_comment_count = *comment_count;
+                state.pr_changes_requested = *changes_requested;
+                state.review_feedback_count = comment_count + changes_requested;
+            }
+            EventKind::PrCommitLint { bad_commits } => {
+                state.pr_bad_commits = bad_commits.clone();
+            }
+            EventKind::PrMerged { pr_url } => {
+                state.pr_url = Some(pr_url.clone());
+                state.status = WorkerStatus::Merged;
+            }
+            EventKind::PrClosed { .. } => {
+                state.status = WorkerStatus::Failed;
+            }
+            EventKind::Terminal { .. } => unreachable!(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn default_config() -> HealthConfig {
-        HealthConfig::default()
+    fn default_config() -> Config {
+        Config::default()
+    }
+
+    fn reduce(events: &[Event], config: &Config) -> WorkerState {
+        let mut state = WorkerState::default();
+        for event in events {
+            Event::apply(&mut state, event);
+        }
+        state.check_silence(config);
+        state
     }
 
     #[test]
     fn empty_events_returns_created() {
-        let state = WorkerState::reduce(&[], &default_config());
+        let state = reduce(&[], &default_config());
         assert_eq!(state.status, WorkerStatus::Created);
         assert_eq!(state.commit_count, 0);
     }
@@ -172,7 +269,7 @@ mod tests {
                 repo: "r".into(),
             }),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.commit_count, 2);
         assert!(state.last_commit_at.is_some());
     }
@@ -190,7 +287,7 @@ mod tests {
                 pr_number: "1".into(),
             }),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::WaitingReview);
         assert_eq!(state.pr_url.as_deref(), Some("https://github.com/pr/1"));
     }
@@ -205,7 +302,7 @@ mod tests {
             }),
             Event::now(EventKind::ToolUseStart),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.issue_ref.as_deref(), Some("features/smart-context"));
     }
 
@@ -230,7 +327,7 @@ mod tests {
                 message: "m".into(),
             }),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.nudge_counts.get("stalled"), Some(&2));
         assert_eq!(state.nudge_counts.get("waiting"), Some(&1));
     }
@@ -266,7 +363,7 @@ mod tests {
                 },
             ),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.last_nudge_at.get("ci"), Some(&(now - 100)));
         assert_eq!(state.last_nudge_at.get("review"), Some(&(now - 500)));
         assert_eq!(state.nudge_counts.get("ci"), Some(&2));
@@ -286,7 +383,7 @@ mod tests {
             }),
             Event::now(EventKind::ToolUseStart),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::Failed);
     }
 
@@ -300,7 +397,7 @@ mod tests {
             }),
             Event::now(EventKind::ToolUseEnd),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert!(state.started_at.is_some());
         assert!(state.last_event_at.is_some());
     }
@@ -323,7 +420,7 @@ mod tests {
             }),
             Event::now(EventKind::Resume),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::Spawned);
         assert_eq!(state.commit_count, 2);
         assert_eq!(state.issue_ref.as_deref(), Some("features/smart-context"));
@@ -341,7 +438,7 @@ mod tests {
             Event::now(EventKind::Stop),
             Event::now(EventKind::Resume),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::Spawned);
     }
 
@@ -349,11 +446,11 @@ mod tests {
     fn silence_triggers_stalled() {
         let old_ts = chrono::Utc::now().timestamp() - 600;
         let events = vec![Event::at(old_ts, EventKind::ToolUseEnd)];
-        let config = HealthConfig {
+        let config = Config {
             silence_threshold_seconds: 300,
             ..Default::default()
         };
-        let state = WorkerState::reduce(&events, &config);
+        let state = reduce(&events, &config);
         assert_eq!(state.status, WorkerStatus::Stalled);
     }
 
@@ -364,7 +461,7 @@ mod tests {
             base: "main".into(),
             auto: false,
         })];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::Initializing);
     }
 
@@ -382,7 +479,7 @@ mod tests {
                 issue: IssueRef::new("features/my-feature"),
             }),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::Spawned);
     }
 
@@ -399,7 +496,7 @@ mod tests {
                 reason: Some("on-create hook failed".into()),
             }),
         ];
-        let state = WorkerState::reduce(&events, &default_config());
+        let state = reduce(&events, &default_config());
         assert_eq!(state.status, WorkerStatus::Failed);
     }
 
@@ -414,11 +511,11 @@ mod tests {
                 auto: false,
             },
         )];
-        let config = HealthConfig {
+        let config = Config {
             silence_threshold_seconds: 300,
             ..Default::default()
         };
-        let state = WorkerState::reduce(&events, &config);
+        let state = reduce(&events, &config);
         assert_eq!(state.status, WorkerStatus::Initializing);
     }
 }

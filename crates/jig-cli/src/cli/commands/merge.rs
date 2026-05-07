@@ -2,11 +2,13 @@
 
 use clap::Args;
 
-use crate::worker::TmuxWorker as Worker;
+use crate::worker::Worker;
 use jig_core::git::Repo;
+use jig_core::mux::TmuxMux;
 use jig_core::Error;
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
+use crate::context::RepoConfig;
 use crate::cli::ui;
 
 /// Merge reviewed worktree into current branch
@@ -28,8 +30,8 @@ impl Op for Merge {
     type Error = MergeError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = RepoConfig::from_cwd()?;
         let worktree_path = cfg.worktrees_path.join(&self.name);
 
         if !worktree_path.exists() {
@@ -57,7 +59,11 @@ impl Op for Merge {
         let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
         if let Some(worker) = workers.iter().find(|w| w.branch() == self.name.as_str()) {
             worker.unregister()?;
-            let _ = worker.kill();
+            let repo_name = cfg.repo_root.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let mux = TmuxMux::for_repo(&repo_name);
+            let _ = worker.kill(&mux);
         }
 
         eprintln!();

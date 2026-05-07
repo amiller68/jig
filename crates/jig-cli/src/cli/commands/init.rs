@@ -4,12 +4,14 @@ use clap::Args;
 use std::fs;
 use std::path::Path;
 
-use crate::config::{JigToml, JIG_DIR, JIG_LOCAL_TOML};
+use crate::context::{Context, JigToml, JIG_DIR, JIG_LOCAL_TOML};
 use jig_core::git::Repo;
-use jig_core::mux::tmux::TmuxWindow;
-use jig_core::{agents, mux, Error};
+use jig_core::mux::{Mux, TmuxMux};
+use jig_core::{agents, Error, Prompt};
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::terminal::Terminal;
+
+use crate::cli::op::{NoOutput, Op};
 use crate::cli::ui;
 
 // Embed templates at compile time from the templates/ directory
@@ -55,6 +57,10 @@ pub struct Init {
     /// Launch agent to audit and populate docs. Optionally pass extra instructions.
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     pub audit: Option<String>,
+
+    /// Operate on global config
+    #[arg(short = 'g', long)]
+    global: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -62,7 +68,7 @@ pub enum InitError {
     #[error(transparent)]
     Core(#[from] Error),
     #[error(transparent)]
-    Tmux(#[from] jig_core::mux::tmux::TmuxError),
+    Mux(#[from] jig_core::MuxError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("Unknown agent: '{0}'. Supported agents: {1}")]
@@ -75,7 +81,11 @@ impl Op for Init {
     type Error = InitError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        if self.global {
+            return init_global(self.force);
+        }
+
         let agent_name = self.agent.as_deref().ok_or_else(|| {
             InitError::UnknownAgent(
                 String::new(),
@@ -90,10 +100,13 @@ impl Op for Init {
             )
         })?;
 
-        // Init needs get_base_repo() directly because Config may not exist
+        // Init needs to discover repo root directly because Config may not exist
         // (init is often the first jig command run in a repo)
-        let repo_root = match ctx.config() {
-            Ok(cfg) => cfg.repo_root.clone(),
+        let repo_root = match Context::from_cwd() {
+            Ok(cfg) => cfg.repo().map(|r| r.repo_root.clone()).unwrap_or_else(|_| {
+                let git_repo = Repo::discover().expect("must be in a git repo");
+                git_repo.clone_path()
+            }),
             Err(_) => {
                 let git_repo = Repo::discover()?;
                 git_repo.clone_path()
@@ -101,7 +114,7 @@ impl Op for Init {
         };
 
         // Validate agent argument
-        let agent = agents::Agent::from_name(agent_name).ok_or_else(|| {
+        let agent = agents::Agent::from_config(agent_name, None, &[]).ok_or_else(|| {
             InitError::UnknownAgent(
                 agent_name.to_string(),
                 agents::AgentKind::ALL
@@ -113,7 +126,7 @@ impl Op for Init {
         })?;
 
         // Check if agent is installed
-        if !mux::command_exists(agent.command()) {
+        if Terminal::which(agent.command()).is_none() {
             ui::warning(&format!(
                 "'{}' not found in PATH. Install it before running agents.",
                 agent.command()
@@ -325,10 +338,6 @@ type = "{}"
 
         Ok(NoOutput)
     }
-
-    fn run_global(&self, _ctx: &crate::cli::op::GlobalCtx) -> Result<Self::Output, Self::Error> {
-        init_global(self.force)
-    }
 }
 
 /// Generate audit prompt with adapter-specific file paths.
@@ -405,7 +414,7 @@ fn launch_audit(
     extra: Option<&str>,
 ) -> Result<(), InitError> {
     let prompt = audit_prompt(agent, has_backup, extra);
-    let cmd = agent.spawn_command(&prompt);
+    let cmd = agent.spawn(Prompt::new(&prompt)).map_err(|e| InitError::Core(e))?;
 
     let session_name = "jig-init";
     let window_name = repo_root
@@ -413,13 +422,13 @@ fn launch_audit(
         .and_then(|n| n.to_str())
         .unwrap_or("init");
 
-    let window = TmuxWindow::new(session_name, window_name);
-    window.create(repo_root)?;
-    window.send_keys(&[&cmd, "Enter"])?;
+    let mux = TmuxMux::new(session_name);
+    mux.create_window(window_name, repo_root)?;
+    mux.send_keys(window_name, &[&cmd, "Enter"])?;
 
     eprintln!();
     ui::progress(&format!(
-        "Audit launched in tmux session {}:{}",
+        "Audit launched in session {}:{}",
         session_name, window_name
     ));
     eprintln!();
@@ -434,7 +443,7 @@ fn launch_audit(
 
 /// Initialize global config at ~/.config/jig/config.toml.
 fn init_global(force: bool) -> Result<NoOutput, InitError> {
-    let config_dir = crate::config::paths::global_config_dir()?;
+    let config_dir = crate::context::paths::global_config_dir()?;
     let config_path = config_dir.join("config.toml");
 
     if config_path.exists() && !force {
@@ -464,7 +473,7 @@ auto_cleanup_closed = false      # clean up workers when PR closed without merge
 
 [spawn]
 max_concurrent_workers = 3       # max auto-spawned workers per repo
-auto_spawn_interval = 120        # seconds between issue polls
+poll_interval = 120              # seconds between issue polls
 
 # [notify]
 # exec = "~/.config/jig/hooks/notify.sh"
@@ -508,7 +517,7 @@ fn install_hooks(repo_root: &Path, agent: &agents::Agent, force: bool) {
     }
 
     ui::progress(&format!("Installing {} agent hooks...", agent.name()));
-    match agent.install_hooks() {
+    match agent.install() {
         Ok(result) => {
             for name in &result.installed {
                 eprintln!("  {} {}: installed", ui::SYM_OK, name);

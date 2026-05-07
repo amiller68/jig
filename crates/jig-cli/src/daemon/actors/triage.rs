@@ -7,16 +7,17 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{self, Config};
+use crate::context::{self, RepoConfig};
 use jig_core::agents;
+use jig_core::prompt::Prompt;
 use jig_core::git::{Branch, Repo};
 use jig_core::issues::issue::{IssueFilter, IssueStatus};
-use jig_core::issues::{Issue, ProviderKind};
+use jig_core::issues::Issue;
 
-use super::Actor;
+use super::{Actor, TickContext};
 
 pub struct TriageRequest {
-    pub repos: Vec<Repo>,
+    pub ctx: TickContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,8 +55,6 @@ struct TriageIssue {
     repo_root: PathBuf,
     issue: Issue,
     worker_name: String,
-    #[allow(dead_code)]
-    provider_kind: ProviderKind,
 }
 
 impl Actor for TriageActor {
@@ -75,15 +74,16 @@ impl Actor for TriageActor {
                 .iter()
                 .filter(|(_, entry)| {
                     let repo_timeout = req
+                        .ctx
                         .repos
                         .iter()
-                        .find(|r| {
-                            r.clone_path()
+                        .find(|e| {
+                            e.path
                                 .file_name()
                                 .map(|n| n.to_string_lossy() == entry.repo_name)
                                 .unwrap_or(false)
                         })
-                        .and_then(|r| config::JigToml::load(&r.clone_path()).ok().flatten())
+                        .and_then(|e| context::JigToml::load(&e.path).ok().flatten())
                         .map(|t| t.triage.timeout_seconds)
                         .unwrap_or(600);
                     now - entry.spawned_at > repo_timeout
@@ -103,14 +103,23 @@ impl Actor for TriageActor {
         }
 
         // Poll for new triageable issues
-        for repo in &req.repos {
-            let repo_root = repo.clone_path();
+        let global = &req.ctx.config;
+        for entry in req.ctx.repos.iter() {
+            let repo_root = entry.path.clone();
             let repo_name = repo_root
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
 
-            let cfg = match Config::from_path(&repo_root) {
+            let repo = match Repo::open(&repo_root) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::debug!(repo = %repo_name, error = %e, "failed to open repo");
+                    continue;
+                }
+            };
+
+            let cfg = match RepoConfig::from_path(&repo_root) {
                 Ok(cfg) => cfg,
                 Err(e) => {
                     tracing::debug!(repo = %repo_name, error = %e, "failed to load config");
@@ -122,7 +131,7 @@ impl Actor for TriageActor {
                 continue;
             }
 
-            let provider = match cfg.issue_provider() {
+            let provider = match cfg.issue_provider(global) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::debug!(repo = %repo_name, error = %e, "failed to create issue provider");
@@ -137,17 +146,12 @@ impl Actor for TriageActor {
                 .filter_map(|wt| wt.branch().ok())
                 .collect();
 
-            let max_workers = cfg
-                .repo
-                .spawn
-                .resolve_max_concurrent_workers(&cfg.global.spawn);
+            let max_workers = cfg.repo.spawn.max_concurrent_workers;
             let budget = max_workers.saturating_sub(existing_branches.len());
 
             if budget == 0 {
                 continue;
             }
-
-            let provider_kind = provider.kind();
 
             let triageable = match provider.list(&IssueFilter {
                 status: Some(IssueStatus::Triage),
@@ -178,7 +182,6 @@ impl Actor for TriageActor {
                     repo_root: repo_root.clone(),
                     issue,
                     worker_name,
-                    provider_kind,
                 };
 
                 run_single(&ti);
@@ -259,18 +262,11 @@ fn run_single(issue: &TriageIssue) {
     }
 }
 
-fn render_triage_prompt(repo_root: &Path, issue: &Issue) -> jig_core::error::Result<String> {
-    let repo_name = repo_root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let cfg = Config::from_path(repo_root)?;
-    let provider = cfg.issue_provider()?;
-
-    issue
-        .to_prompt(TRIAGE_PROMPT, &provider)
-        .var("repo_name", repo_name)
+fn render_triage_prompt(issue: &Issue) -> jig_core::error::Result<String> {
+    Prompt::new(TRIAGE_PROMPT)
+        .var("issue_id", issue.id().to_string())
+        .var("issue_title", issue.title())
+        .var("issue_body", issue.body())
         .render()
 }
 
@@ -278,34 +274,26 @@ pub(crate) fn run_triage_subprocess(
     repo_root: &Path,
     issue: &Issue,
 ) -> std::result::Result<(), String> {
-    let prompt = render_triage_prompt(repo_root, issue).map_err(|e| e.to_string())?;
+    let prompt = render_triage_prompt(issue).map_err(|e| e.to_string())?;
 
-    let jig_toml = config::JigToml::load(repo_root)
+    let jig_toml = context::JigToml::load(repo_root)
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
-    let model = &jig_toml.triage.model;
-    let agent = agents::Agent::from_name(&jig_toml.agent.agent_type)
-        .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude));
+    let agent = agents::Agent::from_config(&jig_toml.agent.agent_type, Some(&jig_toml.triage.model), &[])
+        .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
-    let argv = agent.triage_argv(model, TRIAGE_ALLOWED_TOOLS);
+    let argv = agent
+        .once(jig_core::Prompt::new(&prompt), TRIAGE_ALLOWED_TOOLS)
+        .map_err(|e| e.to_string())?;
 
     let (cmd, args) = argv.split_first().ok_or("empty triage argv")?;
 
     let output = std::process::Command::new(cmd)
         .args(args)
         .current_dir(repo_root)
-        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(prompt.as_bytes());
-            }
-            drop(child.stdin.take());
-            child.wait_with_output()
-        })
+        .output()
         .map_err(|e| format!("failed to execute triage agent: {}", e))?;
 
     if !output.status.success() {

@@ -2,9 +2,10 @@
 
 use clap::{Args, Subcommand};
 
-use crate::config::JigToml;
+use crate::context::JigToml;
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
+use crate::context::RepoConfig;
 use crate::cli::ui;
 
 /// Manage hook integrations
@@ -69,10 +70,10 @@ impl Op for Hooks {
     type Error = HooksError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         match &self.subcommand {
             HooksCommands::Init { force } => {
-                let cfg = ctx.config()?;
+                let cfg = RepoConfig::from_cwd()?;
                 let repo_path = &cfg.repo_root;
 
                 // Install git hooks
@@ -116,11 +117,11 @@ impl Op for Hooks {
 
                 // Install agent-specific hooks based on config
                 let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
-                if let Some(agent) = jig_core::agents::Agent::from_name(&jig_toml.agent.agent_type)
+                if let Some(agent) = jig_core::agents::Agent::from_config(&jig_toml.agent.agent_type, Some(&jig_toml.agent.model), &jig_toml.agent.disallowed_tools)
                 {
                     eprintln!();
                     ui::progress(&format!("Installing {} agent hooks...", agent.name()));
-                    match agent.install_hooks() {
+                    match agent.install() {
                         Ok(result) => {
                             for name in &result.installed {
                                 eprintln!("  {} {}: installed", ui::SYM_OK, name);
@@ -141,7 +142,7 @@ impl Op for Hooks {
                 Ok(NoOutput)
             }
             HooksCommands::Uninstall { hook } => {
-                let cfg = ctx.config()?;
+                let cfg = RepoConfig::from_cwd()?;
                 let repo_path = &cfg.repo_root;
 
                 eprintln!("Uninstalling jig hooks...");
@@ -176,22 +177,22 @@ impl Op for Hooks {
                 Ok(NoOutput)
             }
             HooksCommands::PostCommit { .. } => {
-                let cfg = ctx.config()?;
+                let cfg = RepoConfig::from_cwd()?;
                 crate::hooks::handle_post_commit(&cfg.repo_root)?;
                 Ok(NoOutput)
             }
             HooksCommands::PostMerge { .. } => {
-                let cfg = ctx.config()?;
+                let cfg = RepoConfig::from_cwd()?;
                 crate::hooks::handle_post_merge(&cfg.repo_root)?;
                 Ok(NoOutput)
             }
             HooksCommands::CommitMsg { file, .. } => {
-                let cfg = ctx.config()?;
+                let cfg = RepoConfig::from_cwd()?;
                 crate::hooks::handle_commit_msg(&cfg.repo_root, file)?;
                 Ok(NoOutput)
             }
             HooksCommands::PreCommit { .. } => {
-                let cfg = ctx.config()?;
+                let cfg = RepoConfig::from_cwd()?;
                 crate::hooks::handle_pre_commit(&cfg.repo_root)?;
                 Ok(NoOutput)
             }

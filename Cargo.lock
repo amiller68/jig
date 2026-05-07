@@ -925,6 +925,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "which",
 ]
 
 [[package]]
@@ -951,7 +952,6 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
- "which",
 ]
 
 [[package]]

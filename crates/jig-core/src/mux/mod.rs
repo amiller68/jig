@@ -1,71 +1,46 @@
-pub mod terminal;
 pub mod tmux;
+// TODO: cmux backend (https://cmux.com)
+// - Native macOS terminal + multiplexer — good fit for laptop, not for servers
+// - Flat workspace model: no session/window hierarchy, just named workspaces
+// - CLI: `cmux new-workspace <name>`, `cmux send-key -w <name> <key>`,
+//   `cmux send -w <name> <text>`, `cmux close-workspace <name>`
+// - No built-in is_running equivalent — may need to send a probe keystroke
+//   and check output, or track spawned PIDs ourselves
+// - attach semantics differ: cmux workspaces are always visible in the app,
+//   "attach" would mean focus/switch-to rather than tmux-style session attach
+// - Detection: `which cmux` + check we're running inside cmux (env var?)
+// - Backend selection: jig config chooses backend, or auto-detect from env
 
-pub use terminal::{Terminal, TerminalError};
-pub use tmux::{TmuxError, TmuxSession, TmuxWindow};
+pub use tmux::TmuxMux;
 
 use std::path::Path;
 
 pub const KNOWN_SHELLS: &[&str] = &["bash", "zsh", "fish", "sh"];
 
-/// Check if a command is available on the host
-pub fn command_exists(cmd: &str) -> bool {
-    which::which(cmd).is_ok()
+#[derive(Debug, thiserror::Error)]
+pub enum MuxError {
+    #[error("mux command failed: {command}: {detail}")]
+    CommandFailed { command: String, detail: String },
+    #[error("session not found: {0}")]
+    SessionNotFound(String),
+    #[error("mux command timed out: {command}")]
+    Timeout { command: String },
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
-/// Dependency status for health check
-#[derive(Debug)]
-pub struct DependencyStatus {
-    pub name: String,
-    pub available: bool,
-}
-
-/// Check availability of required dependencies
-pub fn check_dependencies() -> Vec<DependencyStatus> {
-    vec![
-        DependencyStatus {
-            name: "git".to_string(),
-            available: command_exists("git"),
-        },
-        DependencyStatus {
-            name: "tmux".to_string(),
-            available: command_exists("tmux"),
-        },
-        DependencyStatus {
-            name: "claude".to_string(),
-            available: command_exists("claude"),
-        },
-    ]
-}
-
-/// A multiplexer session — a named group of windows.
-pub trait MuxSession {
-    type Error: std::error::Error + Send + Sync + 'static;
-    type Window: MuxWindow<Error = Self::Error>;
-
-    fn new(name: impl Into<String>) -> Self;
-    fn name(&self) -> &str;
-    fn exists(&self) -> bool;
-    fn ensure(&self) -> Result<(), Self::Error>;
-    fn window(&self, name: impl Into<String>) -> Self::Window;
-    fn window_names(&self) -> Result<Vec<String>, Self::Error>;
-    fn kill(&self) -> Result<(), Self::Error>;
-    fn attach(&self) -> Result<(), Self::Error>;
-}
-
-/// A window within a multiplexer session.
-pub trait MuxWindow: Sized {
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    fn new(session: impl Into<String>, window: impl Into<String>) -> Self;
-    fn session_name(&self) -> &str;
-    fn window_name(&self) -> &str;
-    fn exists(&self) -> bool;
-    fn create(&self, dir: &Path) -> Result<(), Self::Error>;
-    fn kill(&self) -> Result<(), Self::Error>;
-    fn send_keys(&self, keys: &[&str]) -> Result<(), Self::Error>;
-    fn send_message(&self, message: &str) -> Result<(), Self::Error>;
-    fn is_running(&self) -> bool;
-    fn pane_command(&self) -> Option<String>;
-    fn attach(&self) -> Result<(), Self::Error>;
+/// A multiplexer backend scoped to a named group (e.g. one tmux session).
+///
+/// Window names are branch names — the backend manages the mapping to its
+/// native hierarchy (tmux session:window, cmux workspace, etc.).
+pub trait Mux: Send + Sync {
+    fn create_window(&self, name: &str, dir: &Path) -> Result<(), MuxError>;
+    fn window_exists(&self, name: &str) -> bool;
+    fn kill_window(&self, name: &str) -> Result<(), MuxError>;
+    fn kill_all(&self) -> Result<(), MuxError>;
+    fn send_keys(&self, name: &str, keys: &[&str]) -> Result<(), MuxError>;
+    fn send_message(&self, name: &str, message: &str) -> Result<(), MuxError>;
+    fn is_running(&self, name: &str) -> bool;
+    fn attach_window(&self, name: &str) -> Result<(), MuxError>;
+    fn attach(&self) -> Result<(), MuxError>;
 }

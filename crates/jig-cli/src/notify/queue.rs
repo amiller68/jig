@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use crate::config::notifications_path;
+use crate::context::notifications_path;
 use jig_core::error::Result;
 
 use super::{Notification, NotificationEvent};

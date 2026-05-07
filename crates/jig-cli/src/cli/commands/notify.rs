@@ -4,10 +4,10 @@ use std::fmt;
 
 use clap::{Args, Subcommand};
 
-use crate::config::{GlobalConfig, NotifyConfig};
+use crate::context::{Config, NotifyConfig};
 use crate::notify::{NotificationEvent, NotificationQueue, Notifier};
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
 use crate::cli::ui;
 
 /// Manage and inspect notifications
@@ -192,7 +192,7 @@ impl Op for Notify {
     type Error = NotifyError;
     type Output = NotifyOutput;
 
-    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         match &self.subcommand {
             NotifyCommands::Doctor => run_doctor(),
             NotifyCommands::Test => run_test(),
@@ -203,11 +203,11 @@ impl Op for Notify {
 }
 
 fn run_doctor() -> Result<NotifyOutput, NotifyError> {
-    let config_path = GlobalConfig::default_path()?;
+    let config_path = Config::default_path()?;
     let config_path_str = config_path.display().to_string();
 
     // Try to load config, capturing parse errors
-    let (notify_config, parse_error) = match GlobalConfig::load_from(&config_path) {
+    let (notify_config, parse_error) = match Config::load_from(&config_path) {
         Ok(cfg) => (cfg.notify, None),
         Err(e) => (NotifyConfig::default(), Some(e.to_string())),
     };
@@ -282,7 +282,7 @@ fn run_doctor() -> Result<NotifyOutput, NotifyError> {
 }
 
 fn run_test() -> Result<NotifyOutput, NotifyError> {
-    let config = GlobalConfig::load()?;
+    let config = Config::load()?;
     let queue = NotificationQueue::global()?;
     let notifier = Notifier::new(config.notify, queue);
 
@@ -312,7 +312,7 @@ fn run_tail(n: usize) -> Result<NotifyOutput, NotifyError> {
 }
 
 fn run_send(kind: SendKind) -> Result<NotifyOutput, NotifyError> {
-    let config = GlobalConfig::load()?;
+    let config = Config::load()?;
     let queue = NotificationQueue::global()?;
     let notifier = Notifier::new(config.notify, queue);
 

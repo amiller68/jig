@@ -1,34 +1,50 @@
 //! jig CLI - Git worktree manager for parallel Claude Code sessions
 
 mod cli;
-pub mod config;
+pub mod context;
 pub mod daemon;
 pub mod hooks;
 pub mod notify;
+pub mod terminal;
 pub mod worker;
 
 use std::io::IsTerminal;
 
 use clap::Parser;
 
-use cli::op::{GlobalCtx, Op, RepoCtx};
+use cli::op::Op;
 use cli::ui;
 use cli::Cli;
-use config::{Config, RepoRegistry};
 
 fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
-
     if let Err(e) = run() {
         ui::print_error(e.as_ref());
         std::process::exit(1);
     }
+}
+
+fn init_tracing(log_file: Option<std::path::PathBuf>) {
+    use tracing_subscriber::prelude::*;
+
+    let default_level = if log_file.is_some() { "info" } else { "warn" };
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_level));
+
+    let stderr_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+
+    let file_layer = log_file.and_then(|path| {
+        std::fs::File::create(&path).ok().map(|file| {
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::sync::Mutex::new(file))
+                .with_ansi(false)
+        })
+    });
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stderr_layer)
+        .with(file_layer)
+        .init();
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,7 +60,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Best-effort global directory setup
-    let _ = config::ensure_global_dirs();
+    let _ = context::ensure_global_dirs();
+
+    // Every command gets a session log file
+    let log_file = context::new_daemon_log_path().ok();
+    init_tracing(log_file);
 
     match cli.command {
         None => {
@@ -52,36 +72,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         Some(ref command) => {
-            let output = if cli.global {
-                let registry = RepoRegistry::load().unwrap_or_default();
-                let configs: Vec<_> = registry
-                    .repos()
-                    .iter()
-                    .filter(|e| e.path.exists())
-                    .filter_map(|e| Config::from_path(&e.path).ok())
-                    .collect();
-                let ctx = GlobalCtx { configs };
-                command.run_global(&ctx)?
-            } else {
-                let config = Config::from_cwd().ok();
-
-                // Best-effort auto-registration and pruning of current repo
-                if let Some(ref cfg) = config {
-                    if let Ok(mut registry) = RepoRegistry::load() {
-                        let _ = registry.register(cfg.repo_root.clone());
-                        let pruned = registry.prune();
-                        if cli.verbose && !pruned.is_empty() {
-                            for p in &pruned {
-                                eprintln!("{} {}", ui::dim("pruned:"), p.display());
-                            }
-                        }
-                        let _ = registry.save();
-                    }
-                }
-
-                let ctx = RepoCtx { config };
-                command.run(&ctx)?
-            };
+            let output = command.run()?;
             let output_str = output.to_string();
             if !output_str.is_empty() {
                 println!("{}", output_str);
@@ -173,10 +164,6 @@ fn print_help() {
     );
     eprintln!();
     eprintln!("{}", ui::bold("GLOBAL OPTIONS:"));
-    eprintln!(
-        "  {}  Run command across all tracked repos",
-        ui::highlight("-g, --global")
-    );
     eprintln!("  {} Show verbose output", ui::highlight("-v, --verbose"));
     eprintln!(
         "  {}    Plain output for scripting",

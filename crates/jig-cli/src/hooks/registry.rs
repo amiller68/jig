@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::hook_registry_path;
+use crate::context::hook_registry_path;
 use jig_core::error::Result;
 
 /// Tracks installed git hooks for idempotent init and safe uninstall.

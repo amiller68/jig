@@ -3,7 +3,8 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
+use crate::context::RepoConfig;
 
 /// Go to base repository root
 #[derive(Args, Debug, Clone)]
@@ -28,8 +29,8 @@ impl Op for Home {
     type Error = HomeError;
     type Output = HomeOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = RepoConfig::from_cwd()?;
         Ok(HomeOutput(cfg.repo_root.clone()))
     }
 }

@@ -1,4 +1,4 @@
-//! Issues command — discover, browse, and manage file-based issues.
+//! Issues command — discover, browse, and manage issues.
 
 use std::fmt;
 use std::io::{self, Write};
@@ -8,12 +8,11 @@ use comfy_table::{Cell, Color};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 
-use jig_core::issues::{
-    self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus, ProviderKind,
-};
+use jig_core::issues::{self, Issue as CoreIssue, IssueFilter, IssuePriority, IssueStatus};
 
-use crate::cli::op::{GlobalCtx, Op, RepoCtx};
+use crate::cli::op::Op;
 use crate::cli::ui;
+use crate::context::{Context, RepoConfig};
 
 /// Discover and manage issues
 #[derive(Args, Debug, Clone)]
@@ -64,6 +63,10 @@ pub struct Issues {
     /// Print issue IDs only (one per line, for scripting)
     #[arg(long)]
     pub ids: bool,
+
+    /// Operate on all tracked repos
+    #[arg(short = 'g', long)]
+    pub global: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -273,10 +276,10 @@ impl Issues {
         Ok(IssuesOutput::Table(all_issues, auto_spawn_labels))
     }
 
-    fn run_list(&self, ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
-        let cfg = ctx.config()?;
+    fn run_list(&self, cfg: &Context) -> Result<IssuesOutput, IssuesError> {
+        let repo = cfg.repo()?;
         let filter = self.filter();
-        let provider = cfg.issue_provider()?;
+        let provider = repo.issue_provider(&cfg.config)?;
 
         if let Some(ref id) = self.id {
             let issue = provider
@@ -285,7 +288,7 @@ impl Issues {
             return Ok(IssuesOutput::Detail(Box::new(issue)));
         }
 
-        let spawn_labels = cfg.repo.issues.auto_spawn_labels.clone();
+        let spawn_labels = repo.repo.issues.auto_spawn_labels.clone();
         let all_issues = if self.auto {
             let labels = spawn_labels.as_deref().unwrap_or(&[]);
             let mut spawnable = provider.list(&IssueFilter {
@@ -303,12 +306,12 @@ impl Issues {
         self.finish(all_issues, spawn_labels)
     }
 
-    fn run_list_global(&self, ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
+    fn run_list_global(&self, cfg: &Context) -> Result<IssuesOutput, IssuesError> {
         let filter = self.filter();
 
         let mut all_issues = Vec::new();
-        for cfg in &ctx.configs {
-            let provider = cfg.issue_provider()?;
+        for repo in &cfg.repos {
+            let provider = repo.issue_provider(&cfg.config)?;
 
             if let Some(ref id) = self.id {
                 if let Some(issue) = provider.get(id)? {
@@ -317,7 +320,7 @@ impl Issues {
                 continue;
             }
 
-            let spawn_labels = cfg.repo.issues.auto_spawn_labels.clone();
+            let spawn_labels = repo.repo.issues.auto_spawn_labels.clone();
             let repo_issues = if self.auto {
                 let labels = spawn_labels.as_deref().unwrap_or(&[]);
                 let mut spawnable = provider.list(&IssueFilter {
@@ -345,7 +348,8 @@ impl Issues {
 
 #[allow(clippy::too_many_arguments)]
 fn run_create(
-    ctx: &RepoCtx,
+    repo: &RepoConfig,
+    global: &crate::context::Config,
     title: &str,
     priority: Option<&str>,
     category: Option<&str>,
@@ -354,7 +358,6 @@ fn run_create(
     parent: Option<&str>,
     status: &str,
 ) -> Result<IssuesOutput, IssuesError> {
-    let cfg = ctx.config()?;
     let pri = priority.and_then(|s| s.parse().ok());
 
     let initial_status: IssueStatus = status
@@ -372,27 +375,24 @@ fn run_create(
         None => None,
     };
 
-    let id = match cfg.repo.issues.provider {
-        ProviderKind::Linear => {
-            let linear_provider = cfg.linear_provider()?;
-            linear_provider.create_issue(
-                title,
-                body_text.as_deref(),
-                pri.as_ref(),
-                labels,
-                category,
-                parent,
-                Some(&initial_status),
-            )?
-        }
-    };
+    let linear_provider = repo.linear_provider(global)?;
+    let id = linear_provider.create_issue(
+        title,
+        body_text.as_deref(),
+        pri.as_ref(),
+        labels,
+        category,
+        parent,
+        Some(&initial_status),
+    )?;
 
     Ok(IssuesOutput::Created(id))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn run_update(
-    ctx: &RepoCtx,
+    repo: &RepoConfig,
+    global: &crate::context::Config,
     id: &str,
     title: Option<&str>,
     body: Option<&str>,
@@ -408,7 +408,6 @@ fn run_update(
     parent: Option<&str>,
     remove_parent: bool,
 ) -> Result<IssuesOutput, IssuesError> {
-    let cfg = ctx.config()?;
     let pri = priority.and_then(|s| s.parse().ok());
 
     let body_text = match body {
@@ -450,7 +449,7 @@ fn run_update(
     // If --append is set and body is provided, fetch existing description and prepend it
     let effective_body = match (append, body_text) {
         (true, Some(new_body)) => {
-            let provider = cfg.issue_provider()?;
+            let provider = repo.issue_provider(global)?;
             let existing = provider
                 .get(id)?
                 .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
@@ -479,7 +478,7 @@ fn run_update(
     let computed_labels: Vec<String> = if !labels.is_empty() {
         labels.to_vec()
     } else if mutate_labels {
-        let provider = cfg.issue_provider()?;
+        let provider = repo.issue_provider(global)?;
         let existing = provider
             .get(id)?
             .ok_or_else(|| IssuesError::Usage(format!("issue not found: {}", id)))?;
@@ -504,51 +503,42 @@ fn run_update(
         || category.is_some()
         || assignee.is_some();
 
-    match cfg.repo.issues.provider {
-        ProviderKind::Linear => {
-            let linear_provider = cfg.linear_provider()?;
-            if has_field_updates || parent.is_some() || remove_parent {
-                linear_provider.update_issue(
-                    id,
-                    title,
-                    effective_body.as_deref(),
-                    pri.as_ref(),
-                    &computed_labels,
-                    category,
-                    assignee,
-                    parent,
-                    remove_parent,
-                )?;
-            }
-            for blocker in blocked_by {
-                linear_provider.add_blocked_by(id, blocker)?;
-            }
-            for blocker in remove_blocked_by {
-                linear_provider.remove_blocked_by(id, blocker)?;
-            }
-        }
+    let linear_provider = repo.linear_provider(global)?;
+    if has_field_updates || parent.is_some() || remove_parent {
+        linear_provider.update_issue(
+            id,
+            title,
+            effective_body.as_deref(),
+            pri.as_ref(),
+            &computed_labels,
+            category,
+            assignee,
+            parent,
+            remove_parent,
+        )?;
+    }
+    for blocker in blocked_by {
+        linear_provider.add_blocked_by(id, blocker)?;
+    }
+    for blocker in remove_blocked_by {
+        linear_provider.remove_blocked_by(id, blocker)?;
     }
 
     Ok(IssuesOutput::Updated(id.to_string()))
 }
 
 fn run_status_update(
-    ctx: &RepoCtx,
+    repo: &RepoConfig,
+    global: &crate::context::Config,
     id: &str,
     new_status: &str,
 ) -> Result<IssuesOutput, IssuesError> {
-    let cfg = ctx.config()?;
-
     let status: IssueStatus = new_status
         .parse()
         .map_err(|_| IssuesError::Usage(format!("unknown status: {}", new_status)))?;
 
-    match cfg.repo.issues.provider {
-        ProviderKind::Linear => {
-            let linear_provider = cfg.linear_provider()?;
-            linear_provider.update_status(id, &status)?;
-        }
-    }
+    let linear_provider = repo.linear_provider(global)?;
+    linear_provider.update_status(id, &status)?;
 
     Ok(IssuesOutput::StatusUpdated(
         id.to_string(),
@@ -556,35 +546,27 @@ fn run_status_update(
     ))
 }
 
-fn run_complete(ctx: &RepoCtx, id: &str, delete: bool) -> Result<IssuesOutput, IssuesError> {
-    let cfg = ctx.config()?;
-
-    match cfg.repo.issues.provider {
-        ProviderKind::Linear => {
-            let linear_provider = cfg.linear_provider()?;
-            linear_provider.update_status(id, &IssueStatus::Complete)?;
-        }
-    }
+fn run_complete(
+    repo: &RepoConfig,
+    global: &crate::context::Config,
+    id: &str,
+    delete: bool,
+) -> Result<IssuesOutput, IssuesError> {
+    let linear_provider = repo.linear_provider(global)?;
+    linear_provider.update_status(id, &IssueStatus::Complete)?;
 
     Ok(IssuesOutput::Completed(id.to_string(), delete))
 }
 
-fn run_stats(ctx: &RepoCtx) -> Result<IssuesOutput, IssuesError> {
-    let cfg = ctx.config()?;
-    let provider = cfg.issue_provider()?;
-
-    let all_issues = provider.list(&IssueFilter::default())?;
-    Ok(IssuesOutput::Stats(compute_stats(&all_issues)))
-}
-
-fn run_stats_global(ctx: &GlobalCtx) -> Result<IssuesOutput, IssuesError> {
+fn run_stats_for_repos(
+    repos: &[RepoConfig],
+    global: &crate::context::Config,
+) -> Result<IssuesOutput, IssuesError> {
     let mut all_issues = Vec::new();
-
-    for cfg in &ctx.configs {
-        let provider = cfg.issue_provider()?;
+    for repo in repos {
+        let provider = repo.issue_provider(global)?;
         all_issues.extend(provider.list(&IssueFilter::default())?);
     }
-
     Ok(IssuesOutput::Stats(compute_stats(&all_issues)))
 }
 
@@ -645,7 +627,21 @@ impl Op for Issues {
     type Error = IssuesError;
     type Output = IssuesOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        if self.global {
+            let cfg = Context::from_global()?;
+            return match &self.command {
+                Some(IssuesCommand::Stats) => run_stats_for_repos(&cfg.repos, &cfg.config),
+                Some(_) => {
+                    eprintln!("error: this subcommand does not support -g/--global");
+                    std::process::exit(1);
+                }
+                None => self.run_list_global(&cfg),
+            };
+        }
+
+        let cfg = Context::from_cwd()?;
+        let repo = cfg.repo()?;
         match &self.command {
             Some(IssuesCommand::Create {
                 title,
@@ -657,7 +653,8 @@ impl Op for Issues {
                 parent,
                 status,
             }) => run_create(
-                ctx,
+                repo,
+                &cfg.config,
                 title,
                 priority.as_deref(),
                 category.as_deref(),
@@ -682,7 +679,8 @@ impl Op for Issues {
                 parent,
                 remove_parent,
             }) => run_update(
-                ctx,
+                repo,
+                &cfg.config,
                 id,
                 title.as_deref(),
                 body.as_deref(),
@@ -698,21 +696,14 @@ impl Op for Issues {
                 parent.as_deref(),
                 *remove_parent,
             ),
-            Some(IssuesCommand::Status { id, status }) => run_status_update(ctx, id, status),
-            Some(IssuesCommand::Complete { id, delete }) => run_complete(ctx, id, *delete),
-            Some(IssuesCommand::Stats) => run_stats(ctx),
-            None => self.run_list(ctx),
-        }
-    }
-
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        match &self.command {
-            Some(IssuesCommand::Stats) => run_stats_global(ctx),
-            Some(_) => {
-                eprintln!("error: this subcommand does not support -g/--global");
-                std::process::exit(1);
+            Some(IssuesCommand::Status { id, status }) => {
+                run_status_update(repo, &cfg.config, id, status)
             }
-            None => self.run_list_global(ctx),
+            Some(IssuesCommand::Complete { id, delete }) => {
+                run_complete(repo, &cfg.config, id, *delete)
+            }
+            Some(IssuesCommand::Stats) => run_stats_for_repos(&cfg.repos, &cfg.config),
+            None => self.run_list(&cfg),
         }
     }
 }

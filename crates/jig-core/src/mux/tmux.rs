@@ -419,88 +419,90 @@ fn exec_tmux(args: &[&str]) -> Result<()> {
     Err(TmuxError::ExecFailed(format!("{:?}", err)))
 }
 
-impl super::MuxSession for TmuxSession {
-    type Error = TmuxError;
-    type Window = TmuxWindow;
+// ── Mux trait implementation ────────────────────────────────────────
 
-    fn new(name: impl Into<String>) -> Self {
-        TmuxSession::new(name)
-    }
+use super::{Mux, MuxError};
 
-    fn name(&self) -> &str {
-        self.name()
-    }
-
-    fn exists(&self) -> bool {
-        self.exists()
-    }
-
-    fn ensure(&self) -> Result<()> {
-        self.ensure()
-    }
-
-    fn window(&self, name: impl Into<String>) -> TmuxWindow {
-        self.window(name)
-    }
-
-    fn window_names(&self) -> Result<Vec<String>> {
-        self.window_names()
-    }
-
-    fn kill(&self) -> Result<()> {
-        self.kill()
-    }
-
-    fn attach(&self) -> Result<()> {
-        self.attach()
+impl From<TmuxError> for MuxError {
+    fn from(e: TmuxError) -> Self {
+        match e {
+            TmuxError::CommandFailed { command, stderr } => MuxError::CommandFailed {
+                command,
+                detail: stderr,
+            },
+            TmuxError::SessionNotFound(s) => MuxError::SessionNotFound(s),
+            TmuxError::Timeout { command, .. } => MuxError::Timeout { command },
+            TmuxError::ExecFailed(msg) => MuxError::CommandFailed {
+                command: "exec".to_string(),
+                detail: msg,
+            },
+            TmuxError::Io(e) => MuxError::Io(e),
+        }
     }
 }
 
-impl super::MuxWindow for TmuxWindow {
-    type Error = TmuxError;
+/// Tmux backend for the [`Mux`] trait.
+///
+/// Wraps a single tmux session — windows map to branches.
+pub struct TmuxMux {
+    session: TmuxSession,
+}
 
-    fn new(session: impl Into<String>, window: impl Into<String>) -> Self {
-        TmuxWindow::new(session, window)
+impl TmuxMux {
+    pub fn new(session_name: impl Into<String>) -> Self {
+        Self {
+            session: TmuxSession::new(session_name),
+        }
     }
 
-    fn session_name(&self) -> &str {
-        self.session_name()
+    pub fn for_repo(repo_name: &str) -> Self {
+        Self {
+            session: TmuxSession::for_repo(repo_name),
+        }
     }
 
-    fn window_name(&self) -> &str {
-        self.window_name()
+    pub fn for_repo_with_prefix(prefix: &str, repo_name: &str) -> Self {
+        Self {
+            session: TmuxSession::for_repo_with_prefix(prefix, repo_name),
+        }
+    }
+}
+
+impl Mux for TmuxMux {
+    fn create_window(&self, name: &str, dir: &Path) -> std::result::Result<(), MuxError> {
+        Ok(self.session.window(name).create(dir)?)
     }
 
-    fn exists(&self) -> bool {
-        self.exists()
+    fn window_exists(&self, name: &str) -> bool {
+        self.session.window(name).exists()
     }
 
-    fn create(&self, dir: &Path) -> Result<()> {
-        self.create(dir)
+    fn kill_window(&self, name: &str) -> std::result::Result<(), MuxError> {
+        Ok(self.session.window(name).kill()?)
     }
 
-    fn kill(&self) -> Result<()> {
-        self.kill()
+    fn kill_all(&self) -> std::result::Result<(), MuxError> {
+        Ok(self.session.kill()?)
     }
 
-    fn send_keys(&self, keys: &[&str]) -> Result<()> {
-        self.send_keys(keys)
+    fn send_keys(&self, name: &str, keys: &[&str]) -> std::result::Result<(), MuxError> {
+        Ok(self.session.window(name).send_keys(keys)?)
     }
 
-    fn send_message(&self, message: &str) -> Result<()> {
-        self.send_message(message)
+    fn send_message(&self, name: &str, message: &str) -> std::result::Result<(), MuxError> {
+        Ok(self.session.window(name).send_message(message)?)
     }
 
-    fn is_running(&self) -> bool {
-        self.is_running()
+    fn is_running(&self, name: &str) -> bool {
+        self.session.window(name).is_running()
     }
 
-    fn pane_command(&self) -> Option<String> {
-        self.pane_command()
+    fn attach_window(&self, name: &str) -> std::result::Result<(), MuxError> {
+        Ok(self.session.window(name).attach()?)
     }
 
-    fn attach(&self) -> Result<()> {
-        self.attach()
+    fn attach(&self) -> std::result::Result<(), MuxError> {
+        Ok(self.session.attach()?)
     }
 }
 

@@ -6,50 +6,12 @@
 use std::error::Error;
 use std::fmt::Display;
 
-/// Single-repo context (no -g). Current repo if available.
-pub struct RepoCtx {
-    pub config: Option<crate::config::Config>,
-}
-
-impl RepoCtx {
-    /// Get the config, or error if not in a git repo.
-    pub fn config(&self) -> std::result::Result<&crate::config::Config, jig_core::Error> {
-        self.config.as_ref().ok_or(jig_core::Error::NotInGitRepo)
-    }
-}
-
-/// Global context (-g). All registered repos.
-pub struct GlobalCtx {
-    pub configs: Vec<crate::config::Config>,
-}
-
-impl GlobalCtx {
-    /// Find the repo that contains a worktree with the given name.
-    pub fn config_for_worktree(
-        &self,
-        name: &str,
-    ) -> std::result::Result<&crate::config::Config, jig_core::Error> {
-        for cfg in &self.configs {
-            let path = cfg.worktrees_path.join(name);
-            if path.exists() {
-                return Ok(cfg);
-            }
-        }
-        Err(jig_core::Error::WorktreeNotFound(name.to_string()))
-    }
-}
-
 /// Trait for CLI operations.
 pub trait Op {
     type Error: Error + Send + Sync + 'static;
     type Output: Display;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error>;
-
-    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        eprintln!("error: this command does not support -g/--global");
-        std::process::exit(1);
-    }
+    fn run(&self) -> Result<Self::Output, Self::Error>;
 }
 
 /// Unit output for commands that only produce stderr
@@ -93,23 +55,11 @@ macro_rules! command_enum {
             type Output = OpOutput;
             type Error = OpError;
 
-            fn run(&self, ctx: &$crate::cli::op::RepoCtx) -> Result<Self::Output, Self::Error> {
+            fn run(&self) -> Result<Self::Output, Self::Error> {
                 match self {
                     $(
                         Command::$variant(op) => {
-                            op.run(ctx)
-                                .map(OpOutput::$variant)
-                                .map_err(OpError::$variant)
-                        },
-                    )*
-                }
-            }
-
-            fn run_global(&self, ctx: &$crate::cli::op::GlobalCtx) -> Result<Self::Output, Self::Error> {
-                match self {
-                    $(
-                        Command::$variant(op) => {
-                            op.run_global(ctx)
+                            op.run()
                                 .map(OpOutput::$variant)
                                 .map_err(OpError::$variant)
                         },

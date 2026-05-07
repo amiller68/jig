@@ -14,5 +14,3 @@ pub use handlers::{handle_commit_msg, handle_post_commit, handle_post_merge, han
 pub use install::{init_hooks, InitResult};
 pub use registry::{HookEntry, HookRegistry};
 pub use uninstall::uninstall_hooks;
-
-pub use jig_core::agents::claude::hooks::AGENT_HOOK_SCRIPTS;

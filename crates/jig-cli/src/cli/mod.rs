@@ -14,10 +14,6 @@ use clap::Parser;
     after_help = "Use 'jig <command> --help' for more information about a command."
 )]
 pub struct Cli {
-    /// Run command across all tracked repositories
-    #[arg(short = 'g', long = "global", global = true)]
-    pub global: bool,
-
     /// Show verbose output (e.g. pruned repos at startup)
     #[arg(short = 'v', long = "verbose", global = true)]
     pub verbose: bool,
@@ -56,7 +52,6 @@ crate::command_enum! {
     (Attach, commands::Attach),
     (Resume, commands::Resume),
     (Merge, commands::Merge),
-    (Review, commands::Review),
     (Notify, commands::Notify),
     (Kill, commands::Kill),
     (Nuke, commands::Nuke),

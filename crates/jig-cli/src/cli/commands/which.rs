@@ -3,7 +3,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
 
 /// Show path to jig executable
 #[derive(Args, Debug, Clone)]
@@ -28,7 +28,7 @@ impl Op for Which {
     type Error = WhichError;
     type Output = WhichOutput;
 
-    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         let exe = std::env::current_exe()?;
         Ok(WhichOutput(exe))
     }

@@ -2,12 +2,14 @@
 
 use clap::Args;
 
-use crate::config;
-use crate::worker::TmuxWorker as Worker;
+use crate::context;
+use crate::worker::Worker;
 use jig_core::agents;
-use jig_core::{Error, Prompt, Worktree};
+use jig_core::mux::TmuxMux;
+use jig_core::{Error, Worktree};
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
+use crate::context::RepoConfig;
 use crate::cli::ui;
 
 /// Resume a dead worker by relaunching its agent session
@@ -33,8 +35,12 @@ impl Op for Resume {
     type Error = ResumeError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = RepoConfig::from_cwd()?;
+        let repo_name = cfg.repo_root.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let mux = TmuxMux::for_repo(&repo_name);
 
         // Open existing worktree
         let wt_path = cfg.worktrees_path.join(&self.name);
@@ -43,11 +49,11 @@ impl Op for Resume {
         }
         let wt = Worktree::open(&wt_path)?;
 
-        // Error if tmux window already exists
+        // Error if mux window already exists
         let pre = Worker::from(&wt);
-        if pre.has_mux_window() {
+        if pre.has_mux_window(&mux) {
             ui::failure(&format!(
-                "Worker '{}' already has a tmux window. Use '{}' to attach.",
+                "Worker '{}' already has a window. Use '{}' to attach.",
                 ui::highlight(&self.name),
                 ui::highlight(&format!("jig attach {}", self.name))
             ));
@@ -63,18 +69,18 @@ impl Op for Resume {
             .clone()
             .unwrap_or_else(|| "You were interrupted. Resume your previous task.".to_string());
 
-        let jig_config = config::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
-        let agent = agents::Agent::from_name(&jig_config.agent.agent_type)
-            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude))
-            .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
+        let jig_config = context::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
+        let agent = agents::Agent::from_config(
+            &jig_config.agent.agent_type,
+            Some(&jig_config.agent.model),
+            &jig_config.agent.disallowed_tools,
+        )
+        .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
-        let prompt =
-            Prompt::new(crate::worker::SPAWN_PREAMBLE).var("task_context", &effective_context);
-
-        Worker::resume(&wt, &agent, prompt)?;
+        Worker::resume(&wt, &agent, &effective_context, &mux)?;
 
         ui::success(&format!(
-            "Resumed worker '{}' in tmux",
+            "Resumed worker '{}'",
             ui::highlight(&self.name)
         ));
 

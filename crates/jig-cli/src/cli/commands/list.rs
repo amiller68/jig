@@ -5,12 +5,12 @@ use std::path::Path;
 use clap::Args;
 use comfy_table::{Cell, CellAlignment, Color};
 
-use crate::config::GlobalConfig;
-use crate::worker::events::{EventLog, WorkerState};
+use crate::context::{Config, Context, RepoConfig};
+use crate::worker::events::{self, WorkerState};
 use crate::worker::WorkerStatus;
 use jig_core::git::{Branch, Repo};
 
-use crate::cli::op::{GlobalCtx, Op, RepoCtx};
+use crate::cli::op::Op;
 use crate::cli::ui;
 
 /// List worktrees
@@ -23,6 +23,10 @@ pub struct List {
     /// Plain output (bare names, no table)
     #[arg(short, long)]
     pub plain: bool,
+
+    /// Operate on all tracked repos
+    #[arg(short = 'g', long)]
+    pub global: bool,
 }
 
 /// Output containing worktree names
@@ -47,13 +51,22 @@ impl Op for List {
     type Error = ListError;
     type Output = ListOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         if self.all {
             return self.list_all_git_worktrees();
         }
 
-        let cfg = ctx.config()?;
-        let git_repo = Repo::open(&cfg.repo_root)?;
+        if self.global {
+            let cfg = Context::from_global()?;
+            if self.plain || ui::is_plain() {
+                return self.run_global_plain(&cfg.repos, &cfg.config);
+            }
+            return self.run_global_table(&cfg.repos, &cfg.config);
+        }
+
+        let cfg = Context::from_cwd()?;
+        let repo = cfg.repo()?;
+        let git_repo = Repo::open(&repo.repo_root)?;
         let worktrees = git_repo.list_worktrees()?;
         let names: Vec<String> = worktrees
             .iter()
@@ -68,22 +81,10 @@ impl Op for List {
             return Ok(ListOutput(out));
         }
 
-        let base_branch = cfg.base_branch();
-        let table = build_worktree_table(&names, &cfg.worktrees_path, &base_branch, &cfg.repo_root);
+        let base_branch = repo.base_branch(&cfg.config);
+        let table = build_worktree_table(&names, &repo.worktrees_path, &base_branch, &repo.repo_root);
         eprintln!("{table}");
         Ok(ListOutput(String::new()))
-    }
-
-    fn run_global(&self, ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        if self.all {
-            return self.list_all_git_worktrees();
-        }
-
-        if self.plain || ui::is_plain() {
-            return self.run_global_plain(ctx);
-        }
-
-        self.run_global_table(ctx)
     }
 }
 
@@ -101,10 +102,10 @@ impl List {
         Ok(ListOutput(String::new()))
     }
 
-    fn run_global_plain(&self, ctx: &GlobalCtx) -> Result<ListOutput, ListError> {
+    fn run_global_plain(&self, repos: &[RepoConfig], _global: &Config) -> Result<ListOutput, ListError> {
         let mut out = String::new();
         let mut first = true;
-        for cfg in &ctx.configs {
+        for cfg in repos {
             let git_repo = Repo::open(&cfg.repo_root)?;
             let worktrees = git_repo.list_worktrees()?;
             if worktrees.is_empty() {
@@ -127,9 +128,9 @@ impl List {
         Ok(ListOutput(out))
     }
 
-    fn run_global_table(&self, ctx: &GlobalCtx) -> Result<ListOutput, ListError> {
+    fn run_global_table(&self, repos: &[RepoConfig], global: &Config) -> Result<ListOutput, ListError> {
         let mut first = true;
-        for cfg in &ctx.configs {
+        for cfg in repos {
             let git_repo = Repo::open(&cfg.repo_root)?;
             let wts = git_repo.list_worktrees()?;
             if wts.is_empty() {
@@ -147,7 +148,7 @@ impl List {
             }
             first = false;
             ui::header(&repo_name);
-            let base_branch = cfg.base_branch();
+            let base_branch = cfg.base_branch(global);
             let table = build_worktree_table(
                 &worktrees,
                 &cfg.worktrees_path,
@@ -166,19 +167,20 @@ fn worktree_event_status(repo_root: &Path, name: &str) -> Option<WorkerStatus> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let event_log = EventLog::for_worker(&repo_name, name).ok()?;
-    let events = event_log.read_all().ok()?;
-    if events.is_empty() {
+    let event_log = events::event_log_for_worker(&repo_name, name).ok()?;
+    if !event_log.exists() {
         return None;
     }
-    let config = GlobalConfig::load().ok()?.health;
-    Some(WorkerState::reduce(&events, &config).status)
+    let config = Config::load().ok()?;
+    let mut state: WorkerState = event_log.reduce().ok()?;
+    state.check_silence(&config);
+    Some(state.status)
 }
 
 fn build_worktree_table(
     names: &[String],
     worktrees_path: &Path,
-    base_branch: &str,
+    base_branch: &Branch,
     repo_root: &Path,
 ) -> comfy_table::Table {
     let mut table = ui::new_table(&["NAME", "BRANCH", "COMMITS"]);
@@ -202,7 +204,7 @@ fn build_worktree_table(
                 // Only show branch if it differs from worktree name
                 if branch == *name {
                     ("-".to_string(), Color::DarkGrey)
-                } else if branch == base_branch {
+                } else if *base_branch == branch {
                     (crate::cli::ui::truncate(&branch, 40), Color::DarkGrey)
                 } else {
                     (crate::cli::ui::truncate(&branch, 40), Color::Cyan)
@@ -211,7 +213,7 @@ fn build_worktree_table(
         };
 
         let commits_ahead = Repo::open(&wt_path)
-            .and_then(|r| r.commits_ahead(&Branch::new(base_branch)))
+            .and_then(|r| r.commits_ahead(base_branch))
             .map(|c| c.len())
             .unwrap_or(0);
         let dirty = Repo::open(&wt_path)

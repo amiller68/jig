@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use jig_core::Worktree;
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
+use crate::context::RepoConfig;
 use crate::cli::ui;
 
 /// Exit current worktree and remove it
@@ -40,8 +41,8 @@ impl Op for Exit {
     type Error = ExitError;
     type Output = ExitOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = RepoConfig::from_cwd()?;
 
         let wt = Worktree::current()?;
         let name = wt.branch_name();

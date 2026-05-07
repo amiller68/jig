@@ -3,11 +3,12 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::config::{Config, RepoRegistry};
+use crate::context::RepoConfig;
+use crate::context::RepoRegistry;
 use jig_core::git::Repo;
 use jig_core::Error;
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
 use crate::cli::ui;
 
 /// Open/cd into a worktree
@@ -53,9 +54,9 @@ impl Op for Open {
     type Error = OpenError;
     type Output = OpenOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        match ctx.config() {
-            Ok(cfg) => self.open_in_cfg(cfg),
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        match RepoConfig::from_cwd() {
+            Ok(cfg) => self.open_in_cfg(&cfg),
             Err(_) => {
                 // Auto-detect: outside a git repo, fall back to global discovery
                 let registry = RepoRegistry::load().unwrap_or_default();
@@ -63,7 +64,7 @@ impl Op for Open {
                     .repos()
                     .iter()
                     .filter(|e| e.path.exists())
-                    .filter_map(|e| Config::from_path(&e.path).ok())
+                    .filter_map(|e| RepoConfig::from_path(&e.path).ok())
                     .collect();
                 let cfg = if let Some(name) = self.name.as_deref() {
                     configs
@@ -80,7 +81,7 @@ impl Op for Open {
 }
 
 impl Open {
-    fn open_in_cfg(&self, cfg: &Config) -> Result<OpenOutput, OpenError> {
+    fn open_in_cfg(&self, cfg: &RepoConfig) -> Result<OpenOutput, OpenError> {
         if self.all {
             // Open all worktrees in new tabs
             let git_repo = Repo::open(&cfg.repo_root)?;
@@ -92,12 +93,12 @@ impl Open {
             }
 
             for wt in worktrees {
-                let terminal = jig_core::mux::Terminal::detect();
+                let terminal = crate::terminal::Terminal::detect();
                 let opened = match terminal.open_tab(&wt.path()) {
                     Ok(()) => true,
-                    Err(jig_core::mux::TerminalError::NotSupported { .. }) => false,
-                    Err(jig_core::mux::TerminalError::MissingDependency(_)) => false,
-                    Err(jig_core::mux::TerminalError::Io(e)) => return Err(e.into()),
+                    Err(crate::terminal::TerminalError::NotSupported { .. }) => false,
+                    Err(crate::terminal::TerminalError::MissingDependency(_)) => false,
+                    Err(crate::terminal::TerminalError::Io(e)) => return Err(e.into()),
                 };
                 if opened {
                     ui::success(&format!(

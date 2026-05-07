@@ -4,11 +4,11 @@ use std::process::Command;
 
 use clap::Args;
 
-use crate::config::GlobalConfig;
-use crate::worker::events::{EventLog, WorkerState};
+use crate::worker::events::{self, WorkerState};
 use jig_core::{Error, Worktree};
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
+use crate::context::{Context, RepoConfig};
 use crate::cli::ui;
 
 /// Push current branch and create a draft PR
@@ -50,15 +50,16 @@ impl Op for Pr {
     type Error = PrError;
     type Output = PrOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = Context::from_cwd()?;
+        let repo = cfg.repo()?;
 
         // 1. Get current branch
         let git_repo = jig_core::git::Repo::discover()?;
         let branch = git_repo.current_branch().map_err(|_| PrError::NoBranch)?;
 
         // 2. Resolve base branch
-        let base = resolve_base(&cfg.repo_root, cfg)?;
+        let base = resolve_base(&repo.repo_root, repo, &cfg.config)?;
         let base_for_gh = base.strip_prefix("origin/").unwrap_or(&base);
 
         ui::detail(&format!(
@@ -126,12 +127,13 @@ impl Op for Pr {
 /// use the parent issue's branch name. Otherwise fall back to the repo base branch.
 fn resolve_base(
     repo_root: &std::path::Path,
-    cfg: &crate::config::Config,
+    repo: &RepoConfig,
+    global: &crate::context::Config,
 ) -> Result<String, PrError> {
     // Try to detect if we're in a jig worktree
     let worktree_name = match Worktree::current() {
         Ok(wt) => wt.branch_name(),
-        Err(_) => return Ok(cfg.base_branch()),
+        Err(_) => return Ok(repo.base_branch(global).to_string()),
     };
 
     // Read issue ref from event log
@@ -139,27 +141,27 @@ fn resolve_base(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let health_config = GlobalConfig::load().map(|g| g.health).unwrap_or_default();
 
-    let issue_ref = match EventLog::for_worker(&repo_name, &worktree_name) {
+    let issue_ref = match events::event_log_for_worker(&repo_name, &worktree_name) {
         Ok(log) => {
-            let events = log.read_all().unwrap_or_default();
-            if events.is_empty() {
-                return Ok(cfg.base_branch());
-            }
-            match WorkerState::reduce(&events, &health_config).issue_ref {
+            let mut state: WorkerState = match log.reduce() {
+                Ok(s) => s,
+                Err(_) => return Ok(repo.base_branch(global).to_string()),
+            };
+            state.check_silence(global);
+            match state.issue_ref {
                 Some(r) => r,
-                None => return Ok(cfg.base_branch()),
+                None => return Ok(repo.base_branch(global).to_string()),
             }
         }
-        Err(_) => return Ok(cfg.base_branch()),
+        Err(_) => return Ok(repo.base_branch(global).to_string()),
     };
 
     // Fetch the issue and check for a parent
-    let provider = cfg.issue_provider()?;
+    let provider = repo.issue_provider(global)?;
     let issue = match provider.get(&issue_ref)? {
         Some(i) => i,
-        None => return Ok(cfg.base_branch()),
+        None => return Ok(repo.base_branch(global).to_string()),
     };
 
     if let Some(parent_ref) = &issue.parent() {
@@ -168,5 +170,5 @@ fn resolve_base(
         }
     }
 
-    Ok(cfg.base_branch())
+    Ok(repo.base_branch(global).to_string())
 }

@@ -9,10 +9,9 @@ use clap::Args;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{self, disable_raw_mode};
 
-use crate::config::JigToml;
-use crate::daemon::{Daemon, DaemonConfig};
+use crate::context::{Context, JigToml};
 
-use crate::cli::op::{GlobalCtx, NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
 use crate::cli::ui;
 
 /// Show status of spawned sessions
@@ -25,6 +24,10 @@ pub struct Ps {
     /// Maximum number of concurrent auto-spawned workers
     #[arg(long)]
     max_workers: Option<usize>,
+
+    /// Operate on all tracked repos
+    #[arg(short = 'g', long)]
+    global: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,36 +40,34 @@ impl Op for Ps {
     type Error = PsError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
-        let repo_filter = cfg
-            .repo_root
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string());
-        let daemon_config = self.build_daemon_config(&cfg.repo_root, repo_filter);
-        self.execute_ps(daemon_config, false)
-    }
-
-    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        self.execute_ps(DaemonConfig::default(), true)
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let mut cfg = if self.global {
+            Context::from_global()?
+        } else {
+            Context::from_cwd()?
+        };
+        if !self.global {
+            let jig_toml = JigToml::load(&cfg.repo()?.repo_root).ok().flatten().unwrap_or_default();
+            cfg.config.max_concurrent_workers = self.max_workers.unwrap_or(jig_toml.spawn.max_concurrent_workers);
+        }
+        self.execute_ps(cfg, self.global)
     }
 }
 
 impl Ps {
-    fn execute_ps(&self, mut config: DaemonConfig, global: bool) -> Result<NoOutput, PsError> {
+    fn execute_ps(&self, mut cfg: Context, global: bool) -> Result<NoOutput, PsError> {
         if let Some(interval) = self.watch {
-            let interval = if interval == 0 { 2 } else { interval };
-            config.interval_seconds = interval;
-            run_watch(config, global);
+            cfg.config.tick_interval = if interval == 0 { 2 } else { interval };
+            run_watch(cfg, global);
             return Ok(NoOutput);
         }
 
         let mut workers = vec![];
         let mut triages = vec![];
         let quit = AtomicBool::new(false);
-        let mut daemon = crate::daemon::Daemon::start(config)?;
+        let mut daemon = crate::daemon::Daemon::start(cfg)?;
         daemon.run(&quit, |daemon| {
-            workers = daemon.dispatch.actor().workers();
+            workers = daemon.monitor.actor().workers();
             triages = daemon.triage.actor().active_entries();
             false
         });
@@ -102,27 +103,6 @@ impl Ps {
         Ok(NoOutput)
     }
 
-    /// Build DaemonConfig from CLI flags + jig.toml + global config.
-    fn build_daemon_config(
-        &self,
-        repo_root: &std::path::Path,
-        repo_filter: Option<String>,
-    ) -> DaemonConfig {
-        let jig_toml = JigToml::load(repo_root).ok().flatten().unwrap_or_default();
-        let global_config = crate::config::GlobalConfig::load().unwrap_or_default();
-        let spawn_config = &jig_toml.spawn;
-
-        let max_concurrent_workers = self
-            .max_workers
-            .unwrap_or_else(|| spawn_config.resolve_max_concurrent_workers(&global_config.spawn));
-
-        DaemonConfig {
-            repo_filter,
-            max_concurrent_workers,
-            poll_interval: spawn_config.resolve_auto_spawn_interval(&global_config.spawn),
-            ..Default::default()
-        }
-    }
 }
 
 /// View mode for the watch display.
@@ -143,48 +123,13 @@ impl ViewMode {
 
 const LOG_BUFFER_SIZE: usize = 50;
 
-fn format_tick_log(daemon: &Daemon) -> Vec<String> {
-    let now = chrono::Local::now().format("%H:%M:%S");
-    let workers = daemon.dispatch.actor().workers();
-    let mut lines = vec![];
-
-    lines.push(format!("[{}] tick: {} workers", now, workers.len()));
-
-    for w in &workers {
-        if w.pr_health.has_pr {
-            if let Some(err) = &w.pr_health.pr_error {
-                lines.push(format!("[{}]   {}/{} PR: {}", now, w.repo, w.name, err));
-            } else if !w.pr_health.pr_checks.is_empty() {
-                let problems = w.pr_health.pr_checks.problems();
-                if problems.is_empty() {
-                    lines.push(format!("[{}]   {}/{} PR: ok", now, w.repo, w.name));
-                } else {
-                    lines.push(format!(
-                        "[{}]   {}/{} PR: {}",
-                        now,
-                        w.repo,
-                        w.name,
-                        problems.join(", ")
-                    ));
-                }
-            }
-        }
-    }
-
-    let spawning = daemon.spawn.actor().spawning_workers();
-    for s in &spawning {
-        lines.push(format!("[{}]   spawning: {}", now, s));
-    }
-
-    lines
-}
-
 /// Run the watch loop: display + orchestrate via daemon::run_with.
-fn run_watch(config: DaemonConfig, global: bool) {
-    let interval = config.interval_seconds;
+fn run_watch(cfg: Context, global: bool) {
+    let interval = cfg.config.tick_interval;
 
     let mut view_mode = ViewMode::Table;
     let mut log_buffer: VecDeque<String> = VecDeque::with_capacity(LOG_BUFFER_SIZE);
+    let mut log_tailer = crate::context::log::LogTailer::new();
 
     terminal::enable_raw_mode().ok();
     eprint!("\x1B[2J");
@@ -224,7 +169,7 @@ fn run_watch(config: DaemonConfig, global: bool) {
         });
     }
 
-    let result = crate::daemon::Daemon::start(config);
+    let result = crate::daemon::Daemon::start(cfg);
     let mut daemon = match result {
         Ok(d) => d,
         Err(e) => {
@@ -238,14 +183,14 @@ fn run_watch(config: DaemonConfig, global: bool) {
             view_mode.toggle();
         }
 
-        for line in format_tick_log(daemon) {
+        for line in log_tailer.poll(LOG_BUFFER_SIZE) {
             if log_buffer.len() >= LOG_BUFFER_SIZE {
                 log_buffer.pop_front();
             }
             log_buffer.push_back(line);
         }
 
-        let workers = daemon.dispatch.actor().workers();
+        let workers = daemon.monitor.actor().workers();
         let triages = daemon.triage.actor().active_entries();
         let spawning = daemon.spawn.actor().spawning_workers();
         let poll_remaining = daemon.poll_remaining_secs();

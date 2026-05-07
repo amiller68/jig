@@ -1,5 +1,7 @@
 //! State reducer — builds DaemonState from events.
 
+use jig_core::Reducible;
+
 use super::schema::{Event, EventKind};
 
 #[derive(Debug, Clone, Default)]
@@ -10,30 +12,26 @@ pub struct DaemonState {
     pub stop_reason: Option<String>,
 }
 
-impl DaemonState {
-    pub fn reduce(events: &[Event]) -> Self {
-        let mut state = Self::default();
-        for event in events {
-            state.apply(event);
-        }
-        state
-    }
+impl Reducible for Event {
+    type State = DaemonState;
 
-    fn apply(&mut self, event: &Event) {
+    fn apply(state: &mut DaemonState, event: &Event) {
         match &event.kind {
             EventKind::Started { pid } => {
-                self.started_at = Some(event.ts);
-                self.stopped_at = None;
-                self.pid = Some(*pid);
-                self.stop_reason = None;
+                state.started_at = Some(event.ts);
+                state.stopped_at = None;
+                state.pid = Some(*pid);
+                state.stop_reason = None;
             }
             EventKind::Stopped { pid: _, reason } => {
-                self.stopped_at = Some(event.ts);
-                self.stop_reason = Some(reason.clone());
+                state.stopped_at = Some(event.ts);
+                state.stop_reason = Some(reason.clone());
             }
         }
     }
+}
 
+impl DaemonState {
     pub fn previous_run_crashed(&self) -> bool {
         self.started_at.is_some() && self.stopped_at.is_none()
     }
@@ -43,9 +41,17 @@ impl DaemonState {
 mod tests {
     use super::*;
 
+    fn reduce(events: &[Event]) -> DaemonState {
+        let mut state = DaemonState::default();
+        for event in events {
+            Event::apply(&mut state, event);
+        }
+        state
+    }
+
     #[test]
     fn empty_events_defaults() {
-        let state = DaemonState::reduce(&[]);
+        let state = reduce(&[]);
         assert!(state.started_at.is_none());
         assert!(!state.previous_run_crashed());
     }
@@ -53,7 +59,7 @@ mod tests {
     #[test]
     fn started_without_stopped_is_crash() {
         let events = vec![Event::started()];
-        let state = DaemonState::reduce(&events);
+        let state = reduce(&events);
         assert!(state.started_at.is_some());
         assert!(state.previous_run_crashed());
     }
@@ -61,7 +67,7 @@ mod tests {
     #[test]
     fn started_then_stopped_is_clean() {
         let events = vec![Event::started(), Event::stopped("normal")];
-        let state = DaemonState::reduce(&events);
+        let state = reduce(&events);
         assert!(state.started_at.is_some());
         assert!(state.stopped_at.is_some());
         assert!(!state.previous_run_crashed());
@@ -71,7 +77,7 @@ mod tests {
     #[test]
     fn multiple_runs_last_wins() {
         let events = vec![Event::started(), Event::stopped("normal"), Event::started()];
-        let state = DaemonState::reduce(&events);
+        let state = reduce(&events);
         assert!(state.previous_run_crashed());
         assert!(state.stopped_at.is_none());
     }

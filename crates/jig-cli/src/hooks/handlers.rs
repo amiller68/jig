@@ -6,9 +6,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::config::JigToml;
-use crate::worker::events::{Event, EventKind, EventLog};
+use crate::worker::events::{self, Event, EventKind};
 use jig_core::error::Result;
+use jig_core::git::conventional::ValidationConfig;
 
 /// Handle post-commit hook: emit a Commit event with the HEAD SHA.
 ///
@@ -21,7 +21,7 @@ pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
 
     let sha = head_sha(repo_path).unwrap_or_default();
 
-    let log = EventLog::for_worker(&repo_name, &worker_name)?;
+    let log = events::event_log_for_worker(&repo_name, &worker_name)?;
     log.append(&Event::now(EventKind::Commit {
         sha,
         repo: repo_name,
@@ -38,7 +38,7 @@ pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
 
     let sha = head_sha(repo_path).unwrap_or_default();
 
-    let log = EventLog::for_worker(&repo_name, &worker_name)?;
+    let log = events::event_log_for_worker(&repo_name, &worker_name)?;
     log.append(&Event::now(EventKind::Push {
         sha,
         repo: repo_name,
@@ -52,7 +52,7 @@ pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
 /// Reads the commit message from the file path provided by git (the first argument).
 /// If a `[commits]` section exists in `jig.toml`, validates against those rules.
 /// Returns an error (blocking the commit) if validation fails.
-pub fn handle_commit_msg(repo_path: &Path, commit_msg_file: &str) -> Result<()> {
+pub fn handle_commit_msg(_repo_path: &Path, commit_msg_file: &str) -> Result<()> {
     let message = std::fs::read_to_string(commit_msg_file).map_err(|e| {
         jig_core::Error::Custom(format!("failed to read commit message file: {}", e))
     })?;
@@ -69,10 +69,7 @@ pub fn handle_commit_msg(repo_path: &Path, commit_msg_file: &str) -> Result<()> 
         return Ok(());
     }
 
-    let config = JigToml::load(repo_path)?
-        .unwrap_or_default()
-        .commits
-        .to_validation_config();
+    let config = ValidationConfig::default();
 
     match config.parse_and_validate(cleaned) {
         Ok((_msg, errors)) => {

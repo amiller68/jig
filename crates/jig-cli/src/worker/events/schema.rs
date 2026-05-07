@@ -61,6 +61,28 @@ pub enum EventKind {
     ToolUseStart,
     ToolUseEnd,
     CiStatus,
+    PrCiStatus {
+        passed: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        failures: Vec<String>,
+    },
+    PrConflict {
+        has_conflict: bool,
+    },
+    PrReviewFeedback {
+        comment_count: u32,
+        changes_requested: u32,
+    },
+    PrCommitLint {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bad_commits: Vec<String>,
+    },
+    PrMerged {
+        pr_url: String,
+    },
+    PrClosed {
+        pr_url: String,
+    },
     Terminal {
         terminal: TerminalKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,6 +122,12 @@ pub enum EventType {
     Stop,
     Nudge,
     CiStatus,
+    PrCiStatus,
+    PrConflict,
+    PrReviewFeedback,
+    PrCommitLint,
+    PrMerged,
+    PrClosed,
     Terminal,
 }
 
@@ -119,6 +147,12 @@ impl EventKind {
             EventKind::Stop => EventType::Stop,
             EventKind::Nudge { .. } => EventType::Nudge,
             EventKind::CiStatus => EventType::CiStatus,
+            EventKind::PrCiStatus { .. } => EventType::PrCiStatus,
+            EventKind::PrConflict { .. } => EventType::PrConflict,
+            EventKind::PrReviewFeedback { .. } => EventType::PrReviewFeedback,
+            EventKind::PrCommitLint { .. } => EventType::PrCommitLint,
+            EventKind::PrMerged { .. } => EventType::PrMerged,
+            EventKind::PrClosed { .. } => EventType::PrClosed,
             EventKind::Terminal { .. } => EventType::Terminal,
         }
     }

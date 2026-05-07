@@ -10,8 +10,9 @@ use colored::Colorize;
 use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrangement, Table};
 use crossterm::terminal;
 
-use crate::daemon::{PrHealth, TriageEntry, WorkerSnapshot};
-use crate::worker::TmuxStatus;
+use crate::daemon::TriageEntry;
+use crate::worker::events::{PrHealth, WorkerState};
+use crate::worker::MuxStatus;
 use crate::worker::WorkerStatus;
 
 // ---------------------------------------------------------------------------
@@ -300,46 +301,46 @@ pub fn format_health(info: &PrHealth) -> (String, Color) {
 }
 
 /// Build a row of cells for a single worker.
-fn worker_row(w: &WorkerSnapshot) -> Vec<Cell> {
-    let tmux_indicator = match w.tmux_status {
-        TmuxStatus::Running => "●",
-        TmuxStatus::Exited => "○",
-        TmuxStatus::NoSession | TmuxStatus::NoWindow => "✗",
+fn worker_row(w: &WorkerState) -> Vec<Cell> {
+    let mux_indicator = match w.mux_status {
+        MuxStatus::Running => "●",
+        MuxStatus::Exited => "○",
+        MuxStatus::NotFound => "✗",
     };
-    let tmux_color = match w.tmux_status {
-        TmuxStatus::Running => Color::Green,
-        TmuxStatus::Exited => Color::Yellow,
-        TmuxStatus::NoSession | TmuxStatus::NoWindow => Color::DarkGrey,
+    let mux_color = match w.mux_status {
+        MuxStatus::Running => Color::Green,
+        MuxStatus::Exited => Color::Yellow,
+        MuxStatus::NotFound => Color::DarkGrey,
     };
 
-    let (state_text, state_color) = match w.worker_status {
-        Some(ref status) if *status == WorkerStatus::WaitingReview && w.is_draft => {
+    let (state_text, state_color) =
+        if w.status == WorkerStatus::WaitingReview && w.is_draft {
             ("draft", Color::Blue)
-        }
-        Some(ref status) => (worker_state_str(status), worker_state_color(status)),
-        None => ("-", Color::DarkGrey),
-    };
+        } else {
+            (worker_state_str(&w.status), worker_state_color(&w.status))
+        };
 
-    let (nudge_text, nudge_color) = if w.nudge_count == 0 {
+    let nudge_count = w.nudge_count();
+    let (nudge_text, nudge_color) = if nudge_count == 0 {
         if let Some(cd) = w.nudge_cooldown_remaining {
             (format!("({})", format_duration_short(cd)), Color::DarkGrey)
         } else {
             ("-".to_string(), Color::DarkGrey)
         }
-    } else if w.nudge_count >= w.max_nudges {
-        (format!("{}/{}", w.nudge_count, w.max_nudges), Color::Red)
+    } else if nudge_count >= w.max_nudges {
+        (format!("{}/{}", nudge_count, w.max_nudges), Color::Red)
     } else if let Some(cd) = w.nudge_cooldown_remaining {
         (
             format!(
                 "{}/{} ({})",
-                w.nudge_count,
+                nudge_count,
                 w.max_nudges,
                 format_duration_short(cd)
             ),
             Color::Yellow,
         )
     } else {
-        (format!("{}/{}", w.nudge_count, w.max_nudges), Color::Yellow)
+        (format!("{}/{}", nudge_count, w.max_nudges), Color::Yellow)
     };
 
     let dirty_marker = if w.is_dirty { "*" } else { "" };
@@ -357,11 +358,11 @@ fn worker_row(w: &WorkerSnapshot) -> Vec<Cell> {
     };
 
     let pr = w
-        .pr_url
+        .parsed_pr_url
         .as_ref()
         .map(|url| {
-            url.rsplit('/')
-                .next()
+            url.path_segments()
+                .and_then(|s| s.last())
                 .map(|n| format!("#{}", n))
                 .unwrap_or_else(|| "yes".to_string())
         })
@@ -385,10 +386,10 @@ fn worker_row(w: &WorkerSnapshot) -> Vec<Cell> {
 
     let (health_text, health_color) = format_health(&w.pr_health);
 
-    let name = format!("{} {}", tmux_indicator, truncate(&w.name, NAME_MAX));
+    let name = format!("{} {}", mux_indicator, truncate(&w.name, NAME_MAX));
 
     vec![
-        Cell::new(&name).fg(tmux_color),
+        Cell::new(&name).fg(mux_color),
         Cell::new(state_text).fg(state_color),
         Cell::new(&nudge_text)
             .fg(nudge_color)
@@ -418,7 +419,7 @@ fn table_header() -> Vec<Cell> {
 /// Render a worker table from display info.
 ///
 /// `borders`: true uses UTF8_BORDERS_ONLY (watch mode), false uses NOTHING (non-watch).
-pub fn render_worker_table(workers: &[WorkerSnapshot], borders: bool) -> Table {
+pub fn render_worker_table(workers: &[WorkerState], borders: bool) -> Table {
     let mut table = Table::new();
     let preset = if borders {
         presets::UTF8_BORDERS_ONLY
@@ -441,12 +442,13 @@ pub fn render_worker_table(workers: &[WorkerSnapshot], borders: bool) -> Table {
 /// Render workers grouped by repo, with bold repo headers.
 ///
 /// Returns a formatted string with separate tables per repo.
-pub fn render_worker_table_grouped(workers: &[WorkerSnapshot], borders: bool) -> String {
-    // Collect unique repos in order of appearance
+pub fn render_worker_table_grouped(workers: &[WorkerState], borders: bool) -> String {
+    // Collect unique repo names in order of appearance
     let mut repos: Vec<String> = Vec::new();
     for w in workers {
-        if !repos.contains(&w.repo) {
-            repos.push(w.repo.clone());
+        let name = w.repo_name();
+        if !repos.contains(&name) {
+            repos.push(name);
         }
     }
 
@@ -459,8 +461,8 @@ pub fn render_worker_table_grouped(workers: &[WorkerSnapshot], borders: bool) ->
     let mut sections: Vec<String> = Vec::new();
 
     for repo in &repos {
-        let repo_workers: Vec<&WorkerSnapshot> =
-            workers.iter().filter(|w| &w.repo == repo).collect();
+        let repo_workers: Vec<&WorkerState> =
+            workers.iter().filter(|w| w.repo_name() == *repo).collect();
 
         let mut table = Table::new();
         table

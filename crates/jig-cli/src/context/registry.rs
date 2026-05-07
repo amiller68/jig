@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-type Worker = crate::worker::Worker<jig_core::mux::tmux::TmuxWindow>;
 
 use jig_core::error::Result;
 
@@ -97,44 +96,6 @@ impl RepoRegistry {
     /// Get all registered repos
     pub fn repos(&self) -> &[RepoEntry] {
         &self.repos
-    }
-
-    /// Return repos filtered by an optional directory name.
-    ///
-    /// When `filter` is `Some`, only entries whose directory name matches are
-    /// returned. When `None`, all entries are returned.
-    pub fn filtered_repos(&self, filter: Option<&str>) -> Vec<&RepoEntry> {
-        self.repos
-            .iter()
-            .filter(|entry| {
-                filter.is_none_or(|f| {
-                    entry
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy() == f)
-                        .unwrap_or(false)
-                })
-            })
-            .collect()
-    }
-
-    /// Discover all workers across registered repos via git2 worktree listing.
-    pub fn discover_workers(&self) -> Vec<(String, String)> {
-        let mut result = Vec::new();
-        for entry in &self.repos {
-            let repo_name = match entry.path.file_name() {
-                Some(n) => n.to_string_lossy().to_string(),
-                None => continue,
-            };
-            let repo = match jig_core::git::Repo::open(&entry.path) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            for worker in Worker::discover(&repo) {
-                result.push((repo_name.clone(), worker.branch().to_string()));
-            }
-        }
-        result
     }
 
     fn find(&self, path: &Path) -> Option<&RepoEntry> {

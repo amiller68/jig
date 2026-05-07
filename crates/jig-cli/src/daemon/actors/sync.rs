@@ -1,13 +1,11 @@
 //! Sync actor — runs `git fetch` in a background thread.
 
-use std::path::PathBuf;
-
 use jig_core::git::Repo;
 
-use super::Actor;
+use super::{Actor, TickContext};
 
 pub struct SyncRequest {
-    pub repos: Vec<(String, PathBuf)>,
+    pub ctx: TickContext,
 }
 
 #[derive(Default)]
@@ -21,11 +19,16 @@ impl Actor for SyncActor {
     const QUEUE_SIZE: usize = 1;
 
     fn handle(&self, req: SyncRequest) {
-        for (name, path) in &req.repos {
-            if !path.exists() {
+        for entry in req.ctx.repos.iter() {
+            if !entry.path.exists() {
                 continue;
             }
-            let repo = match Repo::open(path) {
+            let name = entry
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let repo = match Repo::open(&entry.path) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::debug!(repo = %name, "fetch: failed to open repo: {}", e);

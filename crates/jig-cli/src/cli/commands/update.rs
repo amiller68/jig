@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 use clap::Args;
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
 use crate::cli::ui;
 
 const GITHUB_REPO: &str = "amiller68/jig";
@@ -56,7 +56,7 @@ impl Op for Update {
     type Error = UpdateError;
     type Output = NoOutput;
 
-    fn run(&self, _ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         let install_method = detect_installation()?;
         let current_version = env!("CARGO_PKG_VERSION");
 

@@ -34,6 +34,7 @@ url.workspace = true
 flume.workspace = true
 sha2.workspace = true
 handlebars.workspace = true
+which.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["process"] }

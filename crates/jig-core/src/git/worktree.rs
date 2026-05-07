@@ -1,6 +1,7 @@
 //! Git worktree — a [`Repo`] that has been validated as a linked worktree.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -70,14 +71,40 @@ impl Worktree {
     }
 
     /// Create a git worktree on disk: ensures `.jig` is git-excluded,
-    /// creates the worktree, and returns the handle.
-    ///
-    /// Callers are responsible for any post-creation setup (file copying,
-    /// hook execution).
-    pub fn create(repo: &Repo, branch: &Branch, base: &Branch) -> Result<Self> {
+    /// creates the worktree, copies files, and runs the on-create hook.
+    pub fn create(
+        repo: &Repo,
+        branch: &Branch,
+        base: &Branch,
+        copy_files: &[PathBuf],
+        on_create: Option<Command>,
+    ) -> Result<Self> {
         crate::git::ensure_excluded(&repo.common_dir(), super::WORKTREES_DIR)?;
         let path = repo.create_worktree(branch, base)?;
-        Self::open(&path)
+        let wt = Self::open(&path)?;
+
+        let repo_root = repo.clone_path();
+        for file in copy_files {
+            let src = repo_root.join(file);
+            let dst = wt.path().join(file);
+            if src.exists() {
+                if let Some(parent) = dst.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&src, &dst)?;
+            }
+        }
+
+        if let Some(mut cmd) = on_create {
+            let output = cmd.current_dir(wt.path()).output()?;
+            if !output.status.success() {
+                return Err(GitError::HookFailed(
+                    String::from_utf8_lossy(&output.stderr).to_string(),
+                ));
+            }
+        }
+
+        Ok(wt)
     }
 
     pub fn as_ref(&self) -> WorktreeRef {

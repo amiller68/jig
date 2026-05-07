@@ -1,6 +1,6 @@
 mod emulator;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use emulator::*;
 
@@ -51,5 +51,10 @@ impl Terminal {
 
     pub fn open_tab(&self, dir: &Path) -> Result<(), TerminalError> {
         self.emulator.open_tab(dir)
+    }
+
+    /// Resolve a command on `$PATH`, returning its full path if found.
+    pub fn which(cmd: &str) -> Option<PathBuf> {
+        which::which(cmd).ok()
     }
 }

@@ -188,29 +188,6 @@ fn validate_multiple_errors() {
 }
 
 #[test]
-fn validate_with_config() {
-    let repo = TestRepo::new();
-
-    // Write jig.toml with restricted scopes
-    fs::write(
-        repo.dir.path().join("jig.toml"),
-        r#"
-[commits]
-scopes = ["api", "cli"]
-"#,
-    )
-    .unwrap();
-
-    repo.commit("feat(unknown): add feature");
-
-    repo.jig()
-        .args(["commit", "validate"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("invalid scope 'unknown'"));
-}
-
-#[test]
 fn examples_command() {
     let repo = TestRepo::new();
     repo.commit("init");

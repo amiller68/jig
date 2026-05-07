@@ -2,41 +2,30 @@
 //! branches, and launches workers in a background thread.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use crate::config::{self, Config};
-use crate::worker::SPAWN_PREAMBLE;
+use crate::context::{self, RepoConfig};
 use jig_core::agents;
 use jig_core::git::{Branch, Repo};
 use jig_core::issues::issue::{IssueFilter, IssueStatus};
 use jig_core::issues::{Issue, IssueProvider};
 
-type Worker = crate::worker::Worker<jig_core::mux::tmux::TmuxWindow>;
+type Worker = crate::worker::Worker;
 
-use super::Actor;
+use super::{Actor, TickContext};
 
 pub struct SpawnRequest {
-    pub repos: Vec<Repo>,
+    pub ctx: TickContext,
 }
 
 #[derive(Default)]
 pub struct SpawnActor {
     spawning_workers: Mutex<Vec<String>>,
-    first_poll_done: AtomicBool,
 }
 
 impl SpawnActor {
     pub fn spawning_workers(&self) -> Vec<String> {
         self.spawning_workers.lock().unwrap().clone()
-    }
-
-    pub fn should_first_poll(&self) -> bool {
-        !self.first_poll_done.load(Ordering::Relaxed)
-    }
-
-    pub fn mark_first_poll_done(&self) {
-        self.first_poll_done.store(true, Ordering::Relaxed);
     }
 }
 
@@ -49,15 +38,24 @@ impl Actor for SpawnActor {
 
     fn handle(&self, req: SpawnRequest) {
         let mut spawning = Vec::new();
+        let global = &req.ctx.config;
 
-        for repo in &req.repos {
-            let repo_root = repo.clone_path();
+        for entry in req.ctx.repos.iter() {
+            let repo_root = entry.path.clone();
             let repo_name = repo_root
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
 
-            let cfg = match Config::from_path(&repo_root) {
+            let repo = match Repo::open(&repo_root) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::debug!(repo = %repo_name, error = %e, "failed to open repo");
+                    continue;
+                }
+            };
+
+            let cfg = match RepoConfig::from_path(&repo_root) {
                 Ok(cfg) => cfg,
                 Err(e) => {
                     tracing::debug!(repo = %repo_name, error = %e, "failed to load config");
@@ -65,7 +63,7 @@ impl Actor for SpawnActor {
                 }
             };
 
-            let provider = match cfg.issue_provider() {
+            let provider = match cfg.issue_provider(&global) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::debug!(repo = %repo_name, error = %e, "failed to create issue provider");
@@ -74,7 +72,7 @@ impl Actor for SpawnActor {
             };
 
             // -- Parent integration branches --
-            let base: Branch = cfg.base_branch().as_str().into();
+            let base = cfg.base_branch(&global);
             let parent_candidates: Vec<_> = [IssueStatus::Planned, IssueStatus::InProgress]
                 .into_iter()
                 .flat_map(|status| {
@@ -132,10 +130,7 @@ impl Actor for SpawnActor {
                 .filter_map(|wt| wt.branch().ok())
                 .collect();
 
-            let max_workers = cfg
-                .repo
-                .spawn
-                .resolve_max_concurrent_workers(&cfg.global.spawn);
+            let max_workers = cfg.repo.spawn.max_concurrent_workers;
             let budget = max_workers.saturating_sub(existing_branches.len());
 
             if budget == 0 {
@@ -193,7 +188,8 @@ impl Actor for SpawnActor {
                 let worker_name = issue.branch().to_string();
                 spawning.push(worker_name.clone());
 
-                match spawn_worker_for_issue(&repo_root, &issue, &worker_name, &cfg, &provider) {
+                let mux = jig_core::mux::TmuxMux::for_repo(&repo_name);
+                match spawn_worker_for_issue(&repo_root, &issue, &worker_name, &cfg, &provider, &mux) {
                     Ok(_worker) => {
                         tracing::info!(worker = %worker_name, "auto-spawned worker");
                     }
@@ -213,10 +209,11 @@ fn spawn_worker_for_issue(
     repo_root: &Path,
     issue: &Issue,
     worker_name: &str,
-    cfg: &Config,
+    cfg: &RepoConfig,
     provider: &IssueProvider,
+    mux: &dyn jig_core::mux::Mux,
 ) -> std::result::Result<Worker, String> {
-    let worktree_path = config::worktree_path(repo_root, worker_name);
+    let worktree_path = context::worktree_path(repo_root, worker_name);
 
     if worktree_path.exists() {
         tracing::debug!(worker = %worker_name, "worktree already exists, skipping");
@@ -225,32 +222,43 @@ fn spawn_worker_for_issue(
 
     let parent = issue.parent().and_then(|r| provider.get(r).ok().flatten());
 
-    let base_branch = match &parent {
-        Some(p) => format!("origin/{}", p.branch()),
-        None => Config::resolve_base_branch_for(repo_root)
-            .unwrap_or_else(|_| config::DEFAULT_BASE_BRANCH.to_string()),
+    let base = match &parent {
+        Some(p) => Branch::new(format!("origin/{}", p.branch())),
+        None => context::resolve_base_branch_for(repo_root)
+            .unwrap_or_else(|_| Branch::new(context::DEFAULT_BASE_BRANCH)),
     };
 
     let repo = Repo::open(repo_root).map_err(|e| e.to_string())?;
     let branch = issue.branch().clone();
-    let base = Branch::new(&base_branch);
 
-    let agent = agents::Agent::from_name(&cfg.repo.agent.agent_type)
-        .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude))
-        .with_disallowed_tools(cfg.repo.agent.disallowed_tools.clone());
+    let agent = agents::Agent::from_config(
+        &cfg.repo.agent.agent_type,
+        Some(&cfg.repo.agent.model),
+        &cfg.repo.agent.disallowed_tools,
+    )
+    .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
-    let prompt = issue
-        .to_prompt(SPAWN_PREAMBLE, provider)
-        .var_num("max_nudges", cfg.global.health.max_nudges);
+    let task = issue.to_prompt(provider);
+
+    let copy_files: Vec<std::path::PathBuf> =
+        cfg.repo.worktree.copy.iter().map(std::path::PathBuf::from).collect();
+    let on_create = cfg.repo.worktree.on_create.as_ref().map(|cmd| {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", cmd]);
+        c
+    });
 
     let worker = Worker::spawn(
         &repo,
         &branch,
         &base,
         &agent,
-        prompt,
+        task,
         true,
         Some(issue.id().clone()),
+        &copy_files,
+        on_create,
+        mux,
     )
     .map_err(|e| e.to_string())?;
 

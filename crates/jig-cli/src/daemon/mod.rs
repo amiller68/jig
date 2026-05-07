@@ -1,95 +1,65 @@
 //! Daemon loop — the conductor that ties actors together.
 //!
 //! Runs a periodic loop:
-//! 1. First-tick inline spawn poll
-//! 2. Send dispatch request (worker processing, nudges, notifications, state save)
+//! 1. Send monitor request every tick (worker discovery, health, nudges, notifications)
+//! 2. Drain prune targets from monitor responses → feed to prune actor
 //! 3. Trigger background sync + spawn + triage if poll interval elapsed
-//! 4. Feed prune targets to prune actor
 
 pub mod actors;
 pub mod events;
 
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::config::registry::RepoRegistry;
-use crate::config::JigToml;
-use crate::config::{GlobalConfig, WorkersState};
+use crate::context::{Config, Context, JigToml, RepoRegistry};
 use jig_core::error::Result;
-use jig_core::prompt::Prompt;
 
-type Worker = crate::worker::Worker<jig_core::mux::tmux::TmuxWindow>;
+type Worker = crate::worker::Worker;
 
-use actors::dispatch::DispatchActor;
+use actors::monitor::MonitorActor;
 use actors::prune::PruneActor;
 use actors::spawn::SpawnActor;
 use actors::sync::SyncActor;
 use actors::triage::TriageActor;
-use actors::{Actor, ActorHandle};
+use actors::ActorHandle;
 
-pub use actors::dispatch::{PrChecks, PrHealth, WorkerSnapshot};
+pub use crate::worker::events::{PrHealth, WorkerState};
+pub use crate::worker::checks::PrChecks;
 pub use actors::triage::TriageEntry;
-
-/// Configuration for the daemon.
-#[derive(Debug, Clone)]
-pub struct DaemonConfig {
-    /// How often to poll, in seconds.
-    pub interval_seconds: u64,
-    /// Tmux session prefix (default: "jig-").
-    pub session_prefix: String,
-    /// If set, only process workers for this repo name.
-    pub repo_filter: Option<String>,
-    /// Maximum number of concurrent auto-spawned workers.
-    pub max_concurrent_workers: usize,
-    /// Seconds between sync + issue poll ticks.
-    pub poll_interval: u64,
-}
-
-impl Default for DaemonConfig {
-    fn default() -> Self {
-        Self {
-            interval_seconds: 30,
-            session_prefix: "jig-".to_string(),
-            repo_filter: None,
-            max_concurrent_workers: 3,
-            poll_interval: 60,
-        }
-    }
-}
 
 /// The daemon — owns actors and drives the tick loop.
 pub struct Daemon {
     pub sync: ActorHandle<SyncActor>,
-    pub dispatch: ActorHandle<DispatchActor>,
+    pub monitor: ActorHandle<MonitorActor>,
     pub prune: ActorHandle<PruneActor>,
     pub spawn: ActorHandle<SpawnActor>,
     pub triage: ActorHandle<TriageActor>,
 
-    config: DaemonConfig,
+    config: Config,
+    registry: RepoRegistry,
     last_poll: Instant,
 }
 
 impl Daemon {
-    /// Create and start the daemon: runs recovery, logs startup event.
-    pub fn start(config: DaemonConfig) -> Result<Self> {
-        let global_config = GlobalConfig::load()?;
-        startup_recovery(&global_config);
-        let _notifier = make_notifier(&global_config)?;
+    /// Create and start the daemon from a Config.
+    pub fn start(cfg: Context) -> Result<Self> {
+        startup_recovery(&cfg.config, &cfg.registry);
+        let _notifier = make_notifier(&cfg.config)?;
 
-        let last_poll = Instant::now() - Duration::from_secs(config.poll_interval + 1);
+        let last_poll = Instant::now() - Duration::from_secs(cfg.config.poll_interval + 1);
         Ok(Self {
             sync: ActorHandle::new(),
-            dispatch: ActorHandle::new(),
+            monitor: ActorHandle::new(),
             prune: ActorHandle::new(),
             spawn: ActorHandle::new(),
             triage: ActorHandle::new(),
-            config,
+            config: cfg.config,
+            registry: cfg.registry,
             last_poll,
         })
     }
 
-    pub fn config(&self) -> &DaemonConfig {
+    pub fn config(&self) -> &Config {
         &self.config
     }
 
@@ -114,18 +84,16 @@ impl Daemon {
                     if quit.load(Ordering::Relaxed) {
                         break;
                     }
-                    std::thread::sleep(Duration::from_secs(self.config.interval_seconds));
+                    std::thread::sleep(Duration::from_secs(self.config.tick_interval));
                 }
             }
         }
         log_shutdown("normal");
     }
 
-    /// Whether both sync and spawn poll are due.
+    /// Whether the poll interval has elapsed.
     pub fn poll_is_due(&self) -> bool {
-        !self.sync.is_pending()
-            && !self.spawn.is_pending()
-            && self.last_poll.elapsed().as_secs() >= self.config.poll_interval
+        self.last_poll.elapsed().as_secs() >= self.config.poll_interval
     }
 
     /// Mark that a poll tick just fired.
@@ -140,159 +108,23 @@ impl Daemon {
             .saturating_sub(self.last_poll.elapsed().as_secs())
     }
 
-    /// Fast-forward parent worktrees and nudge parent workers about new commits.
-    fn update_parent_worktrees(&self, workers_state: &WorkersState, registry: &RepoRegistry) {
-        let mut parent_branches: HashSet<(String, String)> = HashSet::new();
-        for entry in workers_state.workers.values() {
-            if entry.status == "merged" || entry.status == "archived" || entry.status == "failed" {
-                continue;
-            }
-            if let Some(ref pb) = entry.parent_branch {
-                parent_branches.insert((entry.repo.clone(), pb.clone()));
-            }
-        }
-
-        if parent_branches.is_empty() {
-            return;
-        }
-
-        for (repo_name, parent_branch) in &parent_branches {
-            let parent_worker = workers_state.workers.iter().find_map(|(key, entry)| {
-                if &entry.repo == repo_name && entry.branch == *parent_branch {
-                    let worker_name = key.split('/').nth(1).unwrap_or(key);
-                    Some((worker_name.to_string(), entry.branch.clone()))
-                } else {
-                    None
-                }
-            });
-
-            let (worker_name, _branch_name) = match parent_worker {
-                Some(pw) => pw,
-                None => continue,
-            };
-
-            let repo_entry = match registry.repos().iter().find(|e| {
-                e.path
-                    .file_name()
-                    .map(|n| n.to_string_lossy() == repo_name.as_str())
-                    .unwrap_or(false)
-            }) {
-                Some(e) => e,
-                None => continue,
-            };
-
-            let worktree_path = crate::config::worktree_path(&repo_entry.path, &worker_name);
-
-            if worktree_path.exists() {
-                let repo = match jig_core::git::Repo::open(&worktree_path) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(worker = %worker_name, repo = %repo_name,
-                            "failed to open parent worktree repo: {}", e);
-                        continue;
-                    }
-                };
-
-                match repo.fast_forward_branch(&parent_branch.as_str().into(), true) {
-                    Ok(true) => {
-                        tracing::info!(worker = %worker_name, repo = %repo_name,
-                            branch = %parent_branch, "pulled new commits into parent worktree");
-
-                        let worker =
-                            Worker::from_branch(&repo_entry.path, worker_name.as_str().into());
-                        if worker.has_mux_window() {
-                            let prompt = Prompt::new(
-                                "Child work has been merged into your branch. \
-                                 New commits are available. Run `git log --oneline -5` \
-                                 to see what changed.",
-                            )
-                            .named("parent_update");
-                            let wkey = worker.branch().to_string();
-                            match worker.nudge(prompt) {
-                                Ok(()) => {
-                                    tracing::info!(worker = %wkey, "parent update nudge delivered")
-                                }
-                                Err(e) => {
-                                    tracing::warn!(worker = %wkey, "parent update nudge failed: {}", e)
-                                }
-                            }
-                        }
-                    }
-                    Ok(false) => {
-                        tracing::debug!(worker = %worker_name, repo = %repo_name,
-                            "parent worktree already up to date");
-                    }
-                    Err(e) => {
-                        tracing::warn!(worker = %worker_name, repo = %repo_name,
-                            "fast-forward failed in parent worktree: {}", e);
-                    }
-                }
-            } else {
-                let repo = match jig_core::git::Repo::open(&repo_entry.path) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::warn!(repo = %repo_name, branch = %parent_branch,
-                            "failed to open main repo for bare branch update: {}", e);
-                        continue;
-                    }
-                };
-
-                match repo.fast_forward_branch(&parent_branch.as_str().into(), false) {
-                    Ok(true) => {
-                        tracing::info!(repo = %repo_name, branch = %parent_branch,
-                            "fast-forwarded parent branch ref (no worktree)");
-                        if let Err(e) = repo.push_branch(&parent_branch.as_str().into()) {
-                            tracing::warn!(repo = %repo_name, branch = %parent_branch,
-                                "push after bare fast-forward failed: {}", e);
-                        }
-                    }
-                    Ok(false) => {
-                        tracing::debug!(repo = %repo_name, branch = %parent_branch,
-                            "parent branch ref already up to date (no worktree)");
-                    }
-                    Err(e) => {
-                        tracing::warn!(repo = %repo_name, branch = %parent_branch,
-                            "bare fast-forward failed for parent branch: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
     /// Execute a single tick of the daemon.
     pub fn tick(&mut self) -> Result<()> {
-        let workers_state = WorkersState::load().unwrap_or_default();
-        let registry = RepoRegistry::load().unwrap_or_default();
+        // Build shared context for this tick
+        let ctx = actors::TickContext {
+            config: std::sync::Arc::new(Config::load().unwrap_or_default()),
+            repos: std::sync::Arc::new(self.registry.repos().to_vec()),
+            session_prefix: self.config.session_prefix.clone(),
+        };
 
-        self.update_parent_worktrees(&workers_state, &registry);
+        // Send monitor request every tick
+        self.monitor.send(actors::monitor::MonitorRequest {
+            ctx: ctx.clone(),
+        });
 
-        // First-tick inline poll: run spawn synchronously so workers start immediately
-        if self.spawn.actor().should_first_poll() {
-            self.spawn.actor().mark_first_poll_done();
-
-            let repos: Vec<jig_core::git::Repo> = registry
-                .filtered_repos(self.config.repo_filter.as_deref())
-                .into_iter()
-                .filter_map(|entry| jig_core::git::Repo::open(&entry.path).ok())
-                .collect();
-
-            if !repos.is_empty() {
-                let req = actors::spawn::SpawnRequest { repos };
-                self.spawn.actor().handle(req);
-            }
-        }
-
-        // Send dispatch request every tick (non-blocking — runs in background thread)
-        if !self.dispatch.is_pending() {
-            self.dispatch.send(actors::dispatch::DispatchRequest {
-                session_prefix: self.config.session_prefix.clone(),
-                repo_filter: self.config.repo_filter.clone(),
-            });
-        }
-
-        // Feed prune targets from dispatch actor to prune actor
-        let prune_targets = self.dispatch.actor().take_prune_targets();
-        if !prune_targets.is_empty() && !self.prune.is_pending() {
+        // Drain prune targets from completed monitor passes
+        let prune_targets: Vec<_> = self.monitor.drain().into_iter().flatten().collect();
+        if !prune_targets.is_empty() {
             self.prune.send(actors::prune::PruneRequest {
                 targets: prune_targets,
             });
@@ -300,38 +132,9 @@ impl Daemon {
 
         // Trigger background sync + spawn + triage if interval elapsed
         if self.poll_is_due() {
-            let filtered = registry.filtered_repos(self.config.repo_filter.as_deref());
-
-            let sync_repos: Vec<(String, std::path::PathBuf)> = filtered
-                .iter()
-                .filter_map(|entry| {
-                    let name = entry.path.file_name()?.to_string_lossy().to_string();
-                    Some((name, entry.path.clone()))
-                })
-                .collect();
-            if !sync_repos.is_empty() {
-                self.sync
-                    .send(actors::sync::SyncRequest { repos: sync_repos });
-            }
-
-            let spawn_repos: Vec<jig_core::git::Repo> = filtered
-                .iter()
-                .filter_map(|entry| jig_core::git::Repo::open(&entry.path).ok())
-                .collect();
-            let triage_repos: Vec<jig_core::git::Repo> = filtered
-                .iter()
-                .filter_map(|entry| jig_core::git::Repo::open(&entry.path).ok())
-                .collect();
-            if !spawn_repos.is_empty() {
-                self.spawn
-                    .send(actors::spawn::SpawnRequest { repos: spawn_repos });
-            }
-            if !triage_repos.is_empty() {
-                self.triage.send(actors::triage::TriageRequest {
-                    repos: triage_repos,
-                });
-            }
-
+            self.sync.send(actors::sync::SyncRequest { ctx: ctx.clone() });
+            self.spawn.send(actors::spawn::SpawnRequest { ctx: ctx.clone() });
+            self.triage.send(actors::triage::TriageRequest { ctx: ctx.clone() });
             self.mark_polled();
         }
 
@@ -339,27 +142,26 @@ impl Daemon {
     }
 }
 
-/// Try to resume a worker whose tmux window is dead.
-fn try_resume_worker(repo_root: &std::path::Path, worker_name: &str) -> Result<bool> {
+/// Try to resume a worker whose mux window is dead.
+fn try_resume_worker(repo_root: &std::path::Path, worker_name: &str, mux: &dyn jig_core::mux::Mux) -> Result<bool> {
     let worker = Worker::from_branch(repo_root, worker_name.into());
-    if worker.has_mux_window() {
+    if worker.has_mux_window(mux) {
         return Ok(false);
     }
     let wt = worker.worktree()?;
     let jig_config = JigToml::load(repo_root)?.unwrap_or_default();
-    let agent = jig_core::agents::Agent::from_name(&jig_config.agent.agent_type)
-        .unwrap_or_else(|| jig_core::agents::Agent::from_kind(jig_core::agents::AgentKind::Claude))
-        .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
-    let prompt = Prompt::new(crate::worker::SPAWN_PREAMBLE).var(
-        "task_context",
-        "You were interrupted. Resume your previous task.",
-    );
-    Worker::resume(&wt, &agent, prompt)?;
+    let agent = jig_core::agents::Agent::from_config(
+        &jig_config.agent.agent_type,
+        Some(&jig_config.agent.model),
+        &jig_config.agent.disallowed_tools,
+    )
+    .unwrap_or_else(|| jig_core::agents::Agent::from_config("claude", None, &[]).unwrap());
+    Worker::resume(&wt, &agent, "You were interrupted. Resume your previous task.", mux)?;
     Ok(true)
 }
 
 /// Build a Notifier from global config.
-fn make_notifier(global_config: &GlobalConfig) -> Result<crate::notify::Notifier> {
+fn make_notifier(global_config: &Config) -> Result<crate::notify::Notifier> {
     let queue = crate::notify::NotificationQueue::global()?;
     Ok(crate::notify::Notifier::new(
         global_config.notify.clone(),
@@ -368,7 +170,7 @@ fn make_notifier(global_config: &GlobalConfig) -> Result<crate::notify::Notifier
 }
 
 /// Run startup recovery: log lifecycle event, detect crash, resume orphans.
-fn startup_recovery(global_config: &GlobalConfig) {
+fn startup_recovery(global_config: &Config, registry: &RepoRegistry) {
     let log = match events::global() {
         Ok(l) => l,
         Err(e) => {
@@ -377,9 +179,8 @@ fn startup_recovery(global_config: &GlobalConfig) {
         }
     };
 
-    match log.read_all() {
-        Ok(all) => {
-            let state = events::DaemonState::reduce(&all);
+    match log.reduce() {
+        Ok(state) => {
             if state.previous_run_crashed() {
                 tracing::warn!(
                     "previous daemon run did not shut down cleanly — checking for orphaned workers"
@@ -395,8 +196,7 @@ fn startup_recovery(global_config: &GlobalConfig) {
         tracing::warn!("failed to write daemon Started event: {}", e);
     }
 
-    if global_config.daemon.auto_recover {
-        let registry = RepoRegistry::load().unwrap_or_default();
+    if global_config.auto_recover {
         let mut recovered = Vec::new();
         for entry in registry.repos() {
             let repo_name = entry
@@ -408,10 +208,11 @@ fn startup_recovery(global_config: &GlobalConfig) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
+            let mux = jig_core::mux::TmuxMux::for_repo(&repo_name);
             for worker in Worker::discover(&repo) {
-                if worker.is_orphaned() {
+                if worker.is_orphaned(&mux) {
                     let branch = worker.branch().to_string();
-                    match try_resume_worker(&entry.path, &branch) {
+                    match try_resume_worker(&entry.path, &branch, &mux) {
                         Ok(true) => {
                             tracing::info!(repo = %repo_name, worker = %branch, "recovered");
                             recovered.push((repo_name.clone(), branch));
@@ -450,56 +251,6 @@ fn log_shutdown(reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::WorkerEntry;
-    use crate::worker::events::WorkerState;
-    use crate::worker::WorkerStatus;
-    use jig_core::issues::issue::IssueRef;
-    use std::collections::HashMap;
-
-    fn entry_to_worker_state(entry: &WorkerEntry) -> WorkerState {
-        let status = WorkerStatus::from_legacy(&entry.status);
-        WorkerState {
-            status,
-            branch: Some(entry.branch.clone()),
-            commit_count: 0,
-            last_commit_at: None,
-            pr_url: entry.pr_url.clone(),
-            nudge_counts: entry.nudge_counts.clone(),
-            last_nudge_at: HashMap::new(),
-            issue_ref: entry.issue.as_ref().map(IssueRef::new),
-            started_at: Some(entry.started_at),
-            last_event_at: Some(entry.last_event_at),
-        }
-    }
-
-    #[test]
-    fn entry_to_state_roundtrip() {
-        let entry = WorkerEntry {
-            repo: "test".to_string(),
-            branch: "main".to_string(),
-            status: "running".to_string(),
-            issue: Some("features/my-task".to_string()),
-            pr_url: Some("https://github.com/pr/1".to_string()),
-            started_at: 1000,
-            last_event_at: 2000,
-            nudge_counts: HashMap::new(),
-            review_feedback_count: None,
-            parent_branch: None,
-        };
-        let state = entry_to_worker_state(&entry);
-        assert_eq!(state.status, WorkerStatus::Running);
-        assert_eq!(state.pr_url.as_deref(), Some("https://github.com/pr/1"));
-        assert_eq!(state.issue_ref.as_deref(), Some("features/my-task"));
-    }
-
-    #[test]
-    fn daemon_config_defaults() {
-        let config = DaemonConfig::default();
-        assert_eq!(config.interval_seconds, 30);
-        assert_eq!(config.session_prefix, "jig-");
-        assert_eq!(config.max_concurrent_workers, 3);
-        assert_eq!(config.poll_interval, 60);
-    }
 
     fn should_auto_complete(
         auto_complete_on_merge: bool,

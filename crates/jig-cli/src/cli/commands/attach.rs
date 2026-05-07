@@ -1,14 +1,15 @@
-//! Attach command - attach to tmux session
+//! Attach command - attach to mux session
 
 use clap::Args;
 
-use crate::config::{Config, RepoRegistry};
-use crate::worker::TmuxWorker as Worker;
-use jig_core::mux::tmux::TmuxSession;
+use crate::context::RepoConfig;
+use crate::context::RepoRegistry;
+use crate::worker::Worker;
+use jig_core::mux::{Mux, TmuxMux};
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
 
-/// Attach to tmux session
+/// Attach to mux session
 #[derive(Args, Debug, Clone)]
 pub struct Attach {
     /// Window name to switch to
@@ -20,17 +21,17 @@ pub enum AttachError {
     #[error(transparent)]
     Core(#[from] jig_core::Error),
     #[error(transparent)]
-    Tmux(#[from] jig_core::mux::tmux::TmuxError),
+    Mux(#[from] jig_core::MuxError),
 }
 
 impl Op for Attach {
     type Error = AttachError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        match ctx.config() {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        match RepoConfig::from_cwd() {
             Ok(cfg) => {
-                attach(cfg, self.name.as_deref())?;
+                attach(&cfg, self.name.as_deref())?;
                 Ok(NoOutput)
             }
             Err(_) => {
@@ -40,7 +41,7 @@ impl Op for Attach {
                     .repos()
                     .iter()
                     .filter(|e| e.path.exists())
-                    .filter_map(|e| Config::from_path(&e.path).ok())
+                    .filter_map(|e| RepoConfig::from_path(&e.path).ok())
                     .collect();
                 let cfg = configs
                     .iter()
@@ -53,7 +54,8 @@ impl Op for Attach {
     }
 }
 
-fn attach(cfg: &Config, name: Option<&str>) -> Result<(), AttachError> {
+fn attach(cfg: &RepoConfig, name: Option<&str>) -> Result<(), AttachError> {
+    let mux = TmuxMux::new(cfg.session_name());
     match name {
         Some(worker_name) => {
             let workers = Worker::discover(&jig_core::git::Repo::open(&cfg.repo_root).unwrap());
@@ -63,12 +65,11 @@ fn attach(cfg: &Config, name: Option<&str>) -> Result<(), AttachError> {
                 .ok_or_else(|| {
                     jig_core::Error::Custom(format!("worker '{}' not found", worker_name))
                 })?;
-            worker.attach()?;
+            worker.attach(&mux)?;
             Ok(())
         }
         None => {
-            let session = TmuxSession::new(cfg.session_name());
-            session.attach()?;
+            mux.attach()?;
             Ok(())
         }
     }

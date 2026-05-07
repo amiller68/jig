@@ -2,13 +2,16 @@
 
 use clap::Args;
 
-use crate::config;
-use crate::worker::TmuxWorker as Worker;
+use crate::context;
+use crate::worker::Worker;
 use jig_core::agents;
 use jig_core::git::Branch;
-use jig_core::{mux, Error, Prompt};
+use jig_core::{Error, Prompt};
+use crate::terminal::Terminal;
+use jig_core::mux::TmuxMux;
 
-use crate::cli::op::{NoOutput, Op, RepoCtx};
+use crate::cli::op::{NoOutput, Op};
+use crate::context::Context;
 use crate::cli::ui;
 
 /// Create worktree and launch Claude in tmux
@@ -44,18 +47,19 @@ impl Op for Spawn {
     type Error = SpawnError;
     type Output = NoOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = Context::from_cwd()?;
+        let repo = cfg.repo()?;
 
-        if !mux::command_exists("tmux") {
+        if Terminal::which("tmux").is_none() {
             return Err(Error::MissingDependency("tmux".to_string()).into());
         }
-        if !mux::command_exists("claude") {
+        if Terminal::which("claude").is_none() {
             return Err(Error::MissingDependency("claude".to_string()).into());
         }
 
         let issue = if let Some(ref issue_ref) = self.issue {
-            let provider = cfg.issue_provider()?;
+            let provider = repo.issue_provider(&cfg.config)?;
             Some(
                 provider
                     .get(issue_ref)?
@@ -77,7 +81,7 @@ impl Op for Spawn {
             .into());
         };
 
-        let worktree_path = cfg.worktrees_path.join(&name);
+        let worktree_path = repo.worktrees_path.join(&name);
         if worktree_path.exists() {
             return Err(Error::Custom(format!(
                 "Worktree '{}' already exists — use `jig resume` or `jig attach`",
@@ -91,18 +95,16 @@ impl Op for Spawn {
             .as_ref()
             .and_then(|i| i.parent())
             .and_then(|parent_ref| {
-                let provider = cfg.issue_provider().ok()?;
+                let provider = repo.issue_provider(&cfg.config).ok()?;
                 provider.get(parent_ref).ok().flatten()
             });
-        let parent_base = parent_issue
-            .as_ref()
-            .map(|p| format!("origin/{}", p.branch()));
-        let base_branch_str = cfg.base_branch();
-        let base = self
-            .base
-            .as_deref()
-            .or(parent_base.as_deref())
-            .unwrap_or(&base_branch_str);
+        let base_branch = if let Some(b) = &self.base {
+            Branch::new(b)
+        } else if let Some(p) = &parent_issue {
+            Branch::new(format!("origin/{}", p.branch()))
+        } else {
+            repo.base_branch(&cfg.config)
+        };
 
         // Track issue ID before consuming the issue
         let issue_id_for_status = issue.as_ref().map(|i| i.id().clone());
@@ -115,38 +117,52 @@ impl Op for Spawn {
             (None, None) => None,
         };
 
-        let global_config = crate::config::GlobalConfig::load()?;
-        let jig_config = config::JigToml::load(&cfg.repo_root)?.unwrap_or_default();
-        let agent = agents::Agent::from_name(&jig_config.agent.agent_type)
-            .unwrap_or_else(|| agents::Agent::from_kind(agents::AgentKind::Claude))
-            .with_disallowed_tools(jig_config.agent.disallowed_tools.clone());
+        let jig_config = context::JigToml::load(&repo.repo_root)?.unwrap_or_default();
+        let agent = agents::Agent::from_config(
+            &jig_config.agent.agent_type,
+            Some(&jig_config.agent.model),
+            &jig_config.agent.disallowed_tools,
+        )
+        .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
-        let git_repo = jig_core::Repo::open(&cfg.repo_root)?;
+        let git_repo = jig_core::Repo::open(&repo.repo_root)?;
         let branch = Branch::new(&name);
-        let base_branch = Branch::new(base);
 
-        let prompt = Prompt::new(crate::worker::SPAWN_PREAMBLE)
-            .var(
-                "task_context",
-                effective_context.as_deref().unwrap_or(
-                    "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
-                ),
-            )
-            .var_num("max_nudges", global_config.health.max_nudges);
+        let task = Prompt::new(
+            effective_context.as_deref().unwrap_or(
+                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
+            ),
+        );
+
+        let copy_files: Vec<std::path::PathBuf> =
+            jig_config.worktree.copy.iter().map(std::path::PathBuf::from).collect();
+        let on_create = jig_config.worktree.on_create.as_ref().map(|cmd| {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", cmd]);
+            c
+        });
 
         let issue_ref = self.issue.as_deref().map(jig_core::IssueRef::new);
+        let repo_name = repo.repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let mux = TmuxMux::for_repo(&repo_name);
         let _worker = Worker::spawn(
             &git_repo,
             &branch,
             &base_branch,
             &agent,
-            prompt,
+            task,
             false,
             issue_ref,
+            &copy_files,
+            on_create,
+            &mux,
         )?;
 
         if let Some(ref issue_id) = issue_id_for_status {
-            if let Ok(provider) = cfg.issue_provider() {
+            if let Ok(provider) = repo.issue_provider(&cfg.config) {
                 let _ = provider.update_status(issue_id, &jig_core::IssueStatus::InProgress);
             }
         }

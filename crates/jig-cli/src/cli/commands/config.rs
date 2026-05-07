@@ -4,12 +4,10 @@ use std::path::Path;
 
 use clap::{Args, Subcommand};
 
-use crate::config::{
-    GlobalConfig, JigToml, LinearIssuesConfig, ResolvedNudgeConfig, DEFAULT_BASE_BRANCH,
-};
+use crate::context::{Config as GlobalConfig, JigToml, LinearIssuesConfig, RepoConfig, DEFAULT_BASE_BRANCH};
 use jig_core::Error as CoreError;
 
-use crate::cli::op::{GlobalCtx, Op, RepoCtx};
+use crate::cli::op::Op;
 use crate::cli::ui;
 
 /// Manage configuration
@@ -76,56 +74,33 @@ impl Op for Config {
     type Error = ConfigError;
     type Output = ConfigOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
+    fn run(&self) -> Result<Self::Output, Self::Error> {
         if self.list {
             return show_list();
         }
 
         match &self.subcommand {
             None | Some(ConfigCommands::Show) => {
-                if ctx.config.is_some() {
-                    show_config(ctx)
-                } else {
-                    show_global_config()
+                match RepoConfig::from_cwd() {
+                    Ok(repo) => show_config(&repo),
+                    Err(_) => show_global_config(),
                 }
             }
             Some(ConfigCommands::Base {
                 branch,
                 global,
                 unset,
-            }) => handle_base(ctx, branch.as_deref(), *global, *unset),
+            }) => handle_base(branch.as_deref(), *global, *unset),
             Some(ConfigCommands::OnCreate { command, unset }) => {
-                handle_on_create(ctx, command.as_deref(), *unset)
-            }
-        }
-    }
-
-    fn run_global(&self, _ctx: &GlobalCtx) -> Result<Self::Output, Self::Error> {
-        if self.list {
-            return show_list();
-        }
-
-        // In global mode, create a repo-less context for subcommands that need it
-        let repo_ctx = RepoCtx { config: None };
-
-        match &self.subcommand {
-            None | Some(ConfigCommands::Show) => show_global_config(),
-            Some(ConfigCommands::Base { branch, unset, .. }) => {
-                // Force global=true in -g mode
-                handle_base(&repo_ctx, branch.as_deref(), true, *unset)
-            }
-            Some(ConfigCommands::OnCreate { .. }) => {
-                eprintln!("error: on-create hook is repo-specific, cannot use with -g/--global");
-                std::process::exit(1);
+                handle_on_create(command.as_deref(), *unset)
             }
         }
     }
 }
 
 fn show_global_config() -> Result<ConfigOutput, ConfigError> {
-    let global = crate::config::GlobalConfig::load()?;
+    let global = GlobalConfig::load()?;
 
-    /// Format a source attribution tag.
     fn src(s: &str) -> String {
         ui::source(&format!("({})", s))
     }
@@ -149,13 +124,13 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
     eprintln!(
         "  {} {} {}",
         ui::dim("Max workers:"),
-        ui::highlight(&global.spawn.max_concurrent_workers.to_string()),
+        ui::highlight(&global.max_concurrent_workers.to_string()),
         src("global config")
     );
     eprintln!(
         "  {} {} {}",
         ui::dim("Poll interval:"),
-        ui::highlight(&format!("{}s", global.spawn.auto_spawn_interval)),
+        ui::highlight(&format!("{}s", global.poll_interval)),
         src("global config")
     );
 
@@ -166,13 +141,13 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
     eprintln!(
         "  {} {} {}",
         ui::dim("Silence threshold:"),
-        ui::highlight(&format!("{}s", global.health.silence_threshold_seconds)),
+        ui::highlight(&format!("{}s", global.silence_threshold_seconds)),
         src("global config")
     );
     eprintln!(
         "  {} {} {}",
         ui::dim("Max nudges:"),
-        ui::highlight(&global.health.max_nudges.to_string()),
+        ui::highlight(&global.max_nudges.to_string()),
         src("global config")
     );
 
@@ -203,12 +178,12 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
     eprintln!(
         "  {} {}",
         ui::dim("Auto-cleanup merged:"),
-        ui::highlight(&global.github.auto_cleanup_merged.to_string())
+        ui::highlight(&global.auto_cleanup_merged.to_string())
     );
     eprintln!(
         "  {} {}",
         ui::dim("Auto-cleanup closed:"),
-        ui::highlight(&global.github.auto_cleanup_closed.to_string())
+        ui::highlight(&global.auto_cleanup_closed.to_string())
     );
 
     // -- Daemon --
@@ -218,27 +193,25 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
     eprintln!(
         "  {} {}",
         ui::dim("Auto-recover:"),
-        ui::highlight(&global.daemon.auto_recover.to_string())
+        ui::highlight(&global.auto_recover.to_string())
     );
     eprintln!(
         "  {} {}",
         ui::dim("Tick interval:"),
-        ui::highlight(&format!("{}s", global.daemon.interval_seconds))
+        ui::highlight(&format!("{}s", global.tick_interval))
     );
     eprintln!(
         "  {} {}",
         ui::dim("Session prefix:"),
-        ui::highlight(&global.daemon.session_prefix)
+        ui::highlight(&global.session_prefix)
     );
 
     Ok(ConfigOutput(None))
 }
 
-fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
-    let cfg = ctx.config()?;
-    let display = ConfigDisplay::load(&cfg.repo_root)?;
+fn show_config(repo: &RepoConfig) -> Result<ConfigOutput, ConfigError> {
+    let display = ConfigDisplay::load(&repo.repo_root)?;
 
-    /// Format a source attribution tag.
     fn src(s: &str) -> String {
         ui::source(&format!("({})", s))
     }
@@ -262,7 +235,7 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
         eprintln!(
             "  {} {}",
             ui::bold("Local overlay:"),
-            ui::highlight(crate::config::JIG_LOCAL_TOML)
+            ui::highlight(crate::context::JIG_LOCAL_TOML)
         );
     }
 
@@ -297,57 +270,48 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     eprintln!(
         "  {} {} {}",
         ui::dim("Provider:"),
-        ui::highlight(&display.issues_provider.to_string()),
+        ui::highlight("linear"),
         src(&display.issues_source)
     );
-    if display.issues_provider == jig_core::issues::ProviderKind::Linear {
-        if let Some(ref linear) = display.linear {
-            eprintln!(
-                "  {} {} {}",
-                ui::dim("Profile:"),
-                ui::highlight(&linear.profile),
-                src(&display.issues_source)
-            );
-            if let Some(ref team) = linear.team {
-                eprintln!(
-                    "  {} {} {}",
-                    ui::dim("Team:"),
-                    ui::highlight(team),
-                    src(&display.issues_source)
-                );
-            }
-            if !linear.projects.is_empty() {
-                eprintln!(
-                    "  {} {} {}",
-                    ui::dim("Projects:"),
-                    ui::highlight(&linear.projects.join(", ")),
-                    src(&display.issues_source)
-                );
-            }
-            if let Some(ref assignee) = linear.assignee {
-                eprintln!(
-                    "  {} {} {}",
-                    ui::dim("Assignee:"),
-                    ui::highlight(assignee),
-                    src(&display.issues_source)
-                );
-            }
-            if !linear.labels.is_empty() {
-                eprintln!(
-                    "  {} {} {}",
-                    ui::dim("Labels:"),
-                    ui::highlight(&linear.labels.join(", ")),
-                    src(&display.issues_source)
-                );
-            }
-        }
-    } else {
+    if let Some(ref linear) = display.linear {
         eprintln!(
             "  {} {} {}",
-            ui::dim("Directory:"),
-            ui::highlight(&display.issues_directory),
+            ui::dim("Profile:"),
+            ui::highlight(&linear.profile),
             src(&display.issues_source)
         );
+        if let Some(ref team) = linear.team {
+            eprintln!(
+                "  {} {} {}",
+                ui::dim("Team:"),
+                ui::highlight(team),
+                src(&display.issues_source)
+            );
+        }
+        if !linear.projects.is_empty() {
+            eprintln!(
+                "  {} {} {}",
+                ui::dim("Projects:"),
+                ui::highlight(&linear.projects.join(", ")),
+                src(&display.issues_source)
+            );
+        }
+        if let Some(ref assignee) = linear.assignee {
+            eprintln!(
+                "  {} {} {}",
+                ui::dim("Assignee:"),
+                ui::highlight(assignee),
+                src(&display.issues_source)
+            );
+        }
+        if !linear.labels.is_empty() {
+            eprintln!(
+                "  {} {} {}",
+                ui::dim("Labels:"),
+                ui::highlight(&linear.labels.join(", ")),
+                src(&display.issues_source)
+            );
+        }
     }
     match &display.auto_spawn_labels {
         None => {
@@ -379,13 +343,13 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
         "  {} {} {}",
         ui::dim("Max workers:"),
         ui::highlight(&display.max_concurrent_workers.to_string()),
-        src(&display.max_concurrent_workers_source)
+        src(&display.spawn_source)
     );
     eprintln!(
         "  {} {} {}",
         ui::dim("Poll interval:"),
-        ui::highlight(&format!("{}s", display.auto_spawn_interval)),
-        src(&display.auto_spawn_interval_source)
+        ui::highlight(&format!("{}s", display.poll_interval)),
+        src("global config")
     );
 
     // -- Health --
@@ -393,28 +357,15 @@ fn show_config(ctx: &RepoCtx) -> Result<ConfigOutput, ConfigError> {
     ui::header("Health");
     eprintln!();
     eprintln!(
-        "  {} {} {}",
+        "  {} {}",
         ui::dim("Silence threshold:"),
-        ui::highlight(&format!("{}s", display.silence_threshold_seconds)),
-        src(&display.silence_threshold_source)
+        ui::highlight(&format!("{}s", display.global.silence_threshold_seconds)),
     );
     eprintln!(
-        "  {} {} {}",
+        "  {} {}",
         ui::dim("Max nudges:"),
-        ui::highlight(&display.max_nudges.to_string()),
-        src(&display.max_nudges_source)
+        ui::highlight(&display.global.max_nudges.to_string()),
     );
-    eprintln!();
-    eprintln!("  {}", ui::dim("Per-type:"));
-    for (name, resolved, source) in &display.nudge_type_configs {
-        eprintln!(
-            "    {} max={} cooldown={}s {}",
-            ui::highlight(name),
-            ui::bold(&resolved.max.to_string()),
-            ui::bold(&resolved.cooldown_seconds.to_string()),
-            src(source)
-        );
-    }
 
     Ok(ConfigOutput(None))
 }
@@ -424,20 +375,19 @@ fn show_list() -> Result<ConfigOutput, ConfigError> {
 }
 
 fn handle_base(
-    ctx: &RepoCtx,
     branch: Option<&str>,
     global: bool,
     unset: bool,
 ) -> Result<ConfigOutput, ConfigError> {
     if unset {
         if global {
-            let mut global_cfg = crate::config::GlobalConfig::load()?;
+            let mut global_cfg = GlobalConfig::load()?;
             global_cfg.default_base_branch = None;
             global_cfg.save()?;
             ui::success("Unset global base branch");
         } else {
-            let cfg = ctx.config()?;
-            update_local_toml(&cfg.repo_root, "worktree", "base", None)?;
+            let repo = RepoConfig::from_cwd()?;
+            update_local_toml(&repo.repo_root, "worktree", "base", None)?;
             ui::success("Unset repo base branch");
         }
         return Ok(ConfigOutput(None));
@@ -446,20 +396,20 @@ fn handle_base(
     match branch {
         Some(b) => {
             if global {
-                let mut global_cfg = crate::config::GlobalConfig::load()?;
+                let mut global_cfg = GlobalConfig::load()?;
                 global_cfg.default_base_branch = Some(b.to_string());
                 global_cfg.save()?;
                 ui::success(&format!("Set global base branch to '{}'", ui::highlight(b)));
             } else {
-                let cfg = ctx.config()?;
-                update_local_toml(&cfg.repo_root, "worktree", "base", Some(b))?;
+                let repo = RepoConfig::from_cwd()?;
+                update_local_toml(&repo.repo_root, "worktree", "base", Some(b))?;
                 ui::success(&format!("Set repo base branch to '{}'", ui::highlight(b)));
             }
             Ok(ConfigOutput(None))
         }
         None => {
             if global {
-                let global_cfg = crate::config::GlobalConfig::load()?;
+                let global_cfg = GlobalConfig::load()?;
                 match global_cfg.default_base_branch {
                     Some(b) => Ok(ConfigOutput(Some(b))),
                     None => {
@@ -468,34 +418,34 @@ fn handle_base(
                     }
                 }
             } else {
-                let cfg = ctx.config()?;
-                Ok(ConfigOutput(Some(cfg.base_branch())))
+                let cfg = crate::context::Context::from_cwd()?;
+                let repo = cfg.repo()?;
+                Ok(ConfigOutput(Some(repo.base_branch(&cfg.config).to_string())))
             }
         }
     }
 }
 
 fn handle_on_create(
-    ctx: &RepoCtx,
     command: Option<&str>,
     unset: bool,
 ) -> Result<ConfigOutput, ConfigError> {
-    let cfg = ctx.config()?;
+    let repo = RepoConfig::from_cwd()?;
 
     if unset {
-        update_local_toml(&cfg.repo_root, "worktree", "on_create", None)?;
+        update_local_toml(&repo.repo_root, "worktree", "on_create", None)?;
         ui::success("Unset on-create hook");
         return Ok(ConfigOutput(None));
     }
 
     match command {
         Some(cmd) => {
-            update_local_toml(&cfg.repo_root, "worktree", "on_create", Some(cmd))?;
+            update_local_toml(&repo.repo_root, "worktree", "on_create", Some(cmd))?;
             ui::success(&format!("Set on-create hook to '{}'", ui::highlight(cmd)));
             Ok(ConfigOutput(None))
         }
         None => {
-            let on_create = cfg.repo.worktree.on_create.as_deref();
+            let on_create = repo.repo.worktree.on_create.as_deref();
             match on_create {
                 Some(cmd) => Ok(ConfigOutput(Some(cmd.to_string()))),
                 None => {
@@ -516,20 +466,13 @@ struct ConfigDisplay {
     toml_on_create: Option<String>,
     agent_type: String,
     agent_source: String,
-    issues_provider: jig_core::issues::ProviderKind,
-    issues_directory: String,
     issues_source: String,
     linear: Option<LinearIssuesConfig>,
     auto_spawn_labels: Option<Vec<String>>,
     max_concurrent_workers: usize,
-    max_concurrent_workers_source: String,
-    auto_spawn_interval: u64,
-    auto_spawn_interval_source: String,
-    silence_threshold_seconds: u64,
-    silence_threshold_source: String,
-    max_nudges: u32,
-    max_nudges_source: String,
-    nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)>,
+    spawn_source: String,
+    poll_interval: u64,
+    global: GlobalConfig,
     has_local_overlay: bool,
 }
 
@@ -537,11 +480,11 @@ impl ConfigDisplay {
     fn load(repo_path: &Path) -> jig_core::Result<Self> {
         let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
         let global_config = GlobalConfig::load().unwrap_or_default();
-        let has_local_overlay = jig_toml.has_local_overlay;
 
         let worktree_source = jig_toml.source_label("worktree");
         let agent_source = jig_toml.source_label("agent");
         let issues_source = jig_toml.source_label("issues");
+        let spawn_source = jig_toml.source_label("spawn");
 
         let effective_base = jig_toml
             .worktree
@@ -550,126 +493,34 @@ impl ConfigDisplay {
             .or_else(|| global_config.default_base_branch.clone())
             .unwrap_or_else(|| DEFAULT_BASE_BRANCH.to_string());
 
-        let effective_on_create = jig_toml.worktree.on_create.clone();
-
-        let global_spawn = &global_config.spawn;
-        let spawn = &jig_toml.spawn;
-
-        let spawn_source = jig_toml.source_label("spawn");
-        let (max_concurrent_workers, max_concurrent_workers_source) =
-            if spawn.max_concurrent_workers.is_some() {
-                (
-                    spawn.resolve_max_concurrent_workers(global_spawn),
-                    spawn_source.clone(),
-                )
-            } else {
-                (
-                    global_spawn.max_concurrent_workers,
-                    "global config".to_string(),
-                )
-            };
-
-        let (auto_spawn_interval, auto_spawn_interval_source) =
-            if spawn.auto_spawn_interval.is_some() {
-                (
-                    spawn.resolve_auto_spawn_interval(global_spawn),
-                    spawn_source,
-                )
-            } else {
-                (
-                    global_spawn.auto_spawn_interval,
-                    "global config".to_string(),
-                )
-            };
-
-        let health = &jig_toml.health;
-        let global_health = &global_config.health;
-        let health_source = jig_toml.source_label("health");
-
-        let (silence_threshold_seconds, silence_threshold_source) =
-            if health.silence_threshold_seconds.is_some() {
-                (
-                    health.resolve_silence_threshold(global_health),
-                    health_source.clone(),
-                )
-            } else {
-                (
-                    global_health.silence_threshold_seconds,
-                    "global config".to_string(),
-                )
-            };
-
-        let (max_nudges, max_nudges_source) = if health.max_nudges.is_some() {
-            (
-                health.resolve_max_nudges(global_health),
-                health_source.clone(),
-            )
-        } else {
-            (global_health.max_nudges, "global config".to_string())
-        };
-
-        let nudge_types = ["idle", "stalled", "ci", "review", "conflict", "bad_commits"];
-        let nudge_type_configs: Vec<(String, ResolvedNudgeConfig, String)> = nudge_types
-            .iter()
-            .map(|&nt| {
-                let resolved = health.resolve_for_nudge_type(nt, global_health);
-                let type_cfg = match nt {
-                    "idle" => &health.nudge.idle,
-                    "stalled" => &health.nudge.stalled,
-                    "ci" => &health.nudge.ci,
-                    "review" => &health.nudge.review,
-                    "conflict" => &health.nudge.conflict,
-                    "bad_commits" => &health.nudge.bad_commits,
-                    _ => &None,
-                };
-                let source = if type_cfg.is_some() {
-                    format!("{} [health.nudge]", health_source)
-                } else if health.max_nudges.is_some() || health.silence_threshold_seconds.is_some()
-                {
-                    format!("{} [health]", health_source)
-                } else {
-                    "global config".to_string()
-                };
-                (nt.to_string(), resolved, source)
-            })
-            .collect();
-
         Ok(Self {
             effective_base,
             toml_base: jig_toml.worktree.base,
             worktree_source,
-            global_base: global_config.default_base_branch,
-            effective_on_create,
+            global_base: global_config.default_base_branch.clone(),
+            effective_on_create: jig_toml.worktree.on_create.clone(),
             toml_on_create: jig_toml.worktree.on_create,
             agent_type: jig_toml.agent.agent_type,
             agent_source,
-            issues_provider: jig_toml.issues.provider,
-            issues_directory: jig_toml.issues.directory,
             issues_source,
             linear: jig_toml.issues.linear,
             auto_spawn_labels: jig_toml.issues.auto_spawn_labels,
-            max_concurrent_workers,
-            max_concurrent_workers_source,
-            auto_spawn_interval,
-            auto_spawn_interval_source,
-            silence_threshold_seconds,
-            silence_threshold_source,
-            max_nudges,
-            max_nudges_source,
-            nudge_type_configs,
-            has_local_overlay,
+            max_concurrent_workers: jig_toml.spawn.max_concurrent_workers,
+            spawn_source,
+            poll_interval: global_config.poll_interval,
+            global: global_config,
+            has_local_overlay: jig_toml.has_local_overlay,
         })
     }
 }
 
-/// Update a key in jig.local.toml. Pass `None` as value to remove the key.
 fn update_local_toml(
     repo_root: &std::path::Path,
     section: &str,
     key: &str,
     value: Option<&str>,
 ) -> Result<(), ConfigError> {
-    let local_path = repo_root.join(crate::config::JIG_LOCAL_TOML);
+    let local_path = repo_root.join(crate::context::JIG_LOCAL_TOML);
     let mut doc: toml::Value = if local_path.exists() {
         let content = std::fs::read_to_string(&local_path).map_err(CoreError::Io)?;
         toml::from_str(&content).map_err(|e| CoreError::Custom(e.to_string()))?

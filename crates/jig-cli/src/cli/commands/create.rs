@@ -3,11 +3,12 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::worker::events::{Event, EventKind, EventLog};
+use crate::worker::events::{self, Event, EventKind};
 use jig_core::git::Branch;
 use jig_core::{Error, Worktree};
 
-use crate::cli::op::{Op, RepoCtx};
+use crate::cli::op::Op;
+use crate::context::Context;
 use crate::cli::ui;
 
 /// Create a new worktree
@@ -64,24 +65,33 @@ impl Op for Create {
     type Error = CreateError;
     type Output = CreateOutput;
 
-    fn run(&self, ctx: &RepoCtx) -> Result<Self::Output, Self::Error> {
-        let cfg = ctx.config()?;
+    fn run(&self) -> Result<Self::Output, Self::Error> {
+        let cfg = Context::from_cwd()?;
+        let repo = cfg.repo()?;
 
-        let base_branch_str = cfg.base_branch();
-        let base = self.base.as_deref().unwrap_or(&base_branch_str);
+        let base_branch = match &self.base {
+            Some(b) => Branch::new(b),
+            None => repo.base_branch(&cfg.config),
+        };
 
-        let git_repo = jig_core::Repo::open(&cfg.repo_root)?;
+        let git_repo = jig_core::Repo::open(&repo.repo_root)?;
         let branch = Branch::new(self.branch.as_deref().unwrap_or(&self.name));
-        let base_branch = Branch::new(base);
-        let wt = Worktree::create(&git_repo, &branch, &base_branch)?;
+        let copy_files: Vec<std::path::PathBuf> =
+            repo.repo.worktree.copy.iter().map(std::path::PathBuf::from).collect();
+        let on_create = repo.repo.worktree.on_create.as_ref().map(|cmd| {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", cmd]);
+            c
+        });
+        let wt = Worktree::create(&git_repo, &branch, &base_branch, &copy_files, on_create)?;
 
         // Emit Create event so the daemon knows this is a bare worktree
-        let repo_name = cfg
+        let repo_name = repo
             .repo_root
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        if let Ok(event_log) = EventLog::for_worker(&repo_name, &self.name) {
+        if let Ok(event_log) = events::event_log_for_worker(&repo_name, &self.name) {
             if let Err(e) = event_log.append(&Event::now(EventKind::Create {
                 branch: branch.to_string(),
             })) {

@@ -2,8 +2,7 @@ use std::fmt;
 use std::path::Path;
 use std::process::Command;
 
-use super::TerminalError;
-use crate::mux::command_exists;
+use super::{Terminal, TerminalError};
 
 /// Terminal identity
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,7 +107,7 @@ impl TerminalEmulator for Kitty {
     }
 
     fn open_tab(&self, dir: &Path) -> Result<(), TerminalError> {
-        if !command_exists("kitten") {
+        if Terminal::which("kitten").is_none() {
             return Err(TerminalError::MissingDependency("kitten".to_string()));
         }
         let dir_str = dir.to_string_lossy();
@@ -127,7 +126,7 @@ impl TerminalEmulator for WezTerm {
     }
 
     fn open_tab(&self, dir: &Path) -> Result<(), TerminalError> {
-        if !command_exists("wezterm") {
+        if Terminal::which("wezterm").is_none() {
             return Err(TerminalError::MissingDependency("wezterm".to_string()));
         }
         let dir_str = dir.to_string_lossy();

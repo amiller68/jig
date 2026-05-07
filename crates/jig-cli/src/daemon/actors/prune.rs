@@ -38,7 +38,7 @@ impl Actor for PruneActor {
 }
 
 fn prune_single(target: &PruneTarget) -> std::result::Result<(), String> {
-    let worktree_path = crate::config::worktree_path(&target.repo_path, &target.worker_name);
+    let worktree_path = crate::context::worktree_path(&target.repo_path, &target.worker_name);
 
     if worktree_path.exists() {
         let wt = Worktree::open(&worktree_path)
@@ -51,7 +51,7 @@ fn prune_single(target: &PruneTarget) -> std::result::Result<(), String> {
         repo.prune_stale_worktrees();
     }
 
-    if let Ok(events_dir) = crate::config::global_events_dir() {
+    if let Ok(events_dir) = crate::context::global_events_dir() {
         let sanitized = format!(
             "{}-{}",
             target.repo_name,
@@ -62,13 +62,6 @@ fn prune_single(target: &PruneTarget) -> std::result::Result<(), String> {
             let _ = std::fs::remove_dir_all(&event_dir);
         }
     }
-
-    let key = format!("{}/{}", target.repo_name, target.worker_name);
-    let mut workers_state = crate::config::WorkersState::load().unwrap_or_default();
-    workers_state.remove_worker(&key);
-    workers_state.save().unwrap_or_else(|e| {
-        tracing::warn!("failed to save workers state after prune: {}", e);
-    });
 
     Ok(())
 }

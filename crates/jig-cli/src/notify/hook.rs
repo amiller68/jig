@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use crate::config::NotifyConfig;
+use crate::context::NotifyConfig;
 use jig_core::error::Result;
 
 use super::{NotificationEvent, NotificationQueue};
@@ -170,7 +170,7 @@ impl NotificationEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::NotifyConfig;
+    use crate::context::NotifyConfig;
 
     fn make_event() -> NotificationEvent {
         NotificationEvent::NeedsIntervention {
