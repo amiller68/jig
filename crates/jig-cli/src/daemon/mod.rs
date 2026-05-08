@@ -9,10 +9,19 @@ pub mod actors;
 pub mod events;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::context::{Config, Context, JigToml, RepoRegistry};
+use crate::context::{Config, Context, JigToml, RepoEntry, RepoRegistry};
 use jig_core::error::Result;
+
+/// Shared context built once per daemon tick, passed to all actors.
+#[derive(Clone)]
+pub struct TickContext {
+    pub config: Arc<Config>,
+    pub repos: Arc<Vec<RepoEntry>>,
+    pub session_prefix: String,
+}
 
 type Worker = crate::worker::Worker;
 
@@ -110,10 +119,9 @@ impl Daemon {
 
     /// Execute a single tick of the daemon.
     pub fn tick(&mut self) -> Result<()> {
-        // Build shared context for this tick
-        let ctx = actors::TickContext {
-            config: std::sync::Arc::new(Config::load().unwrap_or_default()),
-            repos: std::sync::Arc::new(self.registry.repos().to_vec()),
+        let ctx = TickContext {
+            config: Arc::new(self.config.clone()),
+            repos: Arc::new(self.registry.repos().to_vec()),
             session_prefix: self.config.session_prefix.clone(),
         };
 

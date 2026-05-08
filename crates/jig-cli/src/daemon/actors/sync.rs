@@ -2,7 +2,8 @@
 
 use jig_core::git::Repo;
 
-use super::{Actor, TickContext};
+use super::Actor;
+use crate::daemon::TickContext;
 
 pub struct SyncRequest {
     pub ctx: TickContext,

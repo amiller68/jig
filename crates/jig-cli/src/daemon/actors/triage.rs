@@ -14,7 +14,8 @@ use jig_core::git::{Branch, Repo};
 use jig_core::issues::issue::{IssueFilter, IssueStatus};
 use jig_core::issues::Issue;
 
-use super::{Actor, TickContext};
+use super::Actor;
+use crate::daemon::TickContext;
 
 pub struct TriageRequest {
     pub ctx: TickContext,

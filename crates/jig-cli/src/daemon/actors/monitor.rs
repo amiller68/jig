@@ -19,7 +19,8 @@ use jig_core::prompt::Prompt;
 type Worker = crate::worker::Worker;
 
 use super::prune::PruneTarget;
-use super::{Actor, TickContext};
+use super::Actor;
+use crate::daemon::TickContext;
 
 // ── Request / Actor ─────────────────────────────────────────────────
 

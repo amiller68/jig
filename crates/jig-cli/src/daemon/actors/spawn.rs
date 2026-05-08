@@ -12,7 +12,8 @@ use jig_core::issues::{Issue, IssueProvider};
 
 type Worker = crate::worker::Worker;
 
-use super::{Actor, TickContext};
+use super::Actor;
+use crate::daemon::TickContext;
 
 pub struct SpawnRequest {
     pub ctx: TickContext,
