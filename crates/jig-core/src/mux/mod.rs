@@ -1,15 +1,4 @@
 pub mod tmux;
-// TODO: cmux backend (https://cmux.com)
-// - Native macOS terminal + multiplexer — good fit for laptop, not for servers
-// - Flat workspace model: no session/window hierarchy, just named workspaces
-// - CLI: `cmux new-workspace <name>`, `cmux send-key -w <name> <key>`,
-//   `cmux send -w <name> <text>`, `cmux close-workspace <name>`
-// - No built-in is_running equivalent — may need to send a probe keystroke
-//   and check output, or track spawned PIDs ourselves
-// - attach semantics differ: cmux workspaces are always visible in the app,
-//   "attach" would mean focus/switch-to rather than tmux-style session attach
-// - Detection: `which cmux` + check we're running inside cmux (env var?)
-// - Backend selection: jig config chooses backend, or auto-detect from env
 
 pub use tmux::TmuxMux;
 

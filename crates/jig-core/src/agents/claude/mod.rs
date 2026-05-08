@@ -70,7 +70,7 @@ impl AgentBackend for ClaudeCode {
 
     fn hook_event_name(&self, hook: HookType) -> Option<&str> {
         match hook {
-            HookType::ToolUseEnd => Some("PostToolUse"),
+            HookType::PostToolUse => Some("PostToolUse"),
             HookType::Notification => Some("Notification"),
             HookType::Stop => Some("Stop"),
         }

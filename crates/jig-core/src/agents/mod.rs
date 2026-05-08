@@ -63,21 +63,21 @@ pub const DEFAULT_DISALLOWED_TOOLS: &[&str] = &["Bash(gh pr create:*)", "Bash(gh
 ///
 /// Each variant carries a shell script that writes the event to jig's
 /// event log. Backends map these to their own event naming convention
-/// (e.g. Claude Code calls [`ToolUseEnd`](HookType::ToolUseEnd) `"PostToolUse"`).
+/// via [`AgentBackend::hook_event_name`].
 #[derive(Debug, Clone, Copy)]
 pub enum HookType {
-    ToolUseEnd,
+    PostToolUse,
     Notification,
     Stop,
 }
 
 impl HookType {
-    pub const ALL: &[HookType] = &[Self::ToolUseEnd, Self::Notification, Self::Stop];
+    pub const ALL: &[HookType] = &[Self::PostToolUse, Self::Notification, Self::Stop];
 
     /// The agent-agnostic shell script for this hook type.
     pub fn script(&self) -> &'static str {
         match self {
-            Self::ToolUseEnd => include_str!("scripts/PostToolUse.sh"),
+            Self::PostToolUse => include_str!("scripts/PostToolUse.sh"),
             Self::Notification => include_str!("scripts/Notification.sh"),
             Self::Stop => include_str!("scripts/Stop.sh"),
         }
