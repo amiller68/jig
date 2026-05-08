@@ -127,12 +127,12 @@ pub struct InstallResult {
 ///
 /// Accessor methods return static data (trait consts aren't dyn-compatible).
 ///
-/// Each backend defines its own model enum and validates model strings
-/// via [`validate_model`](Self::validate_model). The [`default_model`](Self::default_model)
-/// method returns the fallback when no model is configured.
+/// Each backend owns its model as typed state. The model is set at
+/// construction time and cannot be changed.
 pub(crate) trait AgentBackend: Send + Sync {
     fn kind(&self) -> AgentKind;
     fn command(&self) -> &str;
+    fn model(&self) -> &str;
     fn project_file(&self) -> &Path;
     fn skills_dir(&self) -> &Path;
     fn skill_file(&self) -> &Path;
@@ -142,15 +142,9 @@ pub(crate) trait AgentBackend: Send + Sync {
     /// Map a jig hook type to this agent's event name, or `None` if unsupported.
     fn hook_event_name(&self, hook: HookType) -> Option<&str>;
 
-    /// Check if a model string is valid for this backend.
-    fn validate_model(&self, model: &str) -> bool;
-
-    /// The default model for this backend.
-    fn default_model(&self) -> &str;
-
-    fn spawn(&self, prompt: &str, model: &str, disallowed_tools: &[String]) -> String;
-    fn resume(&self, prompt: &str, model: &str, disallowed_tools: &[String]) -> String;
-    fn once(&self, prompt: &str, model: &str, allowed_tools: &[&str]) -> Vec<String>;
+    fn spawn(&self, prompt: &str, disallowed_tools: &[String]) -> String;
+    fn resume(&self, prompt: &str, disallowed_tools: &[String]) -> String;
+    fn once(&self, prompt: &str, allowed_tools: &[&str]) -> Vec<String>;
 
     /// Run the agent CLI's version/health command and return the version string.
     fn health(&self) -> crate::error::Result<String>;
@@ -163,14 +157,12 @@ pub(crate) trait AgentBackend: Send + Sync {
 
 /// A handle to an AI coding agent.
 ///
-/// Wraps a backend ([`AgentBackend`]) and a validated model. The model
-/// is validated at construction time by the backend — you cannot create
-/// an Agent with a model the backend doesn't support.
+/// Wraps a backend ([`AgentBackend`]) that owns its model as typed state,
+/// plus a set of disallowed tools.
 ///
 /// See the [module docs](self) for the full contract an agent must satisfy.
 pub struct Agent {
     inner: Box<dyn AgentBackend>,
-    model: String,
     disallowed_tools: Vec<String>,
 }
 
@@ -189,14 +181,14 @@ impl Agent {
     ) -> Option<Self> {
         let k = kind.parse::<AgentKind>().ok()?;
         let inner: Box<dyn AgentBackend> = match k {
-            AgentKind::Claude => Box::new(ClaudeCode),
+            AgentKind::Claude => {
+                let m = match model {
+                    Some(s) => s.parse::<claude::Model>().ok()?,
+                    None => claude::Model::DEFAULT,
+                };
+                Box::new(ClaudeCode::new(m))
+            }
         };
-        let model_owned = model
-            .unwrap_or_else(|| inner.default_model())
-            .to_string();
-        if !inner.validate_model(&model_owned) {
-            return None;
-        }
         let mut disallowed: Vec<String> = DEFAULT_DISALLOWED_TOOLS
             .iter()
             .map(|s| s.to_string())
@@ -208,7 +200,6 @@ impl Agent {
         }
         Some(Self {
             inner,
-            model: model_owned,
             disallowed_tools: disallowed,
         })
     }
@@ -216,9 +207,9 @@ impl Agent {
     pub fn kind(&self) -> AgentKind {
         self.inner.kind()
     }
-    /// The validated model string.
+    /// The model string (e.g. `"sonnet"`, `"opus"`).
     pub fn model(&self) -> &str {
-        &self.model
+        self.inner.model()
     }
     pub fn name(&self) -> String {
         self.kind().to_string()
@@ -254,14 +245,14 @@ impl Agent {
     /// window — it is NOT meant to be parsed or exec'd directly.
     pub fn spawn(&self, prompt: Prompt) -> crate::error::Result<String> {
         let rendered = prompt.render()?;
-        Ok(self.inner.spawn(&rendered, &self.model, &self.disallowed_tools))
+        Ok(self.inner.spawn(&rendered, &self.disallowed_tools))
     }
 
     /// Generate a shell command that continues an existing session.
     // TODO: accept an optional session id for agents that support resumption
     pub fn resume(&self, prompt: Prompt) -> crate::error::Result<String> {
         let rendered = prompt.render()?;
-        Ok(self.inner.resume(&rendered, &self.model, &self.disallowed_tools))
+        Ok(self.inner.resume(&rendered, &self.disallowed_tools))
     }
 
     /// Build argv for a non-persistent one-shot completion.
@@ -270,7 +261,7 @@ impl Agent {
     /// The prompt is included as the final positional argument.
     pub fn once(&self, prompt: Prompt, allowed_tools: &[&str]) -> crate::error::Result<Vec<String>> {
         let rendered = prompt.render()?;
-        Ok(self.inner.once(&rendered, &self.model, allowed_tools))
+        Ok(self.inner.once(&rendered, allowed_tools))
     }
 
     /// Run the agent CLI's health check — validates it is installed and

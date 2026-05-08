@@ -48,11 +48,20 @@ impl FromStr for Model {
     }
 }
 
-pub struct ClaudeCode;
+pub struct ClaudeCode {
+    model: Model,
+}
+
+impl ClaudeCode {
+    pub fn new(model: Model) -> Self {
+        Self { model }
+    }
+}
 
 impl AgentBackend for ClaudeCode {
     fn kind(&self) -> AgentKind { AgentKind::Claude }
     fn command(&self) -> &str { COMMAND }
+    fn model(&self) -> &str { self.model.as_cli_arg() }
     fn project_file(&self) -> &Path { Path::new("CLAUDE.md") }
     fn skills_dir(&self) -> &Path { Path::new(".claude/skills") }
     fn skill_file(&self) -> &Path { Path::new("SKILL.md") }
@@ -67,16 +76,9 @@ impl AgentBackend for ClaudeCode {
         }
     }
 
-    fn validate_model(&self, model: &str) -> bool {
-        model.parse::<Model>().is_ok()
-    }
-
-    fn default_model(&self) -> &str {
-        Model::DEFAULT.as_cli_arg()
-    }
-
-    fn spawn(&self, prompt: &str, model: &str, disallowed_tools: &[String]) -> String {
+    fn spawn(&self, prompt: &str, disallowed_tools: &[String]) -> String {
         let escaped = prompt.replace('\'', "'\\''");
+        let model = self.model.as_cli_arg();
         let mut cmd = format!(
             "{COMMAND} '{escaped}' --dangerously-skip-permissions --model {model}"
         );
@@ -94,8 +96,9 @@ impl AgentBackend for ClaudeCode {
         cmd
     }
 
-    fn resume(&self, prompt: &str, model: &str, disallowed_tools: &[String]) -> String {
+    fn resume(&self, prompt: &str, disallowed_tools: &[String]) -> String {
         let escaped = prompt.replace('\'', "'\\''");
+        let model = self.model.as_cli_arg();
         let mut cmd = format!(
             "{COMMAND} -c '{escaped}' --dangerously-skip-permissions --model {model}"
         );
@@ -113,14 +116,14 @@ impl AgentBackend for ClaudeCode {
         cmd
     }
 
-    fn once(&self, prompt: &str, model: &str, allowed_tools: &[&str]) -> Vec<String> {
+    fn once(&self, prompt: &str, allowed_tools: &[&str]) -> Vec<String> {
         let mut argv = vec![
             COMMAND.to_string(),
             "--print".to_string(),
             "--no-session-persistence".to_string(),
             "--dangerously-skip-permissions".to_string(),
             "--model".to_string(),
-            model.to_string(),
+            self.model.as_cli_arg().to_string(),
         ];
 
         if !allowed_tools.is_empty() {
