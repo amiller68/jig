@@ -11,7 +11,8 @@ use comfy_table::{presets, Attribute, Cell, CellAlignment, Color, ContentArrange
 use crossterm::terminal;
 
 use crate::daemon::TriageEntry;
-use crate::worker::events::{PrHealth, WorkerState};
+use crate::daemon::checks::PrHealth;
+use crate::worker::events::WorkerState;
 use crate::worker::MuxStatus;
 use crate::worker::WorkerStatus;
 
@@ -327,20 +328,13 @@ fn worker_row(w: &WorkerState) -> Vec<Cell> {
         } else {
             ("-".to_string(), Color::DarkGrey)
         }
-    } else if nudge_count >= w.max_nudges {
-        (format!("{}/{}", nudge_count, w.max_nudges), Color::Red)
     } else if let Some(cd) = w.nudge_cooldown_remaining {
         (
-            format!(
-                "{}/{} ({})",
-                nudge_count,
-                w.max_nudges,
-                format_duration_short(cd)
-            ),
+            format!("{} ({})", nudge_count, format_duration_short(cd)),
             Color::Yellow,
         )
     } else {
-        (format!("{}/{}", nudge_count, w.max_nudges), Color::Yellow)
+        (nudge_count.to_string(), Color::Yellow)
     };
 
     let dirty_marker = if w.is_dirty { "*" } else { "" };

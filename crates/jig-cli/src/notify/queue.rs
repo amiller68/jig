@@ -5,7 +5,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use crate::context::notifications_path;
-use jig_core::error::Result;
 
 use super::{Notification, NotificationEvent};
 
@@ -16,7 +15,7 @@ pub struct NotificationQueue {
 
 impl NotificationQueue {
     /// Queue at the global state dir (`~/.config/jig/state/notifications.jsonl`).
-    pub fn global() -> Result<Self> {
+    pub fn global() -> Result<Self, super::NotifyError> {
         Ok(Self {
             path: notifications_path()?,
         })
@@ -28,7 +27,7 @@ impl NotificationQueue {
     }
 
     /// Append a notification to the queue.
-    pub fn emit(&self, event: NotificationEvent) -> Result<()> {
+    pub fn emit(&self, event: NotificationEvent) -> Result<(), super::NotifyError> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -48,13 +47,13 @@ impl NotificationQueue {
     }
 
     /// Read notifications newer than the given timestamp.
-    pub fn read_since(&self, since_ts: i64) -> Result<Vec<Notification>> {
+    pub fn read_since(&self, since_ts: i64) -> Result<Vec<Notification>, super::NotifyError> {
         let all = self.read_all()?;
         Ok(all.into_iter().filter(|n| n.ts > since_ts).collect())
     }
 
     /// Return the last N notifications.
-    pub fn tail(&self, n: usize) -> Result<Vec<Notification>> {
+    pub fn tail(&self, n: usize) -> Result<Vec<Notification>, super::NotifyError> {
         let all = self.read_all()?;
         let skip = all.len().saturating_sub(n);
         Ok(all.into_iter().skip(skip).collect())
@@ -70,7 +69,7 @@ impl NotificationQueue {
         self.path.exists()
     }
 
-    fn read_all(&self) -> Result<Vec<Notification>> {
+    fn read_all(&self) -> Result<Vec<Notification>, super::NotifyError> {
         if !self.path.exists() {
             return Ok(Vec::new());
         }

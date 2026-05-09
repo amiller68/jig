@@ -64,7 +64,7 @@ Invest time in:
 
 - `PATTERNS.md` with coding conventions
 - `CONTRIBUTING.md` with workflow
-- `CLAUDE.md` with quick reference
+- `AGENTS.md` with quick reference
 
 The compounding returns across agent sessions are worth it.
 

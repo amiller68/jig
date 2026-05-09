@@ -6,8 +6,8 @@ use crate::context;
 use crate::worker::Worker;
 use jig_core::agents;
 use jig_core::git::Branch;
-use jig_core::{Error, Prompt};
-use crate::terminal::Terminal;
+use crate::context::ContextError;
+use crate::terminal;
 use jig_core::mux::TmuxMux;
 
 use crate::cli::op::{NoOutput, Op};
@@ -17,8 +17,8 @@ use crate::cli::ui;
 /// Create worktree and launch Claude in tmux
 #[derive(Args, Debug, Clone)]
 pub struct Spawn {
-    /// Worktree name (derived from --issue if omitted)
-    pub name: Option<String>,
+    /// Branch name (derived from --issue if omitted)
+    pub branch: Option<String>,
 
     /// Task context/description
     #[arg(long, short)]
@@ -36,11 +36,17 @@ pub struct Spawn {
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
     #[error(transparent)]
-    Core(#[from] Error),
+    Context(#[from] ContextError),
+    #[error(transparent)]
+    Worker(#[from] crate::worker::WorkerError),
     #[error(transparent)]
     Git(#[from] jig_core::GitError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Linear(#[from] jig_core::issues::providers::linear::client::LinearError),
+    #[error("{0}")]
+    Usage(String),
 }
 
 impl Op for Spawn {
@@ -51,11 +57,11 @@ impl Op for Spawn {
         let cfg = Context::from_cwd()?;
         let repo = cfg.repo()?;
 
-        if Terminal::which("tmux").is_none() {
-            return Err(Error::MissingDependency("tmux".to_string()).into());
+        if terminal::which("tmux").is_none() {
+            return Err(SpawnError::Usage("missing dependency: tmux".into()));
         }
-        if Terminal::which("claude").is_none() {
-            return Err(Error::MissingDependency("claude".to_string()).into());
+        if terminal::which("claude").is_none() {
+            return Err(SpawnError::Usage("missing dependency: claude".into()));
         }
 
         let issue = if let Some(ref issue_ref) = self.issue {
@@ -63,31 +69,28 @@ impl Op for Spawn {
             Some(
                 provider
                     .get(issue_ref)?
-                    .ok_or_else(|| Error::Custom(format!("issue not found: {}", issue_ref)))?,
+                    .ok_or_else(|| SpawnError::Usage(format!("issue not found: {}", issue_ref)))?,
             )
         } else {
             None
         };
 
-        // Resolve the worktree name: explicit > derived from issue > error
-        let name = if let Some(ref explicit) = self.name {
+        let branch_name = if let Some(ref explicit) = self.branch {
             explicit.clone()
         } else if let Some(ref issue) = issue {
             issue.branch().to_string()
         } else {
-            return Err(Error::Custom(
-                "worktree name required: provide a name argument or use --issue".into(),
-            )
-            .into());
+            return Err(SpawnError::Usage(
+                "branch name required: provide a name argument or use --issue".into(),
+            ));
         };
 
-        let worktree_path = repo.worktrees_path.join(&name);
+        let worktree_path = repo.worktrees_path.join(&branch_name);
         if worktree_path.exists() {
-            return Err(Error::Custom(format!(
+            return Err(SpawnError::Usage(format!(
                 "Worktree '{}' already exists — use `jig resume` or `jig attach`",
-                name
-            ))
-            .into());
+                branch_name
+            )));
         }
 
         // Resolve base branch
@@ -126,13 +129,12 @@ impl Op for Spawn {
         .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
         let git_repo = jig_core::Repo::open(&repo.repo_root)?;
-        let branch = Branch::new(&name);
+        let branch = Branch::new(&branch_name);
 
-        let task = Prompt::new(
-            effective_context.as_deref().unwrap_or(
-                "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
-            ),
+        let task_context = effective_context.as_deref().unwrap_or(
+            "No specific task provided. Check CLAUDE.md and the issue tracker for context.",
         );
+        let prompt = crate::prompts::spawn_task_raw(task_context);
 
         let copy_files: Vec<std::path::PathBuf> =
             jig_config.worktree.copy.iter().map(std::path::PathBuf::from).collect();
@@ -153,7 +155,7 @@ impl Op for Spawn {
             &branch,
             &base_branch,
             &agent,
-            task,
+            prompt,
             false,
             issue_ref,
             &copy_files,
@@ -169,13 +171,13 @@ impl Op for Spawn {
 
         ui::success(&format!(
             "Launched Claude in tmux window '{}'",
-            ui::highlight(&name)
+            ui::highlight(&branch)
         ));
 
         eprintln!();
         eprintln!(
             "  Use '{}' to attach",
-            ui::highlight(&format!("jig attach {}", name))
+            ui::highlight(&format!("jig attach {}", branch))
         );
         eprintln!("  Use '{}' to check status", ui::highlight("jig ps"));
 

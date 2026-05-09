@@ -5,7 +5,6 @@ use std::fs;
 use std::path::Path;
 
 use super::{JIG_LOCAL_TOML, JIG_TOML};
-use jig_core::error::Result;
 
 /// JigToml configuration from jig.toml
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -115,7 +114,7 @@ impl Default for TriageConfig {
 }
 
 impl JigToml {
-    pub fn load(repo_root: &Path) -> Result<Option<Self>> {
+    pub fn load(repo_root: &Path) -> Result<Option<Self>, super::ContextError> {
         let toml_path = repo_root.join(JIG_TOML);
         if !toml_path.exists() {
             return Ok(None);
@@ -244,9 +243,6 @@ max_concurrent_workers = 5
         let toml_str = r#"
 [worktree]
 base = "origin/main"
-
-[health]
-max_nudges = 5
 "#;
         let config: JigToml = toml::from_str(toml_str).unwrap();
         assert_eq!(config.worktree.base.as_deref(), Some("origin/main"));

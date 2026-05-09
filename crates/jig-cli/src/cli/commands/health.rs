@@ -3,13 +3,11 @@
 use clap::Args;
 
 use crate::context::JigToml;
-use crate::terminal::Terminal;
+use crate::terminal::check_dep;
 
 use crate::cli::op::{NoOutput, Op};
 use crate::context::Context;
 use crate::cli::ui;
-
-const EXPECTED_SKILLS: &[&str] = &["jig", "check", "draft", "issues", "review"];
 
 /// Show terminal and dependency status
 #[derive(Args, Debug, Clone)]
@@ -20,7 +18,7 @@ pub enum HealthError {
     #[error("Health check failed")]
     CheckFailed,
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
 }
 
 impl Op for Health {
@@ -31,8 +29,12 @@ impl Op for Health {
         let version = env!("CARGO_PKG_VERSION");
         let mut all_passed = true;
 
-        let check_ok = |name: &str| {
-            eprintln!("  {} {}", ui::SYM_OK, name);
+        let check_ok = |name: &str, detail: Option<&str>| {
+            if let Some(d) = detail {
+                eprintln!("  {} {} {}", ui::SYM_OK, name, ui::dim(d));
+            } else {
+                eprintln!("  {} {}", ui::SYM_OK, name);
+            }
         };
         let check_fail = |name: &str, note: Option<&str>| {
             if let Some(n) = note {
@@ -42,27 +44,35 @@ impl Op for Health {
             }
         };
 
-        // Header
         eprintln!("jig v{}", version);
 
-        // Section 1: System
+        // Section 1: System dependencies
         eprintln!();
         ui::header("System");
-        for name in ["git", "tmux", "claude"] {
-            if Terminal::which(name).is_some() {
-                check_ok(name);
-            } else {
-                check_fail(name, None);
-                all_passed = false;
-            }
+
+        let git = check_dep("git", &["--version"]);
+        if git.found {
+            check_ok("git", git.version.as_deref());
+        } else {
+            check_fail("git", None);
+            all_passed = false;
         }
 
-        // Section 2: Repository — use Option to handle non-repo gracefully
+        let tmux = check_dep("tmux", &["-V"]);
+        if tmux.found {
+            check_ok("tmux", tmux.version.as_deref());
+        } else {
+            check_fail("tmux", None);
+            all_passed = false;
+        }
+
+        // Section 2: Repository
         eprintln!();
         let cfg = Context::from_cwd().ok();
         let global = cfg.as_ref().map(|c| &c.config);
 
-        match cfg.as_ref().and_then(|c| c.repo().ok()) {
+        let repo = cfg.as_ref().and_then(|c| c.repo().ok());
+        match repo {
             Some(repo) => {
                 let repo_name = repo
                     .repo_root
@@ -71,22 +81,19 @@ impl Op for Health {
                     .unwrap_or_else(|| "unknown".to_string());
                 ui::header(&format!("Repository: {}", repo_name));
 
-                // jig.toml
                 if JigToml::exists(&repo.repo_root) {
-                    check_ok("jig.toml");
+                    check_ok("jig.toml", None);
                 } else {
                     check_fail("jig.toml", Some("(not found)"));
                     all_passed = false;
                 }
 
-                // Base branch
                 let global_ref = global.cloned().unwrap_or_default();
                 let branch = repo.base_branch(&global_ref);
                 eprintln!("  {} Base branch: {}", ui::SYM_OK, branch);
 
-                // Jig worktrees directory
                 if repo.worktrees_path.is_dir() {
-                    check_ok(&format!("{} directory", crate::context::JIG_DIR));
+                    check_ok(&format!("{} directory", crate::context::JIG_DIR), None);
                 } else {
                     check_fail(
                         &format!("{} directory", crate::context::JIG_DIR),
@@ -95,40 +102,89 @@ impl Op for Health {
                     all_passed = false;
                 }
 
-                // Section 3: Agent scaffolding
+                // Section 3: Agent — init from config, use its health + scaffolding
                 eprintln!();
-                ui::header("Agent: claude-code");
+                let jig_config = JigToml::load(&repo.repo_root)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let agent = jig_core::agents::Agent::from_config(
+                    &jig_config.agent.agent_type,
+                    Some(&jig_config.agent.model),
+                    &jig_config.agent.disallowed_tools,
+                );
 
-                // CLAUDE.md
-                if repo.repo_root.join("CLAUDE.md").is_file() {
-                    check_ok("CLAUDE.md");
-                } else {
-                    check_fail("CLAUDE.md", Some("(not found)"));
-                    all_passed = false;
-                }
+                match agent {
+                    Some(agent) => {
+                        ui::header(&format!("Agent: {}", agent.name()));
 
-                // .claude/settings.json
-                if repo
-                    .repo_root
-                    .join(".claude")
-                    .join("settings.json")
-                    .is_file()
-                {
-                    check_ok(".claude/settings.json");
-                } else {
-                    check_fail(".claude/settings.json", Some("(not found)"));
-                    all_passed = false;
-                }
+                        match agent.health() {
+                            Ok(ver) => check_ok(agent.command(), Some(&ver)),
+                            Err(_) => {
+                                check_fail(agent.command(), Some("(not found or broken)"));
+                                all_passed = false;
+                            }
+                        }
 
-                // Skills
-                eprintln!("  Skills (.claude/skills/):");
-                let skills_dir = repo.repo_root.join(".claude").join("skills");
-                for skill in EXPECTED_SKILLS {
-                    let skill_path = skills_dir.join(skill).join("SKILL.md");
-                    if skill_path.is_file() {
-                        eprintln!("    {} {}", ui::SYM_OK, skill);
-                    } else {
-                        eprintln!("    {} {}", ui::SYM_FAIL, skill);
+                        let project_file = agent.project_file();
+                        if repo.repo_root.join(project_file).is_file() {
+                            check_ok(&project_file.display().to_string(), None);
+                        } else {
+                            check_fail(
+                                &project_file.display().to_string(),
+                                Some("(not found)"),
+                            );
+                            all_passed = false;
+                        }
+
+                        if let Some(settings) = agent.settings_file() {
+                            if repo.repo_root.join(settings).is_file() {
+                                check_ok(&settings.display().to_string(), None);
+                            } else {
+                                check_fail(
+                                    &settings.display().to_string(),
+                                    Some("(not found)"),
+                                );
+                                all_passed = false;
+                            }
+                        }
+
+                        let skills_dir = repo.repo_root.join(agent.skills_dir());
+                        if skills_dir.is_dir() {
+                            eprintln!("  Skills ({}):", agent.skills_dir().display());
+                            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                                let mut found_any = false;
+                                let mut skill_names: Vec<String> = entries
+                                    .filter_map(|e| e.ok())
+                                    .filter(|e| e.path().is_dir())
+                                    .filter(|e| {
+                                        e.path().join(agent.skill_file()).is_file()
+                                    })
+                                    .map(|e| {
+                                        e.file_name().to_string_lossy().to_string()
+                                    })
+                                    .collect();
+                                skill_names.sort();
+                                for name in &skill_names {
+                                    eprintln!("    {} {}", ui::SYM_OK, name);
+                                    found_any = true;
+                                }
+                                if !found_any {
+                                    eprintln!("    {} (none found)", ui::SYM_FAIL);
+                                    all_passed = false;
+                                }
+                            }
+                        } else {
+                            check_fail(
+                                &format!("{} directory", agent.skills_dir().display()),
+                                Some("(not found)"),
+                            );
+                            all_passed = false;
+                        }
+                    }
+                    None => {
+                        ui::header("Agent");
+                        check_fail("agent", Some("(unknown agent type in config)"));
                         all_passed = false;
                     }
                 }
@@ -138,13 +194,12 @@ impl Op for Health {
                 eprintln!("  {} Not in a git repository", ui::SYM_FAIL);
 
                 eprintln!();
-                ui::header("Agent: claude-code");
+                ui::header("Agent");
                 eprintln!("  {} Skipped (no repository)", ui::SYM_FAIL);
                 all_passed = false;
             }
         }
 
-        // Footer
         eprintln!();
         if all_passed {
             eprintln!("All checks passed.");

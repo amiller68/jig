@@ -1,9 +1,7 @@
 ---
 description: Push current branch and create a draft PR. Use when ready to share work for review or collaborate on a branch.
 allowed-tools:
-  - Bash(git:*)
-  - Bash(gh pr:*)
-  - Bash(gh repo:*)
+  - Bash(jig:*)
   - Read
   - Glob
   - Grep
@@ -47,7 +45,7 @@ Create a draft pull request for the current branch.
 
 6. Create a draft PR:
    ```
-   gh pr create --draft --base <base>
+   jig pr create --draft --base <base>
    ```
    - Title: descriptive of what the branch accomplishes
    - Body: summarize ALL changes based on the commits
@@ -57,5 +55,4 @@ Create a draft pull request for the current branch.
 ## Important
 
 - **Commit ALL uncommitted changes** before pushing — don't leave anything behind
-- Do NOT use `--no-verify` when pushing — let git hooks run
 - If the linter/formatter finds issues, fix them before committing

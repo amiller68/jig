@@ -5,49 +5,35 @@ use std::path::PathBuf;
 
 use crate::context::RepoConfig;
 use crate::context::RepoRegistry;
-use jig_core::git::Repo;
-use jig_core::Error;
-
 use crate::cli::op::Op;
-use crate::cli::ui;
 
 /// Open/cd into a worktree
 #[derive(Args, Debug, Clone)]
 pub struct Open {
-    /// Worktree name (or --all to open all in tabs)
-    pub name: Option<String>,
-
-    /// Open all worktrees in new tabs
-    #[arg(long)]
-    pub all: bool,
+    /// Branch name
+    pub branch: Option<String>,
 }
 
-/// Output containing optional cd command
+/// Output containing cd command
 #[derive(Debug)]
-pub enum OpenOutput {
-    /// No output (when opening tabs)
-    None,
-    /// cd command to stdout
-    Cd(PathBuf),
-}
+pub struct OpenOutput(PathBuf);
 
 impl std::fmt::Display for OpenOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OpenOutput::None => Ok(()),
-            OpenOutput::Cd(path) => write!(f, "cd '{}'", path.display()),
-        }
+        write!(f, "cd '{}'", self.0.display())
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
     #[error(transparent)]
-    Core(#[from] Error),
+    Context(#[from] crate::context::ContextError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Git(#[from] jig_core::GitError),
+    #[error("{0}")]
+    Usage(String),
 }
 
 impl Op for Open {
@@ -55,10 +41,11 @@ impl Op for Open {
     type Output = OpenOutput;
 
     fn run(&self) -> Result<Self::Output, Self::Error> {
-        match RepoConfig::from_cwd() {
-            Ok(cfg) => self.open_in_cfg(&cfg),
+        let name = self.branch.as_deref().ok_or(OpenError::Usage("branch is required".into()))?;
+
+        let cfg = match RepoConfig::from_cwd() {
+            Ok(cfg) => cfg,
             Err(_) => {
-                // Auto-detect: outside a git repo, fall back to global discovery
                 let registry = RepoRegistry::load().unwrap_or_default();
                 let configs: Vec<_> = registry
                     .repos()
@@ -66,62 +53,19 @@ impl Op for Open {
                     .filter(|e| e.path.exists())
                     .filter_map(|e| RepoConfig::from_path(&e.path).ok())
                     .collect();
-                let cfg = if let Some(name) = self.name.as_deref() {
-                    configs
-                        .iter()
-                        .find(|c| c.worktrees_path.join(name).exists())
-                        .ok_or(Error::WorktreeNotFound(name.to_string()))?
-                } else {
-                    configs.first().ok_or(Error::NotInGitRepo)?
-                };
-                self.open_in_cfg(cfg)
+                configs
+                    .into_iter()
+                    .find(|c| c.worktrees_path.join(name).exists())
+                    .ok_or(OpenError::Usage(format!("worktree '{}' not found", name)))?
             }
+        };
+
+        let worktree_path = cfg.worktrees_path.join(name);
+        if !worktree_path.exists() {
+            return Err(OpenError::Usage(format!("worktree '{}' not found", name)));
         }
-    }
-}
 
-impl Open {
-    fn open_in_cfg(&self, cfg: &RepoConfig) -> Result<OpenOutput, OpenError> {
-        if self.all {
-            // Open all worktrees in new tabs
-            let git_repo = Repo::open(&cfg.repo_root)?;
-            let worktrees = git_repo.list_worktrees()?;
-
-            if worktrees.is_empty() {
-                eprintln!("No worktrees to open");
-                return Ok(OpenOutput::None);
-            }
-
-            for wt in worktrees {
-                let terminal = crate::terminal::Terminal::detect();
-                let opened = match terminal.open_tab(&wt.path()) {
-                    Ok(()) => true,
-                    Err(crate::terminal::TerminalError::NotSupported { .. }) => false,
-                    Err(crate::terminal::TerminalError::MissingDependency(_)) => false,
-                    Err(crate::terminal::TerminalError::Io(e)) => return Err(e.into()),
-                };
-                if opened {
-                    ui::success(&format!(
-                        "Opened '{}' in new tab",
-                        ui::highlight(&wt.branch_name())
-                    ));
-                }
-            }
-
-            // Don't output cd command - tabs are opened directly
-            Ok(OpenOutput::None)
-        } else {
-            // Open specific worktree
-            let name = self.name.as_deref().ok_or(Error::NameRequired)?;
-            let worktree_path = cfg.worktrees_path.join(name);
-
-            if !worktree_path.exists() {
-                return Err(Error::WorktreeNotFound(name.to_string()).into());
-            }
-
-            // Output cd command for shell wrapper to eval
-            let canonical = worktree_path.canonicalize()?;
-            Ok(OpenOutput::Cd(canonical))
-        }
+        let canonical = worktree_path.canonicalize()?;
+        Ok(OpenOutput(canonical))
     }
 }

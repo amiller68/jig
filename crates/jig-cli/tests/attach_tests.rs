@@ -9,7 +9,7 @@ use tempfile::TempDir;
 // ============================================================================
 
 #[test]
-fn test_attach_outside_repo_requires_name() {
+fn test_attach_outside_repo_requires_branch() {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let config_dir = TempDir::new().expect("Failed to create config dir");
 
@@ -19,7 +19,7 @@ fn test_attach_outside_repo_requires_name() {
     cmd.args(["attach"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("name is required"));
+        .stderr(predicate::str::contains("branch is required"));
 }
 
 #[test]

@@ -6,14 +6,26 @@
 //! 3. Trigger background sync + spawn + triage if poll interval elapsed
 
 pub mod actors;
+pub mod checks;
 pub mod events;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::context::{Config, Context, JigToml, RepoEntry, RepoRegistry};
-use jig_core::error::Result;
+use crate::context::{Config, Context, ContextError, JigToml, RepoEntry, RepoRegistry};
+
+#[derive(Debug, thiserror::Error)]
+pub enum DaemonError {
+    #[error(transparent)]
+    Context(#[from] ContextError),
+    #[error(transparent)]
+    Worker(#[from] crate::worker::WorkerError),
+    #[error(transparent)]
+    Notify(#[from] crate::notify::NotifyError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 /// Shared context built once per daemon tick, passed to all actors.
 #[derive(Clone)]
@@ -32,8 +44,8 @@ use actors::sync::SyncActor;
 use actors::triage::TriageActor;
 use actors::ActorHandle;
 
-pub use crate::worker::events::{PrHealth, WorkerState};
-pub use crate::worker::checks::PrChecks;
+pub use checks::{PrChecks, PrHealth};
+pub use crate::worker::events::WorkerState;
 pub use actors::triage::TriageEntry;
 
 /// The daemon — owns actors and drives the tick loop.
@@ -51,7 +63,7 @@ pub struct Daemon {
 
 impl Daemon {
     /// Create and start the daemon from a Config.
-    pub fn start(cfg: Context) -> Result<Self> {
+    pub fn start(cfg: Context) -> Result<Self, DaemonError> {
         startup_recovery(&cfg.config, &cfg.registry);
         let _notifier = make_notifier(&cfg.config)?;
 
@@ -118,7 +130,7 @@ impl Daemon {
     }
 
     /// Execute a single tick of the daemon.
-    pub fn tick(&mut self) -> Result<()> {
+    pub fn tick(&mut self) -> Result<(), DaemonError> {
         let ctx = TickContext {
             config: Arc::new(self.config.clone()),
             repos: Arc::new(self.registry.repos().to_vec()),
@@ -151,7 +163,7 @@ impl Daemon {
 }
 
 /// Try to resume a worker whose mux window is dead.
-fn try_resume_worker(repo_root: &std::path::Path, worker_name: &str, mux: &dyn jig_core::mux::Mux) -> Result<bool> {
+fn try_resume_worker(repo_root: &std::path::Path, worker_name: &str, mux: &dyn jig_core::mux::Mux) -> Result<bool, DaemonError> {
     let worker = Worker::from_branch(repo_root, worker_name.into());
     if worker.has_mux_window(mux) {
         return Ok(false);
@@ -164,12 +176,15 @@ fn try_resume_worker(repo_root: &std::path::Path, worker_name: &str, mux: &dyn j
         &jig_config.agent.disallowed_tools,
     )
     .unwrap_or_else(|| jig_core::agents::Agent::from_config("claude", None, &[]).unwrap());
-    Worker::resume(&wt, &agent, "You were interrupted. Resume your previous task.", mux)?;
+    let prompt = crate::prompts::resume_task(
+        "You were interrupted. Resume your previous task.",
+    );
+    Worker::resume(&wt, &agent, prompt, mux)?;
     Ok(true)
 }
 
 /// Build a Notifier from global config.
-fn make_notifier(global_config: &Config) -> Result<crate::notify::Notifier> {
+fn make_notifier(global_config: &Config) -> Result<crate::notify::Notifier, DaemonError> {
     let queue = crate::notify::NotificationQueue::global()?;
     Ok(crate::notify::Notifier::new(
         global_config.notify.clone(),

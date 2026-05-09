@@ -5,8 +5,6 @@
 
 use std::path::Path;
 
-use jig_core::error::Result;
-
 use super::git::{generate_hook, is_jig_managed, MANAGED_HOOKS};
 use super::registry::HookRegistry;
 
@@ -45,7 +43,7 @@ pub fn should_install_hook(
     registry: &HookRegistry,
     hook_name: &str,
     force: bool,
-) -> Result<InstallDecision> {
+) -> Result<InstallDecision, super::HookError> {
     if force {
         return Ok(InstallDecision::Reinstall);
     }
@@ -66,7 +64,7 @@ pub fn should_install_hook(
 /// Install jig git hooks into `<repo_path>/.git/hooks/`.
 ///
 /// Registry is saved at `<repo_path>/.jig/hooks/hooks.json`.
-pub fn init_hooks(repo_path: &Path, force: bool) -> Result<InitResult> {
+pub fn init_hooks(repo_path: &Path, force: bool) -> Result<InitResult, super::HookError> {
     let hooks_dir = repo_path.join(".git").join("hooks");
     std::fs::create_dir_all(&hooks_dir)?;
 
@@ -120,7 +118,7 @@ pub fn init_hooks(repo_path: &Path, force: bool) -> Result<InitResult> {
     Ok(InitResult { results })
 }
 
-fn make_executable(_path: &Path) -> Result<()> {
+fn make_executable(_path: &Path) -> Result<(), super::HookError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

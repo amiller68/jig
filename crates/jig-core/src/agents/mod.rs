@@ -19,7 +19,7 @@
 //! 3. **Idempotent installation** ([`Agent::install`]). Sets up everything
 //!    the agent needs to work with jig in a given repo:
 //!    - Event hooks that feed agent activity into jig's event log.
-//!    - A project file (e.g. `CLAUDE.md`) with repo-level instructions.
+//!    - A project file (`AGENTS.md`) with repo-level instructions.
 //!    - Skills/commands the agent can invoke (e.g. `.claude/skills/`).
 //!    - Agent-specific settings (e.g. `.claude/settings.json`).
 //!
@@ -55,6 +55,16 @@ use serde::{Deserialize, Serialize};
 pub use claude::ClaudeCode;
 
 use crate::prompt::Prompt;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AgentError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Template(#[from] handlebars::RenderError),
+    #[error("{0}")]
+    Other(String),
+}
 
 /// Tools that are always blocked for spawned workers.
 pub const DEFAULT_DISALLOWED_TOOLS: &[&str] = &["Bash(gh pr create:*)", "Bash(gh pr merge:*)"];
@@ -147,12 +157,12 @@ pub(crate) trait AgentBackend: Send + Sync {
     fn once(&self, prompt: &str, allowed_tools: &[&str]) -> Vec<String>;
 
     /// Run the agent CLI's version/health command and return the version string.
-    fn health(&self) -> crate::error::Result<String>;
+    fn health(&self) -> Result<String, AgentError>;
 
     /// Install hooks into the agent's configuration. Receives resolved
     /// `(event_name, script_content)` pairs — the backend just needs to
     /// write them according to its own conventions.
-    fn install(&self, hooks: &[(&str, &str)]) -> crate::error::Result<InstallResult>;
+    fn install(&self, hooks: &[(&str, &str)]) -> Result<InstallResult, AgentError>;
 }
 
 /// A handle to an AI coding agent.
@@ -243,14 +253,14 @@ impl Agent {
     ///
     /// The returned string is meant to be sent as keystrokes to a mux
     /// window — it is NOT meant to be parsed or exec'd directly.
-    pub fn spawn(&self, prompt: Prompt) -> crate::error::Result<String> {
+    pub fn spawn(&self, prompt: Prompt) -> Result<String, AgentError> {
         let rendered = prompt.render()?;
         Ok(self.inner.spawn(&rendered, &self.disallowed_tools))
     }
 
     /// Generate a shell command that continues an existing session.
     // TODO: accept an optional session id for agents that support resumption
-    pub fn resume(&self, prompt: Prompt) -> crate::error::Result<String> {
+    pub fn resume(&self, prompt: Prompt) -> Result<String, AgentError> {
         let rendered = prompt.render()?;
         Ok(self.inner.resume(&rendered, &self.disallowed_tools))
     }
@@ -259,14 +269,14 @@ impl Agent {
     ///
     /// Returns a `Vec<String>` suitable for `std::process::Command`.
     /// The prompt is included as the final positional argument.
-    pub fn once(&self, prompt: Prompt, allowed_tools: &[&str]) -> crate::error::Result<Vec<String>> {
+    pub fn once(&self, prompt: Prompt, allowed_tools: &[&str]) -> Result<Vec<String>, AgentError> {
         let rendered = prompt.render()?;
         Ok(self.inner.once(&rendered, allowed_tools))
     }
 
     /// Run the agent CLI's health check — validates it is installed and
     /// returns the version string.
-    pub fn health(&self) -> crate::error::Result<String> {
+    pub fn health(&self) -> Result<String, AgentError> {
         self.inner.health()
     }
 
@@ -276,7 +286,7 @@ impl Agent {
     /// then hands the `(event_name, script)` pairs to the backend for
     /// installation according to the agent's own config format.
     /// Makes any returned executable paths executable.
-    pub fn install(&self) -> crate::error::Result<InstallResult> {
+    pub fn install(&self) -> Result<InstallResult, AgentError> {
         let hooks: Vec<(&str, &str)> = HookType::ALL
             .iter()
             .filter_map(|ht| self.inner.hook_event_name(*ht).map(|name| (name, ht.script())))
@@ -290,7 +300,7 @@ impl Agent {
 }
 
 #[cfg(unix)]
-fn make_executable(path: &Path) -> crate::error::Result<()> {
+fn make_executable(path: &Path) -> Result<(), AgentError> {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = std::fs::metadata(path)?.permissions();
     perms.set_mode(perms.mode() | 0o111);
@@ -299,6 +309,6 @@ fn make_executable(path: &Path) -> crate::error::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn make_executable(_path: &Path) -> crate::error::Result<()> {
+fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }

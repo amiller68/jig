@@ -21,8 +21,7 @@ Git worktree manager for orchestrating Agentic Coding Assistants in parallel. Sc
 - **Configurable base branch** - Set per-repo or global default base branch
 - **On-create hooks** - Run setup commands automatically after worktree creation
 - **Shell integration** - Tab completion for commands and worktree names
-- **Nested paths** - Supports branch names like `feature/auth/login`
-- **Multi-agent workflow** - Spawn parallel Claude Code sessions with tmux integration
+- **Multi-agent workflow** - Spawn parallel agent sessions with tmux integration
 - **Event-driven orchestration** - JSONL event logs track worker lifecycle, derive state, and trigger actions
 - **Daemon loop** - Background orchestrator monitors workers, nudges idle/stuck sessions, and sends notifications
 - **GitHub integration** - Detect CI failures, merge conflicts, and review comments via `gh` CLI
@@ -46,61 +45,62 @@ eval "$(jig shell-init zsh)"
 
 ## Commands
 
+### Worktrees
+
 | Command | Description |
 |---------|-------------|
-| `jig create <name> [branch]` | Create a worktree with a new branch |
-| `jig create <name> -o` | Create and cd into the worktree |
-| `jig create <name> --no-hooks` | Create without running on-create hook |
-| `jig open <name>` | cd into an existing worktree |
-| `jig open --all` | Open all worktrees in new terminal tabs |
+| `jig create <branch>` | Create a worktree with a new branch |
+| `jig create <branch> -o` | Create and cd into the worktree |
+| `jig open <branch>` | cd into an existing worktree |
 | `jig list` | List worktrees in `.jig/` |
 | `jig list --all` | List all git worktrees |
 | `jig remove <pattern>` | Remove worktree(s) matching pattern (supports glob) |
 | `jig exit [--force]` | Exit current worktree (removes it, returns to base) |
-| `jig health` | Show terminal detection and dependency status |
+| `jig home` | Navigate to base repository root |
+
+### Sessions
+
+| Command | Description |
+|---------|-------------|
+| `jig spawn <branch> [options]` | Create worktree + launch agent in tmux |
+| `jig spawn --context <text>` | Provide task context for the agent |
+| `jig spawn --issue ENG-123` | Link a Linear issue to the worker |
+| `jig spawn --auto` | Auto-start the agent with full prompt |
+| `jig ps` | Show status of spawned sessions |
+| `jig ps -w` | Live dashboard (updates every 2s) |
+| `jig ps -g` | Global mode — workers across all repos |
+| `jig attach [branch]` | Attach to tmux session |
+| `jig kill <branch>` | Kill a running tmux window |
+| `jig kill --all` | Kill all workers |
+| `jig nuke` | Nuke all workers and state (keeps config) |
+| `jig pr` | Push current branch and create a draft PR |
+| `jig pr comments` | Show review feedback on the current PR |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `jig init <agent>` | Initialize `AGENTS.md`, docs/, skills, and `jig.toml` |
 | `jig config` | Show config for current repo |
 | `jig config base <branch>` | Set base branch for current repo |
-| `jig config base --global <branch>` | Set global default base branch |
 | `jig config on-create <cmd>` | Set on-create hook for current repo |
-| `jig config on-create --unset` | Remove on-create hook |
-| `jig config --list` | List all configuration |
-| `jig spawn <name> [options]` | Create worktree + launch Claude in tmux |
-| `jig spawn --context <text>` | Provide task context for Claude |
-| `jig spawn --auto` | Auto-start Claude with full prompt |
-| `jig ps` | Show status of spawned sessions |
-| `jig attach [name]` | Attach to tmux session (optionally to specific window) |
-| `jig review <name>` | Show diff for parent review |
-| `jig merge <name>` | Merge reviewed worktree into current branch |
-| `jig kill <name>` | Kill a running tmux window |
-| `jig kill --all` | Kill all workers |
-| `jig nuke` | Nuke all workers, worktrees, and state (keeps config) |
-| `jig init [--force] [--backup]` | Initialize jig.toml, docs/, issues/, and .claude/ |
-| `jig update` | Show update instructions |
+| `jig issues` | Browse and manage Linear issues |
+| `jig health` | Show dependency and agent status |
+| `jig hooks` | Manage git/agent hooks |
+| `jig shell-init <shell>` | Print shell integration script |
+| `jig shell-setup` | Auto-configure shell integration |
+| `jig update` | Update jig to latest version |
 | `jig version` | Show version |
 | `jig which` | Show path to jig executable |
-| `jig daemon [--interval N] [--once]` | Run the orchestrator loop |
-| `jig ps --watch [N]` | Live dashboard (refresh every N seconds) |
-| `jig hooks [--install\|--uninstall]` | Manage git/Claude hooks |
-| `jig repos` | List tracked repositories |
-| `jig health` | Show worker health and dependency status |
 
 ## Quick Start
 
 ```bash
 cd ~/projects/my-app
-jig create feature-auth -o    # Creates worktree, cd's into it
-claude                        # Start Claude Code in isolation
+jig init claude                        # Bootstrap AGENTS.md, docs/, skills
+jig spawn feature-auth --auto          # Create worktree + launch agent
+jig ps -w                              # Watch the dashboard
 ```
-
-Open a second terminal and do the same — both sessions work independently on their own branches.
-
-## Guides
-
-- [Working with Worktrees](docs/usage/worktrees.md) — Create, open, remove, glob patterns, terminal tabs
-- [Configuration and Hooks](docs/usage/configuration.md) — Base branch, config file format, on-create hooks
-- [Setting Up a Repo with `jig init`](docs/usage/init.md) — Bootstrap docs, skills, and permissions
-- [Multi-Agent Orchestration](docs/usage/orchestration.md) — Spawn parallel Claude workers with tmux
-- [Shell Integration](docs/usage/shell-integration.md) — Tab completion, how `-o` works, `jig which`
 
 ## Development
 
@@ -146,7 +146,7 @@ rm -rf ~/.config/jig
 
 **For `jig spawn` (optional):**
 - `tmux` - Terminal multiplexer
-- `claude` CLI
+- An AI coding assistant CLI (e.g. `claude`)
 
 ## License
 

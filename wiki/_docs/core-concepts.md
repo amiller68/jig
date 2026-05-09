@@ -46,7 +46,7 @@ docs/
 └── CONTRIBUTING.md    # How to contribute
 ```
 
-Plus a `CLAUDE.md` (or agent-specific config) at the repo root with:
+Plus an `AGENTS.md` at the repo root with:
 
 - Quick reference commands
 - Workflow instructions
@@ -56,45 +56,7 @@ Plus a `CLAUDE.md` (or agent-specific config) at the repo root with:
 
 ## Issues
 
-Well-scoped tickets are the input to agent work. jig supports file-based issue tracking in `issues/` and can also pull issues directly from [Linear](/articles/linear-integration/):
-
-```text
-issues/
-├── README.md
-├── _templates/
-├── features/
-│   └── jwt-auth.md
-├── bugs/
-│   └── fix-pagination.md
-└── chores/
-    └── add-tests.md
-```
-
-Each issue uses markdown-bold metadata:
-
-```markdown
-# Implement JWT authentication
-
-**Status:** Planned
-**Priority:** High
-**Category:** features
-
-## Objective
-
-Add JWT-based authentication to the API.
-
-## Acceptance Criteria
-
-- [ ] POST /auth/login returns JWT
-- [ ] Middleware validates tokens
-- [ ] Tests cover happy path and errors
-```
-
-**Status values:**
-- `Planned` — Ready to be picked up
-- `In Progress` — Being worked on
-- `Complete` — Done
-- `Blocked` — Waiting on something
+Well-scoped tickets are the input to agent work. jig uses [Linear](/docs/issues/) as its issue provider — commands like `jig issues` and `jig spawn --issue ENG-123` talk directly to the Linear API.
 
 The discipline of writing detailed issue descriptions pays dividends. Agents work better with clear scope, explicit acceptance criteria, and relevant context.
 
@@ -113,7 +75,7 @@ cargo clippy             # Linter happy?
 cargo fmt --check        # Formatted correctly?
 ```
 
-Put these in your `CLAUDE.md` or success criteria docs so agents know what "done" means.
+Put these in your `AGENTS.md` or success criteria docs so agents know what "done" means.
 
 ### Patterns
 
@@ -128,20 +90,14 @@ Agents follow patterns they can find. If it's not documented, they'll invent som
 
 ### Review
 
-You're the final gate. When an agent marks work done:
-
-```bash
-jig review feature-x    # See the diff
-```
-
-Check for:
+You're the final gate. When an agent opens a PR, review it on GitHub. Check for:
 - Correct implementation
 - Adherence to patterns
 - No hallucinated requirements
 - Test coverage
 - No security issues
 
-Then merge or send back with feedback.
+Leave review comments on draft PRs — the daemon will nudge the agent to address them. Merge via GitHub when satisfied.
 
 ## Skills
 
@@ -149,10 +105,10 @@ jig ships with safe defaults for getting a project up and running, but is extens
 
 ### What are skills?
 
-Skills are prompt templates that agents can invoke. They live in `.claude/skills/` and encode workflows, integrations, and conventions specific to your team.
+Skills are prompt templates that agents can invoke. They live in your agent's config directory and encode workflows, integrations, and conventions specific to your team.
 
 ```text
-.claude/skills/
+<agent-config>/skills/
 ├── issues/      # How to work with issues
 ├── review/      # Code review workflow
 ├── draft/       # PR drafting conventions
@@ -162,23 +118,7 @@ Skills are prompt templates that agents can invoke. They live in `.claude/skills
 
 ### Extending jig
 
-Don't want file-based issue tracking? Rewrite the issues skill to integrate with an MCP server of your choice:
-
-```markdown
-# issues skill (Linear integration)
-
-Use the Linear MCP server to find and manage issues.
-
-## Finding issues
-- Use `mcp__linear__list_issues` to find ready issues
-- Filter by assignee "me" for your queue
-
-## Updating status
-- Move to "In Progress" when starting
-- Move to "In Review" when done
-```
-
-The same applies to any workflow. jig's defaults are starting points—adapt them to how your team works.
+Skills are starting points — adapt them to how your team works. You can customize existing skills or add entirely new ones for your workflow.
 
 ### Built-in skills
 
@@ -190,6 +130,5 @@ jig scaffolds these skills by default:
 | `review` | Review branch changes against conventions |
 | `draft` | Create PRs with consistent formatting |
 | `check` | Run build, test, lint, format checks |
-| `spawn` | Spawn parallel workers for tasks |
 
 Each can be customized or replaced entirely.

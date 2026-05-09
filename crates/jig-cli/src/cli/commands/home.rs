@@ -22,7 +22,7 @@ impl std::fmt::Display for HomeOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum HomeError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
 }
 
 impl Op for Home {

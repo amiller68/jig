@@ -6,10 +6,10 @@
 pub mod client;
 mod provider;
 
-use crate::error::Result;
+
 
 use crate::issues::issue::{Issue, IssueFilter, IssueStatus};
-use client::LinearClient;
+use client::{LinearClient, LinearError};
 
 /// Issue provider backed by the Linear API.
 pub struct LinearProvider {
@@ -34,7 +34,7 @@ impl LinearProvider {
         projects: Vec<String>,
         assignee: Option<String>,
         labels: Vec<String>,
-    ) -> Result<Self> {
+    ) -> Result<Self, LinearError> {
         let client = LinearClient::new(api_key);
 
         let assignee = match assignee.as_deref() {
@@ -57,7 +57,7 @@ impl LinearProvider {
 
 impl LinearProvider {
     /// Update the workflow state of a Linear issue.
-    pub fn update_status(&self, identifier: &str, new_status: &IssueStatus) -> Result<()> {
+    pub fn update_status(&self, identifier: &str, new_status: &IssueStatus) -> Result<(), LinearError> {
         Ok(self
             .client
             .update_issue_status(identifier, &self.team, new_status)?)
@@ -80,7 +80,7 @@ impl LinearProvider {
         assignee: Option<&str>,
         parent: Option<&str>,
         remove_parent: bool,
-    ) -> Result<()> {
+    ) -> Result<(), LinearError> {
         let resolved_assignee = match assignee {
             Some("me") => Some(self.client.viewer_id()?),
             other => other.map(|s| s.to_string()),
@@ -103,14 +103,14 @@ impl LinearProvider {
     /// Add a "blocked by" dependency relation.
     ///
     /// `identifier` is blocked by `blocker_identifier`.
-    pub fn add_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<()> {
+    pub fn add_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<(), LinearError> {
         Ok(self
             .client
             .create_blocked_by_relation(identifier, blocker_identifier)?)
     }
 
     /// Remove a "blocked by" dependency relation.
-    pub fn remove_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<()> {
+    pub fn remove_blocked_by(&self, identifier: &str, blocker_identifier: &str) -> Result<(), LinearError> {
         Ok(self
             .client
             .remove_blocked_by_relation(identifier, blocker_identifier)?)
@@ -130,7 +130,7 @@ impl LinearProvider {
         category: Option<&str>,
         parent: Option<&str>,
         initial_status: Option<&IssueStatus>,
-    ) -> Result<String> {
+    ) -> Result<String, LinearError> {
         // Merge labels: explicit labels take precedence, fall back to config
         let effective_labels = if labels.is_empty() {
             &self.labels
@@ -156,7 +156,7 @@ impl LinearProvider {
 }
 
 impl LinearProvider {
-    pub(crate) fn list_issues(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
+    pub(crate) fn list_issues(&self, filter: &IssueFilter) -> Result<Vec<Issue>, LinearError> {
         let mut issues = self.client.list_issues(
             &self.team,
             &self.projects,
@@ -188,7 +188,7 @@ impl LinearProvider {
         Ok(issues)
     }
 
-    pub(crate) fn get_issue(&self, id: &str) -> Result<Option<Issue>> {
+    pub(crate) fn get_issue(&self, id: &str) -> Result<Option<Issue>, LinearError> {
         Ok(self.client.get_issue(id)?)
     }
 }

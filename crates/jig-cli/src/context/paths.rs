@@ -2,15 +2,15 @@
 
 use std::path::PathBuf;
 
-use jig_core::error::{Error, Result};
-
 /// `~/.config/jig/`
-pub fn global_config_dir() -> Result<PathBuf> {
+pub fn global_config_dir() -> Result<PathBuf, std::io::Error> {
     let config_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(xdg).join("jig")
     } else {
         dirs::home_dir()
-            .ok_or_else(|| Error::Custom("Could not find home directory".to_string()))?
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "could not find home directory")
+            })?
             .join(".config")
             .join("jig")
     };
@@ -19,12 +19,12 @@ pub fn global_config_dir() -> Result<PathBuf> {
 }
 
 /// `~/.config/jig/config.toml`
-pub fn global_config_path() -> Result<PathBuf> {
+pub fn global_config_path() -> Result<PathBuf, std::io::Error> {
     Ok(global_config_dir()?.join("config.toml"))
 }
 
 /// `~/.config/jig/hooks/`
-pub fn global_hooks_dir() -> Result<PathBuf> {
+pub fn global_hooks_dir() -> Result<PathBuf, std::io::Error> {
     Ok(global_config_dir()?.join("hooks"))
 }
 
@@ -37,53 +37,53 @@ pub fn hook_registry_path(repo_root: &std::path::Path) -> PathBuf {
 }
 
 /// `~/.config/jig/state/`
-pub fn global_state_dir() -> Result<PathBuf> {
+pub fn global_state_dir() -> Result<PathBuf, std::io::Error> {
     Ok(global_config_dir()?.join("state"))
 }
 
 /// `~/.config/jig/state/daemon.jsonl`
-pub fn daemon_log_path() -> Result<PathBuf> {
+pub fn daemon_log_path() -> Result<PathBuf, std::io::Error> {
     Ok(global_state_dir()?.join("daemon.jsonl"))
 }
 
 /// `~/.config/jig/<repo>/<branch>/`
-pub fn worker_events_dir(repo: &str, branch: &str) -> Result<PathBuf> {
+pub fn worker_events_dir(repo: &str, branch: &str) -> Result<PathBuf, std::io::Error> {
     Ok(global_config_dir()?.join(repo).join(branch))
 }
 
 /// `~/.config/jig/repos.json`
-pub fn repo_registry_path() -> Result<PathBuf> {
+pub fn repo_registry_path() -> Result<PathBuf, std::io::Error> {
     Ok(global_config_dir()?.join("repos.json"))
 }
 
 /// `~/.config/jig/state/notifications.jsonl`
-pub fn notifications_path() -> Result<PathBuf> {
+pub fn notifications_path() -> Result<PathBuf, std::io::Error> {
     Ok(global_state_dir()?.join("notifications.jsonl"))
 }
 
 /// `~/.config/jig/state/triages.json`
-pub fn triages_path() -> Result<PathBuf> {
+pub fn triages_path() -> Result<PathBuf, std::io::Error> {
     Ok(global_state_dir()?.join("triages.json"))
 }
 
 /// `~/.config/jig/state/events/`
-pub fn global_events_dir() -> Result<PathBuf> {
+pub fn global_events_dir() -> Result<PathBuf, std::io::Error> {
     Ok(global_state_dir()?.join("events"))
 }
 
 /// `~/.config/jig/state/logs/`
-pub fn daemon_logs_dir() -> Result<PathBuf> {
+pub fn daemon_logs_dir() -> Result<PathBuf, std::io::Error> {
     Ok(global_state_dir()?.join("logs"))
 }
 
 /// Create a new session log path: `~/.config/jig/state/logs/<YYYYMMDDTHHMMSSZ>.log`
-pub fn new_daemon_log_path() -> Result<PathBuf> {
+pub fn new_daemon_log_path() -> Result<PathBuf, std::io::Error> {
     let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
     Ok(daemon_logs_dir()?.join(format!("{}.log", ts)))
 }
 
 /// Find the most recent daemon log file (lexicographic sort on ISO timestamps).
-pub fn latest_daemon_log() -> Result<Option<PathBuf>> {
+pub fn latest_daemon_log() -> Result<Option<PathBuf>, std::io::Error> {
     let dir = daemon_logs_dir()?;
     if !dir.exists() {
         return Ok(None);
@@ -103,7 +103,7 @@ pub fn latest_daemon_log() -> Result<Option<PathBuf>> {
 }
 
 /// Create all global directories.
-pub fn ensure_global_dirs() -> Result<()> {
+pub fn ensure_global_dirs() -> Result<(), std::io::Error> {
     let dirs = [
         global_config_dir()?,
         global_hooks_dir()?,

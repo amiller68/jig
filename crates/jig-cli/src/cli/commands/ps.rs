@@ -33,7 +33,9 @@ pub struct Ps {
 #[derive(Debug, thiserror::Error)]
 pub enum PsError {
     #[error("failed to list tasks: {0}")]
-    ListTasks(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
+    #[error(transparent)]
+    Daemon(#[from] crate::daemon::DaemonError),
 }
 
 impl Op for Ps {

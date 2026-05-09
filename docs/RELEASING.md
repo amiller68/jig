@@ -2,6 +2,27 @@
 
 Automated release workflow using conventional commits and cargo-smart-release.
 
+## PAT Setup
+
+The release pipeline requires a **Personal Access Token** stored as `RELEASE_PAT` in GitHub Actions secrets. This is needed because tags pushed by the default `GITHUB_TOKEN` don't trigger downstream workflows — without a PAT, the tag push from `release-tag.yml` won't kick off the binary build in `release.yml`.
+
+### Creating the token
+
+1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**
+2. Create a new token scoped to the `jig` repository with these permissions:
+   - **Contents**: Read and write (push tags)
+   - **Workflows**: Read and write (trigger workflow runs)
+3. Set expiration as desired (90 days is fine, you'll get an email before it expires)
+
+### Adding to the repository
+
+1. Go to **jig repo → Settings → Secrets and variables → Actions**
+2. Add a new repository secret named `RELEASE_PAT` with the token value
+
+### When to rotate
+
+GitHub sends expiration reminders. When the token expires, tag creation in `release-tag.yml` will fail silently (the tag step uses the PAT for checkout). Create a new token and update the secret.
+
 ## How It Works
 
 1. **Push to main** triggers `.github/workflows/release-pr.yml`

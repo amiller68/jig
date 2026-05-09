@@ -18,7 +18,7 @@ pub struct Nuke {
 #[derive(Debug, thiserror::Error)]
 pub enum NukeError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
     #[error(transparent)]
     Mux(#[from] jig_core::MuxError),
     #[error(transparent)]
@@ -33,7 +33,7 @@ impl Op for Nuke {
         if self.global {
             let cfg = Context::from_global()?;
             if cfg.repos.is_empty() {
-                return Err(jig_core::Error::NotInGitRepo.into());
+                return Err(crate::context::ContextError::NotInGitRepo.into());
             }
             for repo in &cfg.repos {
                 nuke_repo(repo)?;

@@ -49,8 +49,8 @@ pub struct Notification {
 
 impl Notification {
     /// Serialize to a JSON string.
-    pub fn to_json(&self) -> jig_core::error::Result<String> {
-        Ok(serde_json::to_string(self)?)
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 

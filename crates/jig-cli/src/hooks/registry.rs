@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::context::hook_registry_path;
-use jig_core::error::Result;
 
 /// Tracks installed git hooks for idempotent init and safe uninstall.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +40,7 @@ impl HookRegistry {
     /// Falls back to legacy `<repo_path>/jig-hooks.json` if the new path
     /// doesn't exist, to support migration from older installs.
     /// Returns a fresh registry if neither file exists.
-    pub fn load(repo_path: &Path) -> Result<Self> {
+    pub fn load(repo_path: &Path) -> Result<Self, super::HookError> {
         let path = registry_path(repo_path);
         if path.exists() {
             let content = std::fs::read_to_string(&path)?;
@@ -69,7 +68,7 @@ impl HookRegistry {
     }
 
     /// Save registry to `<repo_path>/.jig/hooks/hooks.json`.
-    pub fn save(&self, repo_path: &Path) -> Result<()> {
+    pub fn save(&self, repo_path: &Path) -> Result<(), super::HookError> {
         let path = registry_path(repo_path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

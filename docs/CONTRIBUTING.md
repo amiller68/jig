@@ -68,7 +68,7 @@ docs: update PATTERNS.md with output conventions
 ### Context to Gather First
 
 Before making changes, read:
-- `CLAUDE.md` — Project overview and quick commands
+- `AGENTS.md` — Project overview and quick commands
 - `docs/PATTERNS.md` — Coding conventions
 - `docs/SUCCESS_CRITERIA.md` — CI checks that must pass
 - Related code files to understand existing patterns

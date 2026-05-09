@@ -4,8 +4,6 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use crate::context::NotifyConfig;
-use jig_core::error::Result;
-
 use super::{NotificationEvent, NotificationQueue};
 
 /// Notifier wraps the queue and executes hooks on emit.
@@ -31,7 +29,7 @@ impl Notifier {
 
     /// Emit a notification: write to queue, then trigger hooks.
     /// Hook failures are logged but swallowed (best-effort, for daemon use).
-    pub fn emit(&self, event: NotificationEvent) -> Result<()> {
+    pub fn emit(&self, event: NotificationEvent) -> Result<(), super::NotifyError> {
         // Always write to queue
         self.queue.emit(event.clone())?;
 
@@ -56,7 +54,7 @@ impl Notifier {
 
     /// Emit a notification strictly: write to queue, then trigger hooks.
     /// Hook failures are returned as errors (for CLI use).
-    pub fn emit_strict(&self, event: NotificationEvent) -> Result<()> {
+    pub fn emit_strict(&self, event: NotificationEvent) -> Result<(), super::NotifyError> {
         // Always write to queue
         self.queue.emit(event.clone())?;
 
@@ -85,7 +83,7 @@ impl Notifier {
         self.config.events.iter().any(|e| e == event_type)
     }
 
-    fn exec_hook(&self, exec: &str, json: &str) -> Result<()> {
+    fn exec_hook(&self, exec: &str, json: &str) -> Result<(), super::NotifyError> {
         let expanded = expand_tilde(exec);
 
         let mut child = Command::new("sh")
@@ -109,7 +107,7 @@ impl Notifier {
     }
 
     /// Like `exec_hook` but captures stderr and returns errors on non-zero exit.
-    fn exec_hook_strict(&self, exec: &str, json: &str) -> Result<()> {
+    fn exec_hook_strict(&self, exec: &str, json: &str) -> Result<(), super::NotifyError> {
         let expanded = expand_tilde(exec);
 
         let mut child = Command::new("sh")
@@ -136,7 +134,7 @@ impl Notifier {
                     stderr.trim()
                 )
             };
-            return Err(jig_core::error::Error::Custom(msg));
+            return Err(super::NotifyError::Hook(msg));
         }
 
         Ok(())

@@ -1,7 +1,7 @@
-use crate::error::Result;
 use crate::issues::issue::{Issue, IssueFilter, IssueStatus};
 
 use super::super::{IssueBackend, ProviderKind};
+use super::client::LinearError;
 use super::LinearProvider;
 
 impl IssueBackend for LinearProvider {
@@ -13,15 +13,15 @@ impl IssueBackend for LinearProvider {
         Self::PROVIDER_KIND
     }
 
-    fn update_status(&self, id: &str, new_status: &IssueStatus) -> Result<()> {
+    fn update_status(&self, id: &str, new_status: &IssueStatus) -> Result<(), LinearError> {
         self.update_status(id, new_status)
     }
 
-    fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
+    fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>, LinearError> {
         self.list_issues(filter)
     }
 
-    fn get(&self, id: &str) -> Result<Option<Issue>> {
+    fn get(&self, id: &str) -> Result<Option<Issue>, LinearError> {
         self.get_issue(id)
     }
 }

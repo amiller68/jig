@@ -4,18 +4,17 @@ use clap::Args;
 use std::fs;
 use std::path::Path;
 
-use crate::context::{Context, JigToml, JIG_DIR, JIG_LOCAL_TOML};
+use crate::context::{Config, Context, JigToml, JIG_DIR, JIG_LOCAL_TOML};
 use jig_core::git::Repo;
-use jig_core::mux::{Mux, TmuxMux};
-use jig_core::{agents, Error, Prompt};
+use jig_core::{agents, Prompt};
 
-use crate::terminal::Terminal;
+use crate::terminal;
 
 use crate::cli::op::{NoOutput, Op};
 use crate::cli::ui;
 
 // Embed templates at compile time from the templates/ directory
-const PROJECT_MD_TEMPLATE: &str = include_str!("../../../../../templates/PROJECT.md");
+const AGENTS_MD_TEMPLATE: &str = include_str!("../../../../../templates/AGENTS.md");
 
 // Docs templates
 const DOCS_INDEX: &str = include_str!("../../../../../templates/docs/index.md");
@@ -24,20 +23,13 @@ const DOCS_CONTRIBUTING: &str = include_str!("../../../../../templates/docs/CONT
 const DOCS_SUCCESS_CRITERIA: &str =
     include_str!("../../../../../templates/docs/SUCCESS_CRITERIA.md");
 
-// Issues templates
-const ISSUES_README: &str = include_str!("../../../../../templates/issues/README.md");
-const ISSUES_TEMPLATE_STANDALONE: &str =
-    include_str!("../../../../../templates/issues/_templates/standalone.md");
-const ISSUES_TEMPLATE_EPIC: &str =
-    include_str!("../../../../../templates/issues/_templates/epic-index.md");
-const ISSUES_TEMPLATE_TICKET: &str =
-    include_str!("../../../../../templates/issues/_templates/ticket.md");
-
 // Skills
 const SKILL_CHECK: &str = include_str!("../../../../../templates/skills/check/SKILL.md");
 const SKILL_DRAFT: &str = include_str!("../../../../../templates/skills/draft/SKILL.md");
 const SKILL_ISSUES: &str = include_str!("../../../../../templates/skills/issues/SKILL.md");
-const SKILL_SPAWN: &str = include_str!("../../../../../templates/skills/spawn/SKILL.md");
+const SKILL_REVIEW: &str = include_str!("../../../../../templates/skills/review/SKILL.md");
+
+const AUDIT_TOOLS: &[&str] = &["Read", "Write", "Edit", "Glob", "Grep", "Bash"];
 
 /// Initialize repository for jig
 #[derive(Args, Debug, Clone)]
@@ -66,9 +58,11 @@ pub struct Init {
 #[derive(Debug, thiserror::Error)]
 pub enum InitError {
     #[error(transparent)]
-    Core(#[from] Error),
+    Context(#[from] crate::context::ContextError),
     #[error(transparent)]
-    Mux(#[from] jig_core::MuxError),
+    Hook(#[from] crate::hooks::HookError),
+    #[error(transparent)]
+    Agent(#[from] jig_core::agents::AgentError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("Unknown agent: '{0}'. Supported agents: {1}")]
@@ -126,7 +120,7 @@ impl Op for Init {
         })?;
 
         // Check if agent is installed
-        if Terminal::which(agent.command()).is_none() {
+        if terminal::which(agent.command()).is_none() {
             ui::warning(&format!(
                 "'{}' not found in PATH. Install it before running agents.",
                 agent.command()
@@ -161,16 +155,7 @@ impl Op for Init {
             None
         };
 
-        // Create generic directories
-        let generic_dirs = [
-            "docs",
-            "issues",
-            "issues/_templates",
-            "issues/epics",
-            "issues/features",
-            "issues/bugs",
-            "issues/chores",
-        ];
+        let generic_dirs = ["docs"];
         for dir in generic_dirs {
             let path = repo_root.join(dir);
             if !path.exists() {
@@ -180,7 +165,7 @@ impl Op for Init {
         }
 
         // Create adapter-specific skill directories
-        let skill_names = ["check", "draft", "issues", "spawn"];
+        let skill_names = ["check", "draft", "issues", "review"];
         for skill in skill_names {
             let dir = repo_root.join(agent.skills_dir()).join(skill);
             if !dir.exists() {
@@ -206,10 +191,14 @@ impl Op for Init {
 [agent]
 type = "{}"
 
-# Issue configuration
+# Issue configuration (Linear)
 # [issues]
-# provider = "file"                    # or "linear"
+# provider = "linear"
 # auto_spawn_labels = []               # [] = all issues, ["x"] = filtered, omit = disabled
+#
+# [issues.linear]
+# profile = "work"                     # references ~/.config/jig/config.toml profile
+# team = "ENG"                         # Linear team key
 "#,
             agent_name
         );
@@ -254,41 +243,11 @@ type = "{}"
             backup_dir_opt,
         )?;
 
-        // Write issues files
-        write_file(
-            &repo_root,
-            "issues/README.md",
-            ISSUES_README,
-            self.force,
-            backup_dir_opt,
-        )?;
-        write_file(
-            &repo_root,
-            "issues/_templates/standalone.md",
-            ISSUES_TEMPLATE_STANDALONE,
-            self.force,
-            backup_dir_opt,
-        )?;
-        write_file(
-            &repo_root,
-            "issues/_templates/epic-index.md",
-            ISSUES_TEMPLATE_EPIC,
-            self.force,
-            backup_dir_opt,
-        )?;
-        write_file(
-            &repo_root,
-            "issues/_templates/ticket.md",
-            ISSUES_TEMPLATE_TICKET,
-            self.force,
-            backup_dir_opt,
-        )?;
-
-        // Write adapter-specific project file (CLAUDE.md, .cursorrules, etc.)
+        // Write AGENTS.md project file
         write_file(
             &repo_root,
             &agent.project_file().to_string_lossy(),
-            PROJECT_MD_TEMPLATE,
+            AGENTS_MD_TEMPLATE,
             self.force,
             backup_dir_opt,
         )?;
@@ -310,7 +269,7 @@ type = "{}"
             ("check", SKILL_CHECK),
             ("draft", SKILL_DRAFT),
             ("issues", SKILL_ISSUES),
-            ("spawn", SKILL_SPAWN),
+            ("review", SKILL_REVIEW),
         ];
         for (skill_name, content) in skills {
             let path = format!(
@@ -406,7 +365,7 @@ fn get_settings_content(agent: &agents::Agent) -> &str {
     agent.settings_content().unwrap_or("{}")
 }
 
-/// Launch the agent with the audit prompt in a tmux session.
+/// Run the agent with the audit prompt as a one-shot subprocess.
 fn launch_audit(
     repo_root: &Path,
     agent: &agents::Agent,
@@ -414,80 +373,45 @@ fn launch_audit(
     extra: Option<&str>,
 ) -> Result<(), InitError> {
     let prompt = audit_prompt(agent, has_backup, extra);
-    let cmd = agent.spawn(Prompt::new(&prompt)).map_err(|e| InitError::Core(e))?;
+    let argv = agent.once(Prompt::new(&prompt), AUDIT_TOOLS)?;
 
-    let session_name = "jig-init";
-    let window_name = repo_root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("init");
+    let (cmd, args) = argv
+        .split_first()
+        .ok_or_else(|| InitError::Agent(agents::AgentError::Other("empty audit argv".into())))?;
 
-    let mux = TmuxMux::new(session_name);
-    mux.create_window(window_name, repo_root)?;
-    mux.send_keys(window_name, &[&cmd, "Enter"])?;
+    ui::progress("Running audit agent...");
 
-    eprintln!();
-    ui::progress(&format!(
-        "Audit launched in session {}:{}",
-        session_name, window_name
-    ));
-    eprintln!();
-    eprintln!(
-        "  Attach with: {} -t {}",
-        ui::bold("tmux attach"),
-        session_name
-    );
+    let status = std::process::Command::new(cmd)
+        .args(args)
+        .current_dir(repo_root)
+        .status()?;
 
+    if !status.success() {
+        return Err(InitError::Agent(agents::AgentError::Other(format!(
+            "audit agent exited with {}",
+            status
+        ))));
+    }
+
+    ui::success("Audit complete");
     Ok(())
 }
 
-/// Initialize global config at ~/.config/jig/config.toml.
 fn init_global(force: bool) -> Result<NoOutput, InitError> {
-    let config_dir = crate::context::paths::global_config_dir()?;
-    let config_path = config_dir.join("config.toml");
-
-    if config_path.exists() && !force {
-        ui::success(&format!(
-            "Global config already exists: {}",
-            config_path.display()
-        ));
-        eprintln!(
-            "  Use {} to overwrite",
-            ui::highlight("jig -g init --force")
-        );
-        return Ok(NoOutput);
+    match Config::init(force)? {
+        Some(path) => ui::success(&format!("Created {}", path.display())),
+        None => {
+            let path = Config::default_path()?;
+            ui::success(&format!(
+                "Global config already exists: {}",
+                path.display()
+            ));
+            eprintln!(
+                "  Use {} to overwrite",
+                ui::highlight("jig -g init --force")
+            );
+        }
     }
-
-    fs::create_dir_all(&config_dir)?;
-
-    let content = r#"# jig global configuration
-# See: docs/cli/usage/configuration.md
-
-[health]
-silence_threshold_seconds = 300  # seconds of silence before worker is "stalled"
-max_nudges = 3                   # nudges per type before escalating
-
-[github]
-auto_cleanup_merged = true       # clean up workers when PR merges
-auto_cleanup_closed = false      # clean up workers when PR closed without merge
-
-[spawn]
-max_concurrent_workers = 3       # max auto-spawned workers per repo
-poll_interval = 120              # seconds between issue polls
-
-# [notify]
-# exec = "~/.config/jig/hooks/notify.sh"
-# events = ["needs_intervention", "worker_failed"]
-
-# [linear.profiles.work]
-# api_key = "lin_api_xxxxxxxxxxxx"
-# team = "ENG"
-"#;
-
-    fs::write(&config_path, content)?;
-
-    ui::success(&format!("Created {}", config_path.display()));
-
     Ok(NoOutput)
 }
 

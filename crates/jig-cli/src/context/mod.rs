@@ -15,11 +15,29 @@ pub mod repo;
 
 use std::path::{Path, PathBuf};
 
-use jig_core::error::Result;
 use jig_core::git::{Branch, Repo};
 use jig_core::issues::{IssueProvider, LinearProvider};
 
-pub use config::{Config, LinearConfig, LinearProfile, NotifyConfig};
+#[derive(Debug, thiserror::Error)]
+pub enum ContextError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Toml(#[from] toml::de::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Git(#[from] jig_core::git::GitError),
+    #[error(transparent)]
+    Linear(#[from] jig_core::issues::providers::linear::client::LinearError),
+    #[error("not in a git repository")]
+    NotInGitRepo,
+    #[error("{0}")]
+    Config(String),
+}
+
+pub use config::Config;
+pub use config::{LinearConfig, LinearProfile, NotifyConfig};
 pub use paths::{
     daemon_log_path, daemon_logs_dir, ensure_global_dirs, global_config_dir, global_config_path,
     global_events_dir, global_hooks_dir, global_state_dir, hook_registry_path, latest_daemon_log,
@@ -54,7 +72,7 @@ pub struct RepoConfig {
 }
 
 impl RepoConfig {
-    pub fn from_cwd() -> Result<Self> {
+    pub fn from_cwd() -> Result<Self, ContextError> {
         let git_repo = Repo::discover()?;
         let git_common_dir = git_repo.common_dir();
         let repo_root = git_common_dir
@@ -64,7 +82,7 @@ impl RepoConfig {
         Self::build(repo_root, git_common_dir)
     }
 
-    pub fn from_path(path: &Path) -> Result<Self> {
+    pub fn from_path(path: &Path) -> Result<Self, ContextError> {
         let git_repo = Repo::open(path)?;
         let git_common_dir = git_repo.common_dir();
         let repo_root = git_common_dir
@@ -74,7 +92,7 @@ impl RepoConfig {
         Self::build(repo_root, git_common_dir)
     }
 
-    fn build(repo_root: PathBuf, git_common_dir: PathBuf) -> Result<Self> {
+    fn build(repo_root: PathBuf, git_common_dir: PathBuf) -> Result<Self, ContextError> {
         let worktrees_path = repo_root.join(JIG_DIR);
         let repo = JigToml::load(&repo_root)?.unwrap_or_default();
         Ok(Self {
@@ -108,19 +126,19 @@ impl RepoConfig {
     }
 
     /// Create an issue provider from whatever backend is configured.
-    pub fn issue_provider(&self, config: &Config) -> Result<IssueProvider> {
+    pub fn issue_provider(&self, config: &Config) -> Result<IssueProvider, ContextError> {
         if self.repo.issues.linear.is_some() {
             return Ok(IssueProvider::new(Box::new(self.linear_provider(config)?)));
         }
-        Err(jig_core::error::Error::Custom(
+        Err(ContextError::Config(
             "no issue provider configured — add [issues.linear] to jig.toml".into(),
         ))
     }
 
     /// Create a Linear provider.
-    pub fn linear_provider(&self, config: &Config) -> Result<LinearProvider> {
+    pub fn linear_provider(&self, config: &Config) -> Result<LinearProvider, ContextError> {
         let linear_config = self.repo.issues.linear.as_ref().ok_or_else(|| {
-            jig_core::error::Error::Custom(
+            ContextError::Config(
                 "[issues.linear] config required when provider = \"linear\"".into(),
             )
         })?;
@@ -130,7 +148,7 @@ impl RepoConfig {
             .profiles
             .get(&linear_config.profile)
             .ok_or_else(|| {
-                jig_core::error::Error::Custom(format!(
+                ContextError::Config(format!(
                     "Linear profile '{}' not found in global config (~/.config/jig/config.toml)",
                     linear_config.profile,
                 ))
@@ -141,7 +159,7 @@ impl RepoConfig {
             .clone()
             .or_else(|| profile.team.clone())
             .ok_or_else(|| {
-                jig_core::error::Error::Custom(
+                ContextError::Config(
                     "Linear team key is required — set 'team' in [issues.linear] in jig.toml or in the profile in ~/.config/jig/config.toml"
                         .to_string(),
                 )
@@ -164,7 +182,7 @@ impl RepoConfig {
             .clone()
             .or_else(|| profile.assignee.clone());
 
-        LinearProvider::new(&profile.api_key, team, projects, assignee, labels)
+        Ok(LinearProvider::new(&profile.api_key, team, projects, assignee, labels)?)
     }
 }
 
@@ -177,7 +195,7 @@ pub struct Context {
 
 impl Context {
     /// Single repo from cwd.
-    pub fn from_cwd() -> Result<Self> {
+    pub fn from_cwd() -> Result<Self, ContextError> {
         let config = Config::load().unwrap_or_default();
         let repo = RepoConfig::from_cwd()?;
         let mut registry = RepoRegistry::default();
@@ -190,7 +208,7 @@ impl Context {
     }
 
     /// All tracked repos.
-    pub fn from_global() -> Result<Self> {
+    pub fn from_global() -> Result<Self, ContextError> {
         let config = Config::load().unwrap_or_default();
         let registry = RepoRegistry::load()?;
         let repos = registry
@@ -207,16 +225,62 @@ impl Context {
     }
 
     /// Single repo convenience — errors if no repos.
-    pub fn repo(&self) -> Result<&RepoConfig> {
+    pub fn repo(&self) -> Result<&RepoConfig, ContextError> {
         self.repos
             .first()
-            .ok_or(jig_core::error::Error::NotInGitRepo)
+            .ok_or(ContextError::NotInGitRepo)
     }
+}
+
+/// Update a key in the local (gitignored) `jig.local.toml` config.
+///
+/// Pass `Some(value)` to set, `None` to remove. Removes empty sections.
+pub fn update_local_toml(
+    repo_root: &Path,
+    section: &str,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), ContextError> {
+    let local_path = repo_root.join(JIG_LOCAL_TOML);
+    let mut doc: toml::Value = if local_path.exists() {
+        let content = std::fs::read_to_string(&local_path)?;
+        toml::from_str(&content).map_err(|e| ContextError::Config(e.to_string()))?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    let table = doc.as_table_mut().unwrap();
+
+    match value {
+        Some(v) => {
+            let section_table = table
+                .entry(section)
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+                .as_table_mut()
+                .ok_or_else(|| ContextError::Config(format!("[{}] is not a table", section)))?;
+            section_table.insert(key.to_string(), toml::Value::String(v.to_string()));
+        }
+        None => {
+            if let Some(section_val) = table.get_mut(section) {
+                if let Some(section_table) = section_val.as_table_mut() {
+                    section_table.remove(key);
+                    if section_table.is_empty() {
+                        table.remove(section);
+                    }
+                }
+            }
+        }
+    }
+
+    let content = toml::to_string_pretty(&doc).map_err(|e| ContextError::Config(e.to_string()))?;
+    std::fs::write(&local_path, content)?;
+
+    Ok(())
 }
 
 /// Resolve the effective base branch for an arbitrary repo path
 /// (without building a full Context). Used by daemon code.
-pub fn resolve_base_branch_for(repo_root: &Path) -> Result<Branch> {
+pub fn resolve_base_branch_for(repo_root: &Path) -> Result<Branch, ContextError> {
     if let Ok(Some(jig_toml)) = JigToml::load(repo_root) {
         if let Some(base) = jig_toml.worktree.base {
             return Ok(Branch::new(base));

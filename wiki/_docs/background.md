@@ -83,7 +83,7 @@ Documentation and context maintenance are emphasized to:
 - Encode patterns and conventions agents can follow
 - Make onboarding (for humans and agents) frictionless
 
-Well-maintained `CLAUDE.md`, `PATTERNS.md`, and issue templates pay compounding dividends.
+Well-maintained `AGENTS.md`, `PATTERNS.md`, and issue templates pay compounding dividends.
 
 ### Teams spend more time on
 

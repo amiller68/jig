@@ -4,8 +4,8 @@ use std::path::Path;
 
 use clap::{Args, Subcommand};
 
-use crate::context::{Config as GlobalConfig, JigToml, LinearIssuesConfig, RepoConfig, DEFAULT_BASE_BRANCH};
-use jig_core::Error as CoreError;
+use crate::context::{self, Config as GlobalConfig, JigToml, LinearIssuesConfig, RepoConfig, DEFAULT_BASE_BRANCH};
+use crate::context::ContextError;
 
 use crate::cli::op::Op;
 use crate::cli::ui;
@@ -67,7 +67,7 @@ impl std::fmt::Display for ConfigOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error(transparent)]
-    Core(#[from] CoreError),
+    Context(#[from] ContextError),
 }
 
 impl Op for Config {
@@ -144,13 +144,6 @@ fn show_global_config() -> Result<ConfigOutput, ConfigError> {
         ui::highlight(&format!("{}s", global.silence_threshold_seconds)),
         src("global config")
     );
-    eprintln!(
-        "  {} {} {}",
-        ui::dim("Max nudges:"),
-        ui::highlight(&global.max_nudges.to_string()),
-        src("global config")
-    );
-
     // -- Notify --
     if global.notify.exec.is_some() || global.notify.webhook.is_some() {
         eprintln!();
@@ -361,11 +354,6 @@ fn show_config(repo: &RepoConfig) -> Result<ConfigOutput, ConfigError> {
         ui::dim("Silence threshold:"),
         ui::highlight(&format!("{}s", display.global.silence_threshold_seconds)),
     );
-    eprintln!(
-        "  {} {}",
-        ui::dim("Max nudges:"),
-        ui::highlight(&display.global.max_nudges.to_string()),
-    );
 
     Ok(ConfigOutput(None))
 }
@@ -387,7 +375,7 @@ fn handle_base(
             ui::success("Unset global base branch");
         } else {
             let repo = RepoConfig::from_cwd()?;
-            update_local_toml(&repo.repo_root, "worktree", "base", None)?;
+            context::update_local_toml(&repo.repo_root, "worktree", "base", None)?;
             ui::success("Unset repo base branch");
         }
         return Ok(ConfigOutput(None));
@@ -402,7 +390,7 @@ fn handle_base(
                 ui::success(&format!("Set global base branch to '{}'", ui::highlight(b)));
             } else {
                 let repo = RepoConfig::from_cwd()?;
-                update_local_toml(&repo.repo_root, "worktree", "base", Some(b))?;
+                context::update_local_toml(&repo.repo_root, "worktree", "base", Some(b))?;
                 ui::success(&format!("Set repo base branch to '{}'", ui::highlight(b)));
             }
             Ok(ConfigOutput(None))
@@ -433,14 +421,14 @@ fn handle_on_create(
     let repo = RepoConfig::from_cwd()?;
 
     if unset {
-        update_local_toml(&repo.repo_root, "worktree", "on_create", None)?;
+        context::update_local_toml(&repo.repo_root, "worktree", "on_create", None)?;
         ui::success("Unset on-create hook");
         return Ok(ConfigOutput(None));
     }
 
     match command {
         Some(cmd) => {
-            update_local_toml(&repo.repo_root, "worktree", "on_create", Some(cmd))?;
+            context::update_local_toml(&repo.repo_root, "worktree", "on_create", Some(cmd))?;
             ui::success(&format!("Set on-create hook to '{}'", ui::highlight(cmd)));
             Ok(ConfigOutput(None))
         }
@@ -477,7 +465,7 @@ struct ConfigDisplay {
 }
 
 impl ConfigDisplay {
-    fn load(repo_path: &Path) -> jig_core::Result<Self> {
+    fn load(repo_path: &Path) -> Result<Self, ContextError> {
         let jig_toml = JigToml::load(repo_path)?.unwrap_or_default();
         let global_config = GlobalConfig::load().unwrap_or_default();
 
@@ -514,45 +502,4 @@ impl ConfigDisplay {
     }
 }
 
-fn update_local_toml(
-    repo_root: &std::path::Path,
-    section: &str,
-    key: &str,
-    value: Option<&str>,
-) -> Result<(), ConfigError> {
-    let local_path = repo_root.join(crate::context::JIG_LOCAL_TOML);
-    let mut doc: toml::Value = if local_path.exists() {
-        let content = std::fs::read_to_string(&local_path).map_err(CoreError::Io)?;
-        toml::from_str(&content).map_err(|e| CoreError::Custom(e.to_string()))?
-    } else {
-        toml::Value::Table(toml::map::Map::new())
-    };
 
-    let table = doc.as_table_mut().unwrap();
-
-    match value {
-        Some(v) => {
-            let section_table = table
-                .entry(section)
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
-                .as_table_mut()
-                .ok_or_else(|| CoreError::Custom(format!("[{}] is not a table", section)))?;
-            section_table.insert(key.to_string(), toml::Value::String(v.to_string()));
-        }
-        None => {
-            if let Some(section_val) = table.get_mut(section) {
-                if let Some(section_table) = section_val.as_table_mut() {
-                    section_table.remove(key);
-                    if section_table.is_empty() {
-                        table.remove(section);
-                    }
-                }
-            }
-        }
-    }
-
-    let content = toml::to_string_pretty(&doc).map_err(|e| CoreError::Custom(e.to_string()))?;
-    std::fs::write(&local_path, content).map_err(CoreError::Io)?;
-
-    Ok(())
-}

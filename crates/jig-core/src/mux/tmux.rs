@@ -112,10 +112,14 @@ impl TmuxSession {
         if !self.exists() {
             let output = run_tmux(&["new-session", "-d", "-s", &self.0], TMUX_TIMEOUT)?;
             if !output.status.success() {
-                return Err(TmuxError::CommandFailed {
-                    command: "new-session".to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).into(),
-                });
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                // Race: another process created the session between exists() and new-session
+                if !stderr.contains("duplicate session") {
+                    return Err(TmuxError::CommandFailed {
+                        command: "new-session".to_string(),
+                        stderr: stderr.into(),
+                    });
+                }
             }
             let _ = run_tmux(
                 &["set-option", "-t", &self.0, "prefix", "C-a"],

@@ -12,8 +12,8 @@ use crate::cli::ui;
 /// Kill a running worker window
 #[derive(Args, Debug, Clone)]
 pub struct Kill {
-    /// Worktree name
-    pub name: Option<String>,
+    /// Branch name
+    pub branch: Option<String>,
 
     /// Kill all workers
     #[arg(long, short)]
@@ -27,10 +27,13 @@ pub struct Kill {
 #[derive(Debug, thiserror::Error)]
 pub enum KillError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
-
-    #[error("specify a worker name or --all")]
+    Context(#[from] crate::context::ContextError),
+    #[error(transparent)]
+    Worker(#[from] crate::worker::WorkerError),
+    #[error("specify a branch or --all")]
     NoTarget,
+    #[error("{0}")]
+    NotFound(String),
 }
 
 impl Op for Kill {
@@ -52,7 +55,7 @@ impl Op for Kill {
                 return Ok(NoOutput);
             }
 
-            let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
+            let name = self.branch.as_deref().ok_or(KillError::NoTarget)?;
             for repo in &cfg.repos {
                 let git_repo = jig_core::git::Repo::open(&repo.repo_root).unwrap();
                 let repo_name = repo.repo_root.file_name()
@@ -67,7 +70,7 @@ impl Op for Kill {
                     return Ok(NoOutput);
                 }
             }
-            return Err(jig_core::Error::Custom(format!("worker '{}' not found", name)).into());
+            return Err(KillError::NotFound(format!("worker '{}' not found", name)));
         }
 
         let cfg = Context::from_cwd()?;
@@ -85,12 +88,12 @@ impl Op for Kill {
             return Ok(NoOutput);
         }
 
-        let name = self.name.as_deref().ok_or(KillError::NoTarget)?;
+        let name = self.branch.as_deref().ok_or(KillError::NoTarget)?;
         let workers = Worker::discover(&jig_core::git::Repo::open(&repo.repo_root).unwrap());
         let worker = workers
             .iter()
             .find(|w| w.branch() == name)
-            .ok_or_else(|| jig_core::Error::Custom(format!("worker '{}' not found", name)))?;
+            .ok_or_else(|| KillError::NotFound(format!("worker '{}' not found", name)))?;
         let _ = worker.kill(&mux);
         worker.unregister()?;
         ui::success(&format!("Killed '{}'", ui::highlight(name)));

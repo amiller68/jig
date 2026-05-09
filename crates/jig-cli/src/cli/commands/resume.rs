@@ -6,7 +6,7 @@ use crate::context;
 use crate::worker::Worker;
 use jig_core::agents;
 use jig_core::mux::TmuxMux;
-use jig_core::{Error, Worktree};
+use jig_core::Worktree;
 
 use crate::cli::op::{NoOutput, Op};
 use crate::context::RepoConfig;
@@ -15,8 +15,8 @@ use crate::cli::ui;
 /// Resume a dead worker by relaunching its agent session
 #[derive(Args, Debug, Clone)]
 pub struct Resume {
-    /// Worker name to resume
-    pub name: String,
+    /// Branch name to resume
+    pub branch: String,
 
     /// Override the task context for the resumed session
     #[arg(long, short)]
@@ -26,9 +26,13 @@ pub struct Resume {
 #[derive(Debug, thiserror::Error)]
 pub enum ResumeError {
     #[error(transparent)]
-    Core(#[from] Error),
+    Context(#[from] crate::context::ContextError),
+    #[error(transparent)]
+    Worker(#[from] crate::worker::WorkerError),
     #[error(transparent)]
     Git(#[from] jig_core::GitError),
+    #[error("{0}")]
+    Usage(String),
 }
 
 impl Op for Resume {
@@ -43,9 +47,9 @@ impl Op for Resume {
         let mux = TmuxMux::for_repo(&repo_name);
 
         // Open existing worktree
-        let wt_path = cfg.worktrees_path.join(&self.name);
+        let wt_path = cfg.worktrees_path.join(&self.branch);
         if !wt_path.exists() {
-            return Err(Error::WorktreeNotFound(self.name.clone()).into());
+            return Err(ResumeError::Usage(format!("worktree '{}' not found", self.branch)));
         }
         let wt = Worktree::open(&wt_path)?;
 
@@ -54,14 +58,13 @@ impl Op for Resume {
         if pre.has_mux_window(&mux) {
             ui::failure(&format!(
                 "Worker '{}' already has a window. Use '{}' to attach.",
-                ui::highlight(&self.name),
-                ui::highlight(&format!("jig attach {}", self.name))
+                ui::highlight(&self.branch),
+                ui::highlight(&format!("jig attach {}", self.branch))
             ));
-            return Err(Error::Custom(format!(
+            return Err(ResumeError::Usage(format!(
                 "Worker '{}' already running — use `jig attach` instead",
-                self.name
-            ))
-            .into());
+                self.branch
+            )));
         }
 
         let effective_context = self
@@ -77,17 +80,18 @@ impl Op for Resume {
         )
         .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
-        Worker::resume(&wt, &agent, &effective_context, &mux)?;
+        let prompt = crate::prompts::resume_task(&effective_context);
+        Worker::resume(&wt, &agent, prompt, &mux)?;
 
         ui::success(&format!(
             "Resumed worker '{}'",
-            ui::highlight(&self.name)
+            ui::highlight(&self.branch)
         ));
 
         eprintln!();
         eprintln!(
             "  Use '{}' to attach",
-            ui::highlight(&format!("jig attach {}", self.name))
+            ui::highlight(&format!("jig attach {}", self.branch))
         );
         eprintln!("  Use '{}' to check status", ui::highlight("jig ps"));
 

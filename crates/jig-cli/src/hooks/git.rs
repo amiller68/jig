@@ -5,8 +5,6 @@
 //! - Chain to `.user` suffix hooks if they exist
 //! - Include a marker comment for detection
 
-use jig_core::error::Result;
-
 /// Marker prefix in the first comment line of jig-managed hooks.
 pub const JIG_MANAGED_MARKER: &str = "# jig-managed: v1";
 
@@ -79,13 +77,13 @@ fi
 "#;
 
 /// Generate the wrapper script content for a given hook name.
-pub fn generate_hook(hook_name: &str) -> Result<String> {
+pub fn generate_hook(hook_name: &str) -> Result<String, super::HookError> {
     match hook_name {
         "commit-msg" => Ok(COMMIT_MSG_TEMPLATE.to_string()),
         "post-commit" => Ok(POST_COMMIT_TEMPLATE.to_string()),
         "post-merge" => Ok(POST_MERGE_TEMPLATE.to_string()),
         "pre-commit" => Ok(PRE_COMMIT_TEMPLATE.to_string()),
-        _ => Err(jig_core::Error::Custom(format!(
+        _ => Err(super::HookError::Validation(format!(
             "unsupported hook: {}",
             hook_name
         ))),

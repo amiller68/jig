@@ -7,7 +7,14 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::error::Result;
+#[derive(Debug, thiserror::Error)]
+pub enum EventLogError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
+
 
 /// An event type that knows how to fold into a state.
 ///
@@ -36,14 +43,14 @@ impl<E> EventLog<E> {
         self.path.exists()
     }
 
-    pub fn reset(&self) -> Result<()> {
+    pub fn reset(&self) -> Result<(), EventLogError> {
         if self.path.exists() {
             fs::write(&self.path, "")?;
         }
         Ok(())
     }
 
-    pub fn remove(&self) -> Result<()> {
+    pub fn remove(&self) -> Result<(), EventLogError> {
         if self.path.exists() {
             fs::remove_file(&self.path)?;
         }
@@ -55,7 +62,7 @@ impl<E> EventLog<E> {
 }
 
 impl<E: Serialize> EventLog<E> {
-    pub fn append(&self, event: &E) -> Result<()> {
+    pub fn append(&self, event: &E) -> Result<(), EventLogError> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -71,7 +78,7 @@ impl<E: Serialize> EventLog<E> {
 
 impl<E: DeserializeOwned + Reducible> EventLog<E> {
     /// Replay all events into the event's associated [`Reducible::State`].
-    pub fn reduce(&self) -> Result<E::State> {
+    pub fn reduce(&self) -> Result<E::State, EventLogError> {
         let events = self.read_all()?;
         let mut state = E::State::default();
         for event in &events {
@@ -82,7 +89,7 @@ impl<E: DeserializeOwned + Reducible> EventLog<E> {
 }
 
 impl<E: DeserializeOwned> EventLog<E> {
-    pub fn read_all(&self) -> Result<Vec<E>> {
+    pub fn read_all(&self) -> Result<Vec<E>, EventLogError> {
         if !self.path.exists() {
             return Ok(Vec::new());
         }
@@ -98,7 +105,7 @@ impl<E: DeserializeOwned> EventLog<E> {
         Ok(events)
     }
 
-    pub fn last_event(&self) -> Result<Option<E>> {
+    pub fn last_event(&self) -> Result<Option<E>, EventLogError> {
         if !self.path.exists() {
             return Ok(None);
         }

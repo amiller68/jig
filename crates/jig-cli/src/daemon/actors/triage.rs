@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::{self, RepoConfig};
 use jig_core::agents;
-use jig_core::prompt::Prompt;
 use jig_core::git::{Branch, Repo};
 use jig_core::issues::issue::{IssueFilter, IssueStatus};
 use jig_core::issues::Issue;
@@ -191,53 +190,6 @@ impl Actor for TriageActor {
     }
 }
 
-const TRIAGE_PROMPT: &str = r#"You are triaging issue {{issue_id}}: {{issue_title}}
-
-## Issue Description
-
-{{issue_body}}
-
-## Your Task
-
-Investigate this issue in the codebase and produce a scoped analysis. Do NOT implement any changes -- you are read-only.
-
-1. **Identify affected code** -- find the relevant files, functions, and modules
-2. **Assess scope** -- is this a small fix, a medium refactor, or a large feature?
-3. **Propose approach** -- outline what an implementing agent (or human) would need to do
-4. **Flag risks** -- note any dependencies, breaking changes, or areas needing careful handling
-5. **Suggest priority** -- based on severity and scope, suggest Urgent/High/Medium/Low
-
-## Output
-
-When you have completed your investigation, update the Linear issue with your findings using the jig CLI, then change the issue status to Backlog.
-
-Run: `jig issues update {{issue_id}} --body "your investigation findings"`
-Then: `jig issues status {{issue_id}} backlog`
-
-Structure your findings as:
-
-### Investigation
-[Your findings about affected code, scope, and approach]
-
-### Affected Files
-- `path/to/file.rs` -- reason
-
-### Proposed Approach
-1. Step one
-2. Step two
-
-### Complexity
-[Small | Medium | Large]
-
-### Suggested Priority
-[Urgent | High | Medium | Low]
-
-### Risks
-- [Any risks or concerns]
-"#;
-
-const TRIAGE_ALLOWED_TOOLS: &[&str] = &["Read", "Glob", "Grep", "Bash(jig *)"];
-
 fn run_single(issue: &TriageIssue) {
     tracing::info!(
         worker = %issue.worker_name,
@@ -263,19 +215,11 @@ fn run_single(issue: &TriageIssue) {
     }
 }
 
-fn render_triage_prompt(issue: &Issue) -> jig_core::error::Result<String> {
-    Prompt::new(TRIAGE_PROMPT)
-        .var("issue_id", issue.id().to_string())
-        .var("issue_title", issue.title())
-        .var("issue_body", issue.body())
-        .render()
-}
-
 pub(crate) fn run_triage_subprocess(
     repo_root: &Path,
     issue: &Issue,
 ) -> std::result::Result<(), String> {
-    let prompt = render_triage_prompt(issue).map_err(|e| e.to_string())?;
+    let prompt = crate::prompts::triage::triage_prompt(issue);
 
     let jig_toml = context::JigToml::load(repo_root)
         .map_err(|e| e.to_string())?
@@ -284,7 +228,7 @@ pub(crate) fn run_triage_subprocess(
         .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
     let argv = agent
-        .once(jig_core::Prompt::new(&prompt), TRIAGE_ALLOWED_TOOLS)
+        .once(prompt, crate::prompts::triage::ALLOWED_TOOLS)
         .map_err(|e| e.to_string())?;
 
     let (cmd, args) = argv.split_first().ok_or("empty triage argv")?;

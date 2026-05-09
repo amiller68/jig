@@ -6,8 +6,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use jig_core::error::{Error, Result};
-
+use super::ContextError;
 use super::paths::global_config_path;
 
 /// Notification configuration.
@@ -46,7 +45,6 @@ pub struct LinearProfile {
 pub struct Config {
     // Health
     pub silence_threshold_seconds: u64,
-    pub max_nudges: u32,
 
     // Spawn
     pub max_concurrent_workers: usize,
@@ -74,7 +72,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             silence_threshold_seconds: 300,
-            max_nudges: 3,
             max_concurrent_workers: 3,
             poll_interval: 120,
             auto_recover: true,
@@ -90,12 +87,12 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load() -> Result<Self> {
+    pub fn load() -> Result<Self, ContextError> {
         let path = global_config_path()?;
         Self::load_from(&path)
     }
 
-    pub fn load_from(path: &Path) -> Result<Self> {
+    pub fn load_from(path: &Path) -> Result<Self, ContextError> {
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -104,22 +101,60 @@ impl Config {
         Ok(config)
     }
 
-    pub fn default_path() -> Result<std::path::PathBuf> {
-        global_config_path()
+    pub fn default_path() -> Result<std::path::PathBuf, ContextError> {
+        Ok(global_config_path()?)
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<(), ContextError> {
         let path = global_config_path()?;
         self.save_to(&path)
     }
 
-    pub fn save_to(&self, path: &Path) -> Result<()> {
+    pub fn save_to(&self, path: &Path) -> Result<(), ContextError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = toml::to_string_pretty(self).map_err(|e| Error::Custom(e.to_string()))?;
+        let content = toml::to_string_pretty(self).map_err(|e| ContextError::Config(e.to_string()))?;
         fs::write(path, content)?;
         Ok(())
+    }
+
+    /// Initialize global config at ~/.config/jig/config.toml.
+    /// Returns the path if created, None if it already exists (and force is false).
+    pub fn init(force: bool) -> Result<Option<std::path::PathBuf>, ContextError> {
+        let config_dir = super::paths::global_config_dir()?;
+        let config_path = config_dir.join("config.toml");
+
+        if config_path.exists() && !force {
+            return Ok(None);
+        }
+
+        fs::create_dir_all(&config_dir)?;
+
+        let content = r#"# jig global configuration
+
+[health]
+silence_threshold_seconds = 300  # seconds of silence before worker is "stalled"
+
+[github]
+auto_cleanup_merged = true       # clean up workers when PR merges
+auto_cleanup_closed = false      # clean up workers when PR closed without merge
+
+[spawn]
+max_concurrent_workers = 3       # max auto-spawned workers per repo
+poll_interval = 120              # seconds between issue polls
+
+# [notify]
+# exec = "~/.config/jig/hooks/notify.sh"
+# events = ["needs_intervention", "worker_failed"]
+
+# [linear.profiles.work]
+# api_key = "lin_api_xxxxxxxxxxxx"
+# team = "ENG"
+"#;
+
+        fs::write(&config_path, content)?;
+        Ok(Some(config_path))
     }
 }
 
@@ -131,7 +166,6 @@ mod tests {
     fn defaults() {
         let cfg = Config::default();
         assert_eq!(cfg.silence_threshold_seconds, 300);
-        assert_eq!(cfg.max_nudges, 3);
         assert_eq!(cfg.max_concurrent_workers, 3);
         assert_eq!(cfg.poll_interval, 120);
         assert!(cfg.auto_recover);
@@ -201,11 +235,11 @@ labels = ["auto", "backend"]
     fn partial_toml_fills_defaults() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
-        fs::write(&path, "max_nudges = 5\n").unwrap();
+        fs::write(&path, "silence_threshold_seconds = 600\n").unwrap();
 
         let cfg = Config::load_from(&path).unwrap();
-        assert_eq!(cfg.max_nudges, 5);
-        assert_eq!(cfg.silence_threshold_seconds, 300);
+        assert_eq!(cfg.silence_threshold_seconds, 600);
+        assert_eq!(cfg.max_concurrent_workers, 3);
         assert!(cfg.notify.exec.is_none());
     }
 }

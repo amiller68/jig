@@ -4,22 +4,22 @@
 //! Each handler emits events to the worker's event log.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::worker::events::{self, Event, EventKind};
-use jig_core::error::Result;
 use jig_core::git::conventional::ValidationConfig;
+use jig_core::git::Worktree;
 
 /// Handle post-commit hook: emit a Commit event with the HEAD SHA.
 ///
-/// Silently does nothing if not in a jig-managed worktree or if
-/// the worker can't be identified.
-pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
-    let Some((repo_name, worker_name)) = identify_worker(repo_path) else {
+/// Silently does nothing if not in a jig-managed worktree.
+pub fn handle_post_commit(repo_path: &Path) -> Result<(), super::HookError> {
+    let Some(wt) = open_worktree(repo_path) else {
         return Ok(());
     };
 
-    let sha = head_sha(repo_path).unwrap_or_default();
+    let repo_name = wt.repo_name();
+    let worker_name = wt.branch_name().to_string();
+    let sha = wt.head_sha().unwrap_or_default();
 
     let log = events::event_log_for_worker(&repo_name, &worker_name)?;
     log.append(&Event::now(EventKind::Commit {
@@ -31,12 +31,14 @@ pub fn handle_post_commit(repo_path: &Path) -> Result<()> {
 }
 
 /// Handle post-merge hook: emit a Push event.
-pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
-    let Some((repo_name, worker_name)) = identify_worker(repo_path) else {
+pub fn handle_post_merge(repo_path: &Path) -> Result<(), super::HookError> {
+    let Some(wt) = open_worktree(repo_path) else {
         return Ok(());
     };
 
-    let sha = head_sha(repo_path).unwrap_or_default();
+    let repo_name = wt.repo_name();
+    let worker_name = wt.branch_name().to_string();
+    let sha = wt.head_sha().unwrap_or_default();
 
     let log = events::event_log_for_worker(&repo_name, &worker_name)?;
     log.append(&Event::now(EventKind::Push {
@@ -52,10 +54,8 @@ pub fn handle_post_merge(repo_path: &Path) -> Result<()> {
 /// Reads the commit message from the file path provided by git (the first argument).
 /// If a `[commits]` section exists in `jig.toml`, validates against those rules.
 /// Returns an error (blocking the commit) if validation fails.
-pub fn handle_commit_msg(_repo_path: &Path, commit_msg_file: &str) -> Result<()> {
-    let message = std::fs::read_to_string(commit_msg_file).map_err(|e| {
-        jig_core::Error::Custom(format!("failed to read commit message file: {}", e))
-    })?;
+pub fn handle_commit_msg(_repo_path: &Path, commit_msg_file: &str) -> Result<(), super::HookError> {
+    let message = std::fs::read_to_string(commit_msg_file)?;
 
     // Strip git comment lines (lines starting with #)
     let cleaned: String = message
@@ -77,14 +77,14 @@ pub fn handle_commit_msg(_repo_path: &Path, commit_msg_file: &str) -> Result<()>
                 Ok(())
             } else {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("  {}", e)).collect();
-                Err(jig_core::Error::Custom(format!(
+                Err(super::HookError::Validation(format!(
                     "commit message does not follow conventional commits:\n{}\n\n  \
                      Run `jig commit examples` for help.",
                     msgs.join("\n"),
                 )))
             }
         }
-        Err(e) => Err(jig_core::Error::Custom(format!(
+        Err(e) => Err(super::HookError::Validation(format!(
             "commit message does not follow conventional commits:\n  {}\n\n  \
              Run `jig commit examples` for help.",
             e,
@@ -93,51 +93,13 @@ pub fn handle_commit_msg(_repo_path: &Path, commit_msg_file: &str) -> Result<()>
 }
 
 /// Handle pre-commit hook: currently a no-op.
-pub fn handle_pre_commit(_repo_path: &Path) -> Result<()> {
+pub fn handle_pre_commit(_repo_path: &Path) -> Result<(), super::HookError> {
     Ok(())
 }
 
-/// Try to identify the repo name and worker name from the repo path.
-///
-/// Returns `None` if not in a jig-managed worktree.
-fn identify_worker(repo_path: &Path) -> Option<(String, String)> {
-    // Check if we're inside a .jig/ worktree directory
-    let path_str = repo_path.to_string_lossy();
-
-    // Look for .jig/ in the path — the parent of .jig is the repo root,
-    // and everything after .jig/ is the worker name
-    if let Some(idx) = path_str.find("/.jig/") {
-        let repo_root = &path_str[..idx];
-        let worker_name = &path_str[idx + 6..]; // skip "/.jig/"
-
-        let repo_name = Path::new(repo_root)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        if !worker_name.is_empty() {
-            return Some((repo_name, worker_name.to_string()));
-        }
-    }
-
-    None
-}
-
-/// Get HEAD SHA for the repo at the given path.
-fn head_sha(repo_path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo_path)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
+/// Try to open the path as a linked git worktree (jig-managed).
+fn open_worktree(repo_path: &Path) -> Option<Worktree> {
+    Worktree::open(repo_path).ok()
 }
 
 #[cfg(test)]
@@ -145,29 +107,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identify_worker_in_jig_worktree() {
-        let path = Path::new("/home/user/myrepo/.jig/feat/add-auth");
-        let result = identify_worker(path);
-        assert!(result.is_some());
-        let (repo, worker) = result.unwrap();
-        assert_eq!(repo, "myrepo");
-        assert_eq!(worker, "feat/add-auth");
-    }
-
-    #[test]
-    fn identify_worker_not_in_worktree() {
-        let path = Path::new("/home/user/myrepo");
-        assert!(identify_worker(path).is_none());
-    }
-
-    #[test]
-    fn identify_worker_simple_name() {
-        let path = Path::new("/repos/project/.jig/fix-bug");
-        let result = identify_worker(path);
-        assert!(result.is_some());
-        let (repo, worker) = result.unwrap();
-        assert_eq!(repo, "project");
-        assert_eq!(worker, "fix-bug");
+    fn open_worktree_not_in_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(open_worktree(tmp.path()).is_none());
     }
 
     #[test]
@@ -209,7 +151,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let msg_file = tmp.path().join("COMMIT_EDITMSG");
         std::fs::write(&msg_file, "# All comments\n# Nothing else\n").unwrap();
-        // Empty message after stripping comments should pass (git will abort anyway)
         assert!(handle_commit_msg(tmp.path(), msg_file.to_str().unwrap()).is_ok());
     }
 

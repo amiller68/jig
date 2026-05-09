@@ -73,16 +73,9 @@ If behavior changed that affects skills in `.claude/skills/`:
 - `/check` — Did build, test, or lint commands change?
 - `/review` — Did review criteria or conventions change?
 - `/draft` — Did PR workflow change?
-- `/spawn` — Did worker spawning behavior change?
 - `/issues` — Did issue tracking conventions change?
 
 Skills must stay in sync with actual project behavior.
-
-### 7. Issue Cross-Reference
-
-If `issues/` exists, check for related tickets:
-- Should any issue status be updated?
-- Are there follow-up items to track?
 
 ## Output Format
 

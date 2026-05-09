@@ -2,15 +2,7 @@
 
 Central hub for project documentation. **Read this first** to find the right docs for your task.
 
-## Quick Start
-
-```bash
-cargo build              # Build all crates
-cargo test               # Run all tests
-cargo clippy             # Lint
-cargo fmt --check        # Check formatting
-cargo run -- <args>      # Run CLI (e.g., cargo run -- list)
-```
+For usage guides (shell integration, worktrees, orchestration, configuration, Linear integration), see the [wiki](https://jig.krondor.org/docs/getting-started/).
 
 ## Documentation Map
 
@@ -29,19 +21,7 @@ Find the right doc by what you're working on. The **Sources** column tells you w
 | Document | Summary | Sources |
 |----------|---------|---------|
 | [daemon.md](./daemon.md) | Tick loop, actor threads, nudging, auto-spawn, auto-prune, PR monitoring | `crates/jig-cli/src/daemon/` |
-| [Parent-Child Epics](./parent-child.md) | Parent-as-integrator model, auto vs manual children, wrap-up flow, migration | `crates/jig-cli/src/cli/commands/spawn.rs`, `crates/jig-cli/src/cli/commands/pr.rs`, `crates/jig-cli/src/daemon/` |
-| [CLI Output Formatting](./cli/ui/STDOUT-FORMATTING.md) | Op trait pattern, Display impls, comfy-table usage, color conventions | `crates/jig-cli/src/cli/op.rs`, `crates/jig-cli/src/cli/ui.rs`, `crates/jig-cli/src/cli/commands/*.rs` |
-
-### CLI Usage
-
-| Document | Summary | Sources |
-|----------|---------|---------|
-| [Shell Integration](./cli/usage/shell-integration.md) | Shell function, tab completion, `-o` flag, troubleshooting | `crates/jig-cli/src/cli/commands/shell_init.rs`, `crates/jig-cli/src/cli/commands/shell_setup.rs` |
-| [Worktrees](./cli/usage/worktrees.md) | Create, open, remove worktrees; glob patterns; nested paths | `crates/jig-cli/src/cli/commands/create.rs`, `crates/jig-cli/src/cli/commands/remove.rs`, `crates/jig-core/src/git/worktree.rs` |
-| [Orchestration](./cli/usage/orchestration.md) | Multi-agent workflow: spawn, monitor, review, merge workers | `crates/jig-cli/src/cli/commands/spawn.rs`, `crates/jig-cli/src/cli/commands/merge.rs`, `crates/jig-cli/src/cli/commands/review.rs` |
-| [Configuration](./cli/usage/configuration.md) | jig.toml, jig.local.toml, global config, on-create hooks, file copying | `crates/jig-cli/src/config/` |
-| [Init](./cli/usage/init.md) | `jig init` bootstrapping, --audit, --backup, template system | `crates/jig-cli/src/cli/commands/init.rs`, `templates/` |
-| [Linear Integration](./cli/usage/linear-integration.md) | Linear API setup, status/priority mapping, label-based auto-spawn | `crates/jig-core/src/issues/providers/linear/` |
+| [STDOUT-FORMATTING.md](./STDOUT-FORMATTING.md) | Op trait pattern, Display impls, comfy-table usage, color conventions | `crates/jig-cli/src/cli/op.rs`, `crates/jig-cli/src/cli/ui.rs`, `crates/jig-cli/src/cli/commands/*.rs` |
 
 ### Operations
 

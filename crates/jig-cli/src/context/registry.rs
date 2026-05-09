@@ -10,8 +10,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 
-use jig_core::error::Result;
-
 /// A single registered repository
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoEntry {
@@ -28,7 +26,7 @@ pub struct RepoRegistry {
 
 impl RepoRegistry {
     /// Load registry from disk, returning empty registry if file doesn't exist
-    pub fn load() -> Result<Self> {
+    pub fn load() -> Result<Self, super::ContextError> {
         let path = Self::registry_path()?;
         if !path.exists() {
             return Ok(Self::default());
@@ -39,7 +37,7 @@ impl RepoRegistry {
     }
 
     /// Save registry to disk
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<(), super::ContextError> {
         let path = Self::registry_path()?;
         fs::create_dir_all(path.parent().unwrap())?;
         let content = serde_json::to_string_pretty(self)?;
@@ -106,7 +104,7 @@ impl RepoRegistry {
         self.repos.iter_mut().find(|e| e.path == path)
     }
 
-    fn registry_path() -> Result<PathBuf> {
-        super::paths::repo_registry_path()
+    fn registry_path() -> Result<PathBuf, super::ContextError> {
+        Ok(super::paths::repo_registry_path()?)
     }
 }

@@ -1,21 +1,23 @@
 //! Monitor actor — the daemon's main per-tick work loop.
 //!
-//! Each tick it discovers active workers, delegates state checking to
-//! [`Worker::tick()`], runs nudge rules, sends notifications, and returns
-//! [`PruneTarget`]s for the prune actor to clean up.
+//! Each tick it discovers active workers, reduces their event logs,
+//! polls GitHub, enriches runtime state, runs nudge rules, sends
+//! notifications, and returns [`PruneTarget`]s for the prune actor.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use url::Url;
+
 use crate::context::{self, Config, JigToml, RepoConfig, RepoEntry};
 use crate::notify::{NotificationEvent, NotificationQueue, Notifier};
+use crate::daemon::checks::{self, PrHealth, PrStatus};
 use crate::worker::events::{self, Event, EventKind, TerminalKind, WorkerState};
 use crate::worker::{MuxStatus, WorkerStatus};
 use jig_core::git::Branch;
+use jig_core::github::GitHubClient;
 use jig_core::mux::{Mux, TmuxMux};
-use jig_core::prompt::Prompt;
-
 type Worker = crate::worker::Worker;
 
 use super::prune::PruneTarget;
@@ -157,13 +159,21 @@ impl MonitorActor {
         key: &str,
         global_config: &Config,
         notifier: &Notifier,
-    ) -> jig_core::error::Result<(WorkerState, Vec<PruneTarget>)> {
+    ) -> Result<(WorkerState, Vec<PruneTarget>), crate::worker::WorkerError> {
         let worker_name = worker.branch().to_string();
         let repo_name = worker.repo_name();
 
-        // Decide whether to poll GitHub this tick
+        // 1. Reduce event log
+        let log = worker.log()?;
+        let mut state: WorkerState = log.reduce()?;
+        state.check_silence(global_config);
+
+        // 2. PR check if polling this tick
+        let mut pr_health = PrHealth::default();
+        let mut is_draft = false;
+
         let gh_client = if self.should_poll_github(key) {
-            worker.github_client()
+            GitHubClient::from_repo_path(worker.path()).ok()
         } else {
             None
         };
@@ -174,7 +184,34 @@ impl MonitorActor {
             self.mark_github_polled(key);
         }
 
-        let state = worker.tick(mux, gh, global_config, repo_entry)?;
+        if let Some(gh) = gh {
+            if !state.status.is_terminal() {
+                let report = checks::check_pr(gh, &worker_name, key);
+                state.review_feedback_count = report.review_feedback_count;
+                process_pr_report(&report, &log, &state, &mut pr_health, &mut is_draft);
+
+                // Re-reduce if we wrote a PrOpened event
+                if state.pr_url.is_none() && pr_health.has_pr {
+                    state = log.reduce()?;
+                    state.check_silence(global_config);
+                    state.review_feedback_count = report.review_feedback_count;
+                }
+            }
+        }
+
+        // 3. Runtime enrichment
+        let branch: Branch = state.branch.as_deref().unwrap_or(&worker_name).into();
+        state.repo = Some(repo_entry.clone());
+        state.name = worker_name.clone();
+        state.resolved_branch = branch;
+        state.mux_status = worker.mux_status(mux);
+        let (commits_ahead, is_dirty) = git_stats(&repo_entry.path, &worker_name);
+        state.commits_ahead = commits_ahead;
+        state.is_dirty = is_dirty;
+        state.parsed_pr_url = state.pr_url.as_deref().and_then(|u| Url::parse(u).ok());
+        state.pr_health = pr_health;
+        state.is_draft = is_draft;
+        state.nudge_cooldown_remaining = nudge_cooldown(&state, global_config);
 
         if state.status == WorkerStatus::Created {
             return Ok((state, vec![]));
@@ -194,7 +231,6 @@ impl MonitorActor {
             &worker_name,
             &old_state,
             &state,
-            global_config.max_nudges,
             global_config.silence_threshold_seconds,
         );
 
@@ -333,44 +369,28 @@ impl MonitorActor {
                 .unwrap_or_else(|| context::DEFAULT_BASE_BRANCH.to_string());
 
             for check_name in state.pr_health.pr_checks.problems() {
-                let nkey = nudge_key_for_check(check_name);
+                let nkey = crate::prompts::nudge::nudge_key_for_check(check_name);
                 let count = state.nudge_counts.get(nkey).copied().unwrap_or(0);
-                if count >= global_config.max_nudges {
-                    continue;
-                }
                 if let Some(&last_ts) = state.last_nudge_at.get(nkey) {
                     let now = chrono::Utc::now().timestamp();
                     if now - last_ts < global_config.silence_threshold_seconds as i64 {
                         continue;
                     }
                 }
-                let mut prompt = Prompt::new(template_for_check(check_name))
-                    .named(nkey)
-                    .var_num("nudge_count", count + 1)
-                    .var_num("max_nudges", global_config.max_nudges)
-                    .var_bool("is_final_nudge", count + 1 >= global_config.max_nudges);
+                let prompt = crate::prompts::nudge::for_check(
+                    check_name,
+                    count + 1,
+                    &base,
+                );
 
-                match check_name {
-                    "ci" => {
-                        prompt = prompt.var_list("ci_failures", Vec::<String>::new());
+                if let Some(prompt) = prompt {
+                    if let Ok(message) = prompt.render() {
+                        actions.push(DispatchAction::Nudge {
+                            message,
+                            nudge_key: nkey.to_string(),
+                            is_pr_nudge: true,
+                        });
                     }
-                    "conflicts" => {
-                        prompt = prompt.var("base_branch", &base);
-                    }
-                    "commits" => {
-                        prompt = prompt
-                            .var_list("bad_commits", Vec::<String>::new())
-                            .var("base_branch", &base);
-                    }
-                    _ => {}
-                }
-
-                if let Ok(message) = prompt.render() {
-                    actions.push(DispatchAction::Nudge {
-                        message,
-                        nudge_key: nkey.to_string(),
-                        is_pr_nudge: true,
-                    });
                 }
             }
         }
@@ -405,7 +425,7 @@ impl MonitorActor {
                         if !is_pr_nudge && !w.is_agent_running(mux) {
                             continue;
                         }
-                        let prompt = Prompt::new(message).named(nudge_key);
+                        let prompt = jig_core::prompt::Prompt::new(message).named(nudge_key);
                         match w.nudge(prompt, mux) {
                             Ok(()) => {
                                 tracing::info!(worker = key, nudge_key = %nudge_key, "nudge delivered")
@@ -500,50 +520,22 @@ enum DispatchAction {
 
 // ── Dispatch rules ──────────────────────────────────────────────────
 
-const TEMPLATE_IDLE: &str = r#"STATUS CHECK: You've been idle for a while (nudge {{nudge_count}}/{{max_nudges}}).
-
-{{#if has_changes}}
-You have uncommitted changes but no PR yet. What's blocking you?
-
-1. If ready: commit (conventional format), push, create PR, update issue, call /review
-2. If stuck: explain what you need help with
-3. If complete but confused: finish the PR
-{{else}}
-No recent commits. What's the current state?
-
-1. Still working? Give a brief status update and continue
-2. Stuck on something? Explain what's blocking you
-3. Done but forgot to create PR? Commit, push, create PR, call /review
-{{/if}}
-
-{{#if is_final_nudge}}
-This is your final nudge. If you need human help, say so now.
-{{/if}}
-"#;
-
-const TEMPLATE_STUCK: &str = r#"STUCK PROMPT DETECTED: You appear to be waiting at an interactive prompt.
-Auto-approving... (nudge {{nudge_count}}/{{max_nudges}})
-"#;
-
 fn dispatch_actions(
     repo_name: &str,
     worker_name: &str,
     old_state: &WorkerState,
     new_state: &WorkerState,
-    max_nudges: u32,
     cooldown_seconds: u64,
 ) -> Vec<DispatchAction> {
     let mut actions = vec![];
     let is_transition = old_state.status != new_state.status;
 
     if !new_state.status.is_terminal() && new_state.pr_url.is_none() {
-        let (nudge_key, template, is_stuck) = match new_state.status {
-            WorkerStatus::WaitingInput => ("stuck", TEMPLATE_STUCK, true),
-            WorkerStatus::Stalled | WorkerStatus::Idle => ("idle", TEMPLATE_IDLE, false),
-            _ => ("", "", false),
+        let nudge_key = match new_state.status {
+            WorkerStatus::WaitingInput => "stuck",
+            WorkerStatus::Stalled | WorkerStatus::Idle => "idle",
+            _ => "",
         };
-
-        let _ = is_stuck;
 
         if !nudge_key.is_empty() {
             let count = new_state.nudge_counts.get(nudge_key).copied().unwrap_or(0);
@@ -556,16 +548,12 @@ fn dispatch_actions(
                 None => true,
             };
 
-            if count < max_nudges && cooldown_ok {
-                let mut prompt = Prompt::new(template)
-                    .named(nudge_key)
-                    .var_num("nudge_count", count + 1)
-                    .var_num("max_nudges", max_nudges)
-                    .var_bool("is_final_nudge", count + 1 >= max_nudges);
-
-                if nudge_key == "idle" {
-                    prompt = prompt.var_bool("has_changes", new_state.commit_count > 0);
-                }
+            if cooldown_ok {
+                let prompt = if nudge_key == "stuck" {
+                    crate::prompts::nudge::stuck(count + 1)
+                } else {
+                    crate::prompts::nudge::idle(count + 1, new_state.commit_count > 0)
+                };
 
                 if let Ok(message) = prompt.render() {
                     actions.push(DispatchAction::Nudge {
@@ -574,22 +562,6 @@ fn dispatch_actions(
                         is_pr_nudge: false,
                     });
                 }
-            } else if is_transition {
-                actions.push(DispatchAction::Notify {
-                    event: NotificationEvent::NeedsIntervention {
-                        repo: repo_name.to_string(),
-                        worker: worker_name.to_string(),
-                        reason: format!(
-                            "Max nudges reached for {} worker, needs human attention",
-                            match new_state.status {
-                                WorkerStatus::WaitingInput => "stuck",
-                                WorkerStatus::Stalled => "stalled",
-                                WorkerStatus::Idle => "idle",
-                                _ => "unknown",
-                            }
-                        ),
-                    },
-                });
             }
         }
     }
@@ -633,7 +605,7 @@ fn try_resume_worker(
     repo_root: &std::path::Path,
     worker_name: &str,
     mux: &dyn Mux,
-) -> jig_core::error::Result<bool> {
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     let worker = Worker::from_branch(repo_root, worker_name.into());
     if worker.has_mux_window(mux) {
         return Ok(false);
@@ -646,7 +618,10 @@ fn try_resume_worker(
         &jig_config.agent.disallowed_tools,
     )
     .unwrap_or_else(|| jig_core::agents::Agent::from_config("claude", None, &[]).unwrap());
-    Worker::resume(&wt, &agent, "You were interrupted. Resume your previous task.", mux)?;
+    let prompt = crate::prompts::resume_task(
+        "You were interrupted. Resume your previous task.",
+    );
+    Worker::resume(&wt, &agent, prompt, mux)?;
     Ok(true)
 }
 
@@ -656,73 +631,81 @@ fn build_notifier(config: &Config) -> Option<Notifier> {
     Some(Notifier::new(config.notify.clone(), queue))
 }
 
-// ── PR nudge templates ──────────────────────────────────────────────
-
-const TEMPLATE_CI: &str = r#"CI is failing on your PR (nudge {{nudge_count}}/{{max_nudges}}).
-
-Fix these issues:
-{{#each ci_failures}}
-  - {{this}}
-{{/each}}
-
-STEPS:
-1. Fix the failing checks
-2. Commit using conventional commits: fix(ci): fix linting errors
-3. Push to your branch: git push
-4. Verify CI passes
-5. Call /review when green
-"#;
-
-const TEMPLATE_CONFLICT: &str = r#"Your PR has merge conflicts with {{base_branch}} (nudge {{nudge_count}}/{{max_nudges}}).
-
-Resolve them:
-
-1. git fetch origin
-2. git rebase {{base_branch}}
-3. Resolve conflicts, stage files, git rebase --continue
-4. git push --force-with-lease
-5. Call /review when conflicts are resolved
-"#;
-
-const TEMPLATE_REVIEW: &str = r#"Your PR has unresolved review comments (nudge {{nudge_count}}/{{max_nudges}}).
-
-Address all feedback, commit, push, and call /review.
-"#;
-
-const TEMPLATE_BAD_COMMITS: &str = r#"Your PR has commits that don't follow conventional commit format (nudge {{nudge_count}}/{{max_nudges}}).
-
-Bad commits:
-{{#each bad_commits}}
-  - {{this}}
-{{/each}}
-
-Fix with interactive rebase:
-
-1. git rebase -i {{base_branch}}
-2. Change 'pick' to 'reword' for each bad commit
-3. Update message to: <type>(<scope>): <description>
-   Types: feat|fix|docs|style|refactor|perf|test|chore|ci
-4. git push --force-with-lease
-5. Call /review
-"#;
-
-fn nudge_key_for_check(check_name: &str) -> &str {
-    match check_name {
-        "ci" => "ci",
-        "conflicts" => "conflict",
-        "reviews" => "review",
-        "commits" => "bad_commits",
-        _ => check_name,
+fn git_stats(repo_path: &std::path::Path, worker_name: &str) -> (usize, bool) {
+    let worktree_path = context::worktree_path(repo_path, worker_name);
+    if !worktree_path.exists() {
+        return (0, false);
     }
+    let base = context::resolve_base_branch_for(repo_path)
+        .unwrap_or_else(|_| Branch::new(context::DEFAULT_BASE_BRANCH));
+    let ahead = jig_core::git::Repo::open(&worktree_path)
+        .and_then(|r| r.commits_ahead(&base))
+        .unwrap_or_default()
+        .len();
+    let dirty = jig_core::git::Repo::open(&worktree_path)
+        .and_then(|r| r.has_uncommitted_changes())
+        .unwrap_or(false);
+    (ahead, dirty)
 }
 
-fn template_for_check(check_name: &str) -> &'static str {
-    match check_name {
-        "ci" => TEMPLATE_CI,
-        "conflicts" => TEMPLATE_CONFLICT,
-        "reviews" => TEMPLATE_REVIEW,
-        "commits" => TEMPLATE_BAD_COMMITS,
-        _ => "",
+fn nudge_cooldown(state: &WorkerState, config: &Config) -> Option<u64> {
+    let now = chrono::Utc::now().timestamp();
+    let mut min_remaining: Option<u64> = None;
+    for &last_ts in state.last_nudge_at.values() {
+        let elapsed = now - last_ts;
+        if elapsed < config.silence_threshold_seconds as i64 {
+            let remaining = (config.silence_threshold_seconds as i64 - elapsed) as u64;
+            min_remaining = Some(min_remaining.map_or(remaining, |cur: u64| cur.min(remaining)));
+        }
+    }
+    min_remaining
+}
+
+fn process_pr_report(
+    report: &checks::PrReport,
+    event_log: &events::EventLog,
+    state: &WorkerState,
+    pr_health: &mut PrHealth,
+    is_draft: &mut bool,
+) {
+    match &report.status {
+        PrStatus::NoPr => {}
+        PrStatus::Error { error, .. } => {
+            pr_health.pr_error = Some(error.clone());
+        }
+        PrStatus::Merged { pr_url } | PrStatus::Closed { pr_url } => {
+            pr_health.has_pr = true;
+            if state.pr_url.is_none() {
+                let pr_number = pr_url
+                    .path_segments()
+                    .and_then(|mut s| s.next_back())
+                    .unwrap_or("0");
+                let _ = event_log.append(&Event::now(EventKind::PrOpened {
+                    pr_url: pr_url.to_string(),
+                    pr_number: pr_number.to_string(),
+                }));
+            }
+        }
+        PrStatus::Open {
+            pr_url,
+            is_draft: draft,
+            checks,
+            ..
+        } => {
+            pr_health.has_pr = true;
+            pr_health.pr_checks = checks.clone();
+            *is_draft = *draft;
+            if state.pr_url.is_none() {
+                let pr_number = pr_url
+                    .path_segments()
+                    .and_then(|mut s| s.next_back())
+                    .unwrap_or("0");
+                let _ = event_log.append(&Event::now(EventKind::PrOpened {
+                    pr_url: pr_url.to_string(),
+                    pr_number: pr_number.to_string(),
+                }));
+            }
+        }
     }
 }
 
@@ -741,29 +724,10 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &old, &new, 3, 300);
+        let actions = dispatch_actions("repo", "test", &old, &new, 300);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], DispatchAction::Nudge { nudge_key, .. } if nudge_key == "stuck")
-        );
-    }
-
-    #[test]
-    fn max_nudges_triggers_notify() {
-        let old = WorkerState {
-            status: WorkerStatus::Running,
-            ..Default::default()
-        };
-        let mut new = WorkerState {
-            status: WorkerStatus::WaitingInput,
-            ..Default::default()
-        };
-        new.nudge_counts.insert("stuck".to_string(), 3);
-
-        let actions = dispatch_actions("repo", "test", &old, &new, 3, 300);
-        assert_eq!(actions.len(), 1);
-        assert!(
-            matches!(&actions[0], DispatchAction::Notify { event: NotificationEvent::NeedsIntervention { reason, .. } } if reason.contains("Max nudges"))
         );
     }
 
@@ -778,7 +742,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &old, &new, 3, 300);
+        let actions = dispatch_actions("repo", "test", &old, &new, 300);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], DispatchAction::Nudge { nudge_key, .. } if nudge_key == "idle")
@@ -793,7 +757,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &old, &new, 3, 300);
+        let actions = dispatch_actions("repo", "test", &old, &new, 300);
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -810,7 +774,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &state, &state, 3, 300);
+        let actions = dispatch_actions("repo", "test", &state, &state, 300);
         assert!(actions.is_empty());
     }
 
@@ -821,7 +785,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &state, &state, 3, 300);
+        let actions = dispatch_actions("repo", "test", &state, &state, 300);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], DispatchAction::Nudge { nudge_key, .. } if nudge_key == "stuck")
@@ -839,7 +803,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &old, &new, 3, 300);
+        let actions = dispatch_actions("repo", "test", &old, &new, 300);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], DispatchAction::Notify { event: NotificationEvent::NeedsIntervention { reason, .. } } if reason.contains("failed"))
@@ -857,7 +821,7 @@ mod tests {
             ..Default::default()
         };
 
-        let actions = dispatch_actions("repo", "test", &old, &new, 3, 300);
+        let actions = dispatch_actions("repo", "test", &old, &new, 300);
         assert_eq!(actions.len(), 1);
         assert!(
             matches!(&actions[0], DispatchAction::Nudge { nudge_key, .. } if nudge_key == "idle")

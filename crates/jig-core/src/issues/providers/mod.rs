@@ -4,9 +4,10 @@ pub mod linear;
 
 use std::fmt;
 
-use crate::error::Result;
+
 
 use super::issue::{Issue, IssueFilter, IssueRef, IssueStatus};
+use linear::client::LinearError;
 
 /// Identifies the type of issue provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -28,9 +29,9 @@ impl fmt::Display for ProviderKind {
 pub trait IssueBackend {
     fn name(&self) -> &str;
     fn kind(&self) -> ProviderKind;
-    fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>>;
-    fn get(&self, id: &str) -> Result<Option<Issue>>;
-    fn update_status(&self, id: &str, status: &IssueStatus) -> Result<()>;
+    fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>, LinearError>;
+    fn get(&self, id: &str) -> Result<Option<Issue>, LinearError>;
+    fn update_status(&self, id: &str, status: &IssueStatus) -> Result<(), LinearError>;
 }
 
 /// Concrete handle that adapts to a project's configured issue backend.
@@ -51,15 +52,15 @@ impl IssueProvider {
         self.inner.kind()
     }
 
-    pub fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>> {
+    pub fn list(&self, filter: &IssueFilter) -> Result<Vec<Issue>, LinearError> {
         self.inner.list(filter)
     }
 
-    pub fn get(&self, id: &str) -> Result<Option<Issue>> {
+    pub fn get(&self, id: &str) -> Result<Option<Issue>, LinearError> {
         self.inner.get(id)
     }
 
-    pub fn update_status(&self, id: &str, status: &IssueStatus) -> Result<()> {
+    pub fn update_status(&self, id: &str, status: &IssueStatus) -> Result<(), LinearError> {
         self.inner.update_status(id, status)
     }
 

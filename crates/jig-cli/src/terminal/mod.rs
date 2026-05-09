@@ -1,60 +1,38 @@
-mod emulator;
+pub mod shell;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-pub use emulator::*;
-
-/// Terminal-specific errors
-#[derive(Debug, thiserror::Error)]
-pub enum TerminalError {
-    #[error("{terminal} does not support {operation}")]
-    NotSupported {
-        terminal: TerminalEmulatorKind,
-        operation: String,
-    },
-    #[error("missing dependency: {0}")]
-    MissingDependency(String),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
+/// Resolve a command on `$PATH`, returning its full path if found.
+pub fn which(cmd: &str) -> Option<PathBuf> {
+    which::which(cmd).ok()
 }
 
-/// Wraps a detected terminal emulator, providing the entry point for
-/// terminal operations.
-pub struct Terminal {
-    emulator: Box<dyn TerminalEmulator>,
+/// Result of checking a system dependency.
+#[derive(Debug)]
+pub struct DepCheck {
+    pub name: String,
+    pub found: bool,
+    pub version: Option<String>,
 }
 
-impl Terminal {
-    pub fn detect() -> Self {
-        let emulator: Box<dyn TerminalEmulator> = if let Ok(term) = std::env::var("TERM_PROGRAM") {
-            match term.to_lowercase().as_str() {
-                "iterm.app" => Box::new(ITerm2),
-                "apple_terminal" => Box::new(TerminalApp),
-                "ghostty" => Box::new(Ghostty),
-                "wezterm" => Box::new(WezTerm),
-                "alacritty" => Box::new(Alacritty),
-                _ => Box::new(Unknown(term)),
-            }
-        } else if std::env::var("KITTY_WINDOW_ID").is_ok() {
-            Box::new(Kitty)
-        } else if std::env::var("WEZTERM_UNIX_SOCKET").is_ok() {
-            Box::new(WezTerm)
-        } else {
-            Box::new(Unknown("unknown".to_string()))
-        };
-        Self { emulator }
-    }
-
-    pub fn kind(&self) -> TerminalEmulatorKind {
-        self.emulator.kind()
-    }
-
-    pub fn open_tab(&self, dir: &Path) -> Result<(), TerminalError> {
-        self.emulator.open_tab(dir)
-    }
-
-    /// Resolve a command on `$PATH`, returning its full path if found.
-    pub fn which(cmd: &str) -> Option<PathBuf> {
-        which::which(cmd).ok()
-    }
+/// Check whether a CLI dependency is available, optionally extracting its version.
+///
+/// `version_args` are passed to the command to get version output (e.g. `&["--version"]`).
+/// The first token of stdout is returned as the version string.
+pub fn check_dep(name: &str, version_args: &[&str]) -> DepCheck {
+    let found = which(name).is_some();
+    let version = if found {
+        std::process::Command::new(name)
+            .args(version_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    DepCheck { name: name.to_string(), found, version }
 }

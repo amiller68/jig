@@ -2,8 +2,6 @@
 
 use std::path::Path;
 
-use jig_core::error::Result;
-
 use super::registry::{self, HookRegistry};
 
 /// Outcome for a single hook uninstall.
@@ -27,7 +25,7 @@ pub struct UninstallResult {
 ///
 /// If `specific_hook` is `Some`, only that hook is removed.
 /// Otherwise all hooks tracked in the registry are removed.
-pub fn uninstall_hooks(repo_path: &Path, specific_hook: Option<&str>) -> Result<UninstallResult> {
+pub fn uninstall_hooks(repo_path: &Path, specific_hook: Option<&str>) -> Result<UninstallResult, super::HookError> {
     let hooks_dir = repo_path.join(".git").join("hooks");
     let registry_path = registry::registry_path(repo_path);
 

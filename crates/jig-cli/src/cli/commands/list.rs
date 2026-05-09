@@ -42,7 +42,7 @@ impl std::fmt::Display for ListOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum ListError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
     #[error(transparent)]
     Git(#[from] jig_core::GitError),
 }

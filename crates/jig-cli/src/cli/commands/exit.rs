@@ -30,7 +30,7 @@ impl std::fmt::Display for ExitOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum ExitError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]

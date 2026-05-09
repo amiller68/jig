@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
 use crate::git::Branch;
-use crate::prompt::Prompt;
 
-use super::providers::IssueProvider;
 
 /// A reference to an issue in an external tracker (e.g. "ENG-123").
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -219,34 +217,6 @@ impl Issue {
             return true;
         }
         spawn_labels.iter().all(|required| self.has_label(required))
-    }
-
-    /// Build a [`Prompt`] from this issue, resolving the parent if present.
-    ///
-    /// The returned prompt's template is the fully-formed task context string.
-    /// Callers render it and inject the result into their own framing template.
-    pub fn to_prompt(&self, provider: &IssueProvider) -> Prompt {
-        let parent = self.parent().and_then(|r| provider.get(r).ok().flatten());
-
-        let parent_section = match &parent {
-            Some(p) => format!(
-                "PARENT ISSUE ({}): {}\n{}\n\n---\n\nSUB-TASK:\n",
-                p.id(),
-                p.title(),
-                p.body()
-            ),
-            None => String::new(),
-        };
-
-        let task_context = format!(
-            "{}{}\n\n{}\n\nISSUE COMPLETION: This issue is tracked by Linear. \
-             Status sync is handled automatically — no manual status update is needed.",
-            parent_section,
-            self.title(),
-            self.body(),
-        );
-
-        Prompt::new(&task_context)
     }
 
     /// Whether this issue matches the given filter.

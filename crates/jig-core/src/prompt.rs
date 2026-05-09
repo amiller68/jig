@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use handlebars::Handlebars;
 
-use crate::error::Result;
+
 
 /// A context builder that takes a Handlebars template string and renders
 /// it with accumulated vars.
@@ -61,7 +61,7 @@ impl Prompt {
         self.name.as_deref().unwrap_or("unknown")
     }
 
-    pub fn render(self) -> Result<String> {
+    pub fn render(self) -> Result<String, handlebars::RenderError> {
         let hbs = Handlebars::new();
         let rendered = hbs.render_template(&self.template, &self.vars)?;
         Ok(rendered)

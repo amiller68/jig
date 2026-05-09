@@ -2,10 +2,20 @@
   items:
     - background
     - core-concepts
-    - getting-started
-    - workflow
-
-- title: Reference
-  items:
     - why-jig
     - tips-and-faq
+
+- title: Usage
+  items:
+    - init
+    - group:
+        title: Commands
+        items:
+          - commands
+          - issues
+          - prs
+    - worktrees
+    - spawning
+    - monitoring
+    - hooks-and-notifications
+    - parent-child

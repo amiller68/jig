@@ -11,9 +11,6 @@ collections:
   docs:
     output: true
     permalink: /docs/:slug/
-  articles:
-    output: true
-    permalink: /articles/:slug/
 
 defaults:
   - scope:
@@ -26,18 +23,9 @@ defaults:
     values:
       layout: doc
   - scope:
-      path: ""
-      type: articles
-    values:
-      layout: article
-  - scope:
       path: "index.md"
     values:
       layout: home
-  - scope:
-      path: "articles.md"
-    values:
-      layout: articles
 
 exclude:
   - Gemfile

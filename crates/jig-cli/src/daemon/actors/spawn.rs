@@ -239,7 +239,7 @@ fn spawn_worker_for_issue(
     )
     .unwrap_or_else(|| agents::Agent::from_config("claude", None, &[]).unwrap());
 
-    let task = issue.to_prompt(provider);
+    let prompt = crate::prompts::spawn_task(issue, provider);
 
     let copy_files: Vec<std::path::PathBuf> =
         cfg.repo.worktree.copy.iter().map(std::path::PathBuf::from).collect();
@@ -254,7 +254,7 @@ fn spawn_worker_for_issue(
         &branch,
         &base,
         &agent,
-        task,
+        prompt,
         true,
         Some(issue.id().clone()),
         &copy_files,

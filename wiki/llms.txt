@@ -1,0 +1,22 @@
+---
+layout: null
+permalink: /llms.txt
+---
+# {{ site.title }}
+
+> {{ site.description }}
+
+## Docs
+
+{% for section in site.data.nav %}### {{ section.title }}
+{% for item in section.items %}{% if item.group %}{% for sub in item.group.items %}{% assign doc = site.docs | where: "slug", sub | first %}{% if doc %}- [{{ doc.title }}]({{ site.url }}/docs/{{ doc.slug }}/)
+{% endif %}{% endfor %}{% else %}{% assign doc = site.docs | where: "slug", item | first %}{% if doc %}- [{{ doc.title }}]({{ site.url }}/docs/{{ doc.slug }}/)
+{% endif %}{% endif %}{% endfor %}
+{% endfor %}
+## Raw Markdown
+
+Each doc is available as raw markdown at `{{ site.url }}/docs/<slug>/raw.txt`.
+
+## Full Docs
+
+For the complete documentation in a single file, see [llms-full.txt]({{ site.url }}/llms-full.txt).

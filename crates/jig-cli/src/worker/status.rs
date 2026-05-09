@@ -82,22 +82,6 @@ impl WorkerStatus {
         matches!(self, Self::WaitingReview)
     }
 
-    pub fn from_legacy(s: &str) -> Self {
-        match s {
-            "created" => Self::Created,
-            "spawned" => Self::Spawned,
-            "running" => Self::Running,
-            "idle" => Self::Idle,
-            "waiting_input" => Self::WaitingInput,
-            "stalled" => Self::Stalled,
-            "waiting_review" | "review" => Self::WaitingReview,
-            "approved" => Self::Approved,
-            "merged" => Self::Merged,
-            "failed" => Self::Failed,
-            "archived" => Self::Archived,
-            _ => Self::Running,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -160,16 +144,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn legacy_migration() {
-        assert_eq!(WorkerStatus::from_legacy("running"), WorkerStatus::Running);
-        assert_eq!(
-            WorkerStatus::from_legacy("review"),
-            WorkerStatus::WaitingReview
-        );
-        assert_eq!(
-            WorkerStatus::from_legacy("unknown_value"),
-            WorkerStatus::Running
-        );
-    }
 }

@@ -185,7 +185,13 @@ impl fmt::Display for NotifyOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum NotifyError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
+    #[error(transparent)]
+    Notify(#[from] crate::notify::NotifyError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
 }
 
 impl Op for Notify {

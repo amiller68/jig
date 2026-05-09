@@ -7,20 +7,12 @@ use url::Url;
 use jig_core::Reducible;
 
 use crate::context::{Config, RepoEntry};
+use crate::daemon::checks::PrHealth;
 use crate::worker::{MuxStatus, WorkerStatus};
-use crate::worker::checks::PrChecks;
 use jig_core::git::Branch;
 use jig_core::issues::issue::IssueRef;
 
 use super::schema::{Event, EventKind, TerminalKind};
-
-/// Per-worker PR health info collected during a tick.
-#[derive(Debug, Clone, Default)]
-pub struct PrHealth {
-    pub pr_checks: PrChecks,
-    pub pr_error: Option<String>,
-    pub has_pr: bool,
-}
 
 /// Full worker state — event-log reduction + runtime enrichment.
 ///
@@ -57,7 +49,6 @@ pub struct WorkerState {
     pub is_dirty: bool,
     pub parsed_pr_url: Option<Url>,
     pub pr_health: PrHealth,
-    pub max_nudges: u32,
     pub nudge_cooldown_remaining: Option<u64>,
 }
 
@@ -105,7 +96,6 @@ impl Default for WorkerState {
             is_dirty: false,
             parsed_pr_url: None,
             pr_health: PrHealth::default(),
-            max_nudges: 0,
             nudge_cooldown_remaining: None,
         }
     }

@@ -62,7 +62,7 @@ impl AgentBackend for ClaudeCode {
     fn kind(&self) -> AgentKind { AgentKind::Claude }
     fn command(&self) -> &str { COMMAND }
     fn model(&self) -> &str { self.model.as_cli_arg() }
-    fn project_file(&self) -> &Path { Path::new("CLAUDE.md") }
+    fn project_file(&self) -> &Path { Path::new("AGENTS.md") }
     fn skills_dir(&self) -> &Path { Path::new(".claude/skills") }
     fn skill_file(&self) -> &Path { Path::new("SKILL.md") }
     fn settings_file(&self) -> Option<&Path> { Some(Path::new(".claude/settings.json")) }
@@ -135,17 +135,16 @@ impl AgentBackend for ClaudeCode {
         argv
     }
 
-    fn health(&self) -> crate::error::Result<String> {
+    fn health(&self) -> Result<String, super::AgentError> {
         let output = std::process::Command::new(COMMAND)
             .arg("--version")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .output()
-            .map_err(|e| crate::Error::Custom(format!("failed to run `claude --version`: {e}")))?;
+            .output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::Error::Custom(format!(
+            return Err(super::AgentError::Other(format!(
                 "claude --version failed: {}",
                 stderr.trim()
             )));
@@ -155,9 +154,9 @@ impl AgentBackend for ClaudeCode {
         Ok(version)
     }
 
-    fn install(&self, hooks: &[(&str, &str)]) -> crate::error::Result<InstallResult> {
+    fn install(&self, hooks: &[(&str, &str)]) -> Result<InstallResult, super::AgentError> {
         let home =
-            dirs::home_dir().ok_or_else(|| crate::Error::Custom("no home directory".into()))?;
+            dirs::home_dir().ok_or_else(|| super::AgentError::Other("no home directory".into()))?;
         let hooks_dir = home.join(".claude").join("hooks");
         let settings_path = home.join(".claude").join("settings.json");
 
@@ -187,13 +186,13 @@ impl AgentBackend for ClaudeCode {
 
         let hooks_obj = settings
             .as_object_mut()
-            .ok_or_else(|| crate::Error::Custom("settings.json is not an object".into()))?
+            .ok_or_else(|| super::AgentError::Other("settings.json is not an object".into()))?
             .entry("hooks")
             .or_insert_with(|| serde_json::json!({}));
 
         let hooks_map = hooks_obj
             .as_object_mut()
-            .ok_or_else(|| crate::Error::Custom("hooks is not an object".into()))?;
+            .ok_or_else(|| super::AgentError::Other("hooks is not an object".into()))?;
 
         let mut modified = false;
 
@@ -241,7 +240,7 @@ impl AgentBackend for ClaudeCode {
                 std::fs::create_dir_all(parent)?;
             }
             let content = serde_json::to_string_pretty(&settings)
-                .map_err(|e| crate::Error::Custom(format!("failed to serialize settings: {e}")))?;
+                .map_err(|e| super::AgentError::Other(format!("failed to serialize settings: {e}")))?;
             std::fs::write(&settings_path, content)?;
         }
 

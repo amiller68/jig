@@ -41,7 +41,7 @@ pub enum CommitCommand {
 #[derive(Debug, thiserror::Error)]
 pub enum CommitError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
     #[error("{0}")]
     Usage(String),
     #[error("IO error: {0}")]

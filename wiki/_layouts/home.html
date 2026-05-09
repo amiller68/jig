@@ -8,27 +8,16 @@
   <main class="home">
 
     <section class="hero">
-      <svg class="hero-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="72" height="72">
-        <rect x="0" y="0" width="10" height="10" rx="2" class="logo-surround"/>
-        <rect x="13" y="0" width="10" height="10" rx="2" class="logo-surround"/>
-        <rect x="26" y="0" width="10" height="10" rx="2" class="logo-surround" opacity="0.55"/>
-        <rect x="0" y="13" width="10" height="10" rx="2" class="logo-surround" opacity="0.15"/>
-        <rect x="13" y="13" width="10" height="10" rx="2" class="logo-center"/>
-        <rect x="26" y="13" width="10" height="10" rx="2" class="logo-surround" opacity="0.15"/>
-        <rect x="0" y="26" width="10" height="10" rx="2" class="logo-surround"/>
-        <rect x="13" y="26" width="10" height="10" rx="2" class="logo-surround" opacity="0.35"/>
-        <rect x="26" y="26" width="10" height="10" rx="2" class="logo-surround" opacity="0.15"/>
-      </svg>
+      <span class="hero-eyebrow">Multiply yourself across parallel agent sessions</span>
       <h1 class="hero-title">jig</h1>
-      <p class="hero-tagline">Multiply yourself across parallel agent sessions.</p>
-      <p class="hero-sub">Git worktree manager for orchestrating agentic coding assistants. Write tickets, spawn workers, ship features &mdash; in parallel.</p>
+      <p class="hero-tagline">Git worktree manager for orchestrating agentic coding assistants. Write tickets, spawn workers, ship features &mdash; in parallel.</p>
       <div class="hero-install" id="hero-install">
         <code>curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash</code>
         <button class="copy-btn copy-btn-visible" onclick="navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/amiller68/jig/main/install.sh | bash').then(function(){var b=document.querySelector('#hero-install .copy-btn');b.textContent='copied';setTimeout(function(){b.textContent='copy'},1500)})">copy</button>
       </div>
       <div class="hero-links">
-        <a href="{{ '/docs/getting-started/' | relative_url }}" class="hero-cta">Get started</a>
-        <a href="https://github.com/amiller68/jig" class="hero-link">GitHub</a>
+        <a href="{{ '/docs/init/' | relative_url }}" class="hero-cta">Get started</a>
+        <a href="https://github.com/amiller68/jig" class="hero-link">View on GitHub</a>
       </div>
     </section>
 
@@ -107,7 +96,7 @@
     </section>
 
     <section class="home-bottom">
-      <p>Read the <a href="{{ '/docs/background/' | relative_url }}">docs</a> for the full story, or dive into <a href="{{ '/articles/' | relative_url }}">articles</a> on autonomous orchestration and integrations.</p>
+      <p>Read the <a href="{{ '/docs/background/' | relative_url }}">docs</a> for the full story — from setup to multi-agent orchestration.</p>
     </section>
 
   </main>

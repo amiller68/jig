@@ -5,7 +5,7 @@ use glob::Pattern;
 
 use crate::context::{Context, RepoConfig};
 use jig_core::git::Repo;
-use jig_core::{Error, Worktree};
+use jig_core::Worktree;
 
 use crate::cli::op::{NoOutput, Op};
 use crate::cli::ui;
@@ -28,7 +28,9 @@ pub struct Remove {
 #[derive(Debug, thiserror::Error)]
 pub enum RemoveError {
     #[error(transparent)]
-    Core(#[from] Error),
+    Context(#[from] crate::context::ContextError),
+    #[error("{0}")]
+    NotFound(String),
     #[error("Invalid pattern: {0}")]
     InvalidPattern(#[from] glob::PatternError),
     #[error(transparent)]
@@ -55,7 +57,7 @@ impl Op for Remove {
                     return self.remove_from_repo(repo);
                 }
             }
-            return Err(Error::WorktreeNotFound(self.pattern.clone()).into());
+            return Err(RemoveError::NotFound(format!("worktree '{}' not found", self.pattern)));
         }
 
         let cfg = Context::from_cwd()?;
@@ -93,7 +95,7 @@ impl Remove {
                 ));
                 return Ok(NoOutput);
             }
-            return Err(Error::WorktreeNotFound(pattern.as_str().to_string()).into());
+            return Err(RemoveError::NotFound(format!("no worktrees matching '{}'", pattern.as_str())));
         }
 
         // Remove each matching worktree

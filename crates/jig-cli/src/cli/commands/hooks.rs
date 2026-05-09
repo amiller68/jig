@@ -63,7 +63,9 @@ pub enum HooksCommands {
 #[derive(Debug, thiserror::Error)]
 pub enum HooksError {
     #[error(transparent)]
-    Core(#[from] jig_core::Error),
+    Context(#[from] crate::context::ContextError),
+    #[error(transparent)]
+    Hook(#[from] crate::hooks::HookError),
 }
 
 impl Op for Hooks {

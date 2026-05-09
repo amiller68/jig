@@ -3,6 +3,18 @@
 //! - Git hooks: wrapper scripts in `.git/hooks/` that call `jig hooks <name>`
 //! - Agent hooks: jig event scripts installed into an agent's hook system
 
+#[derive(Debug, thiserror::Error)]
+pub enum HookError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    EventLog(#[from] jig_core::events::EventLogError),
+    #[error("{0}")]
+    Validation(String),
+}
+
 pub mod git;
 pub mod handlers;
 pub mod install;
