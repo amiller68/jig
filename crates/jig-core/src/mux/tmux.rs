@@ -131,10 +131,7 @@ impl TmuxSession {
     }
 
     pub fn window(&self, name: impl Into<String>) -> TmuxWindow {
-        TmuxWindow {
-            session: self.0.clone(),
-            window: name.into(),
-        }
+        TmuxWindow::new(self.0.clone(), name)
     }
 
     pub fn windows(&self) -> Result<Vec<TmuxWindow>> {

@@ -35,9 +35,11 @@ pub struct MonitorActor {
     github_last_polled: Mutex<HashMap<String, Instant>>,
     previous_states: Mutex<HashMap<String, WorkerState>>,
     workers: Mutex<Vec<WorkerState>>,
+    resume_failures: Mutex<HashMap<String, u32>>,
 }
 
 const GITHUB_POLL_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_RESUME_ATTEMPTS: u32 = 3;
 
 impl MonitorActor {
     pub fn workers(&self) -> Vec<WorkerState> {
@@ -234,21 +236,57 @@ impl MonitorActor {
             global_config.silence_threshold_seconds,
         );
 
-        // Resume dead mux windows
+        // Resume dead mux windows (with retry limit)
         if !state.status.is_terminal() && state.status != WorkerStatus::Initializing {
             if !mux.window_exists(&worker_name) {
-                tracing::info!(
-                    worker = key,
-                    "active worker has no mux window, attempting resume"
-                );
-                actions.retain(|a| !matches!(a, DispatchAction::Nudge { .. }));
-                match try_resume_worker(&repo_entry.path, &worker_name, mux) {
-                    Ok(true) => tracing::info!(worker = key, "worker resumed"),
-                    Ok(false) => {}
-                    Err(e) => {
-                        tracing::warn!(worker = key, error = %e, "failed to resume worker")
+                let failures = {
+                    let map = self.resume_failures.lock().unwrap();
+                    map.get(key).copied().unwrap_or(0)
+                };
+
+                if failures >= MAX_RESUME_ATTEMPTS {
+                    tracing::debug!(
+                        worker = key,
+                        attempts = failures,
+                        "resume exhausted, marking failed"
+                    );
+                    let event_log = events::event_log_for_worker(&repo_name, &worker_name)?;
+                    let _ = event_log.append(&Event::now(EventKind::Terminal {
+                        terminal: TerminalKind::Failed,
+                        reason: Some(format!(
+                            "mux window lost, {} resume attempts failed",
+                            failures
+                        )),
+                    }));
+                    state = log.reduce()?;
+                    state.check_silence(global_config);
+                } else {
+                    actions.retain(|a| !matches!(a, DispatchAction::Nudge { .. }));
+                    match try_resume_worker(&repo_entry.path, &worker_name, mux) {
+                        Ok(true) => {
+                            tracing::info!(worker = key, "worker resumed");
+                            self.resume_failures.lock().unwrap().remove(key);
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            let count = {
+                                let mut map = self.resume_failures.lock().unwrap();
+                                let count = map.entry(key.to_string()).or_insert(0);
+                                *count += 1;
+                                *count
+                            };
+                            tracing::warn!(
+                                worker = key,
+                                attempt = count,
+                                max = MAX_RESUME_ATTEMPTS,
+                                error = %e,
+                                "failed to resume worker"
+                            );
+                        }
                     }
                 }
+            } else {
+                self.resume_failures.lock().unwrap().remove(key);
             }
         }
 
