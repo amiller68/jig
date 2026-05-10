@@ -1022,7 +1022,9 @@ fn view_issue(issue: &CoreIssue, w: &mut impl Write) -> Result<(), IssuesError> 
 
         // Footer
         let total = lines.len();
-        let pct = ((scroll + visible).min(total) * 100).checked_div(total).unwrap_or(100);
+        let pct = ((scroll + visible).min(total) * 100)
+            .checked_div(total)
+            .unwrap_or(100);
         write!(w, "\x1B[2m— {}% (j/k scroll, q back) —\x1B[0m", pct)?;
         w.flush()?;
 
