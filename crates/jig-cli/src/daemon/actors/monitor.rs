@@ -171,8 +171,16 @@ impl MonitorActor {
         state.check_silence(global_config);
 
         // 2. PR check if polling this tick
-        let mut pr_health = PrHealth::default();
-        let mut is_draft = false;
+        let old_state = self
+            .previous_states
+            .lock()
+            .unwrap()
+            .get(key)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut pr_health = old_state.pr_health.clone();
+        let mut is_draft = old_state.is_draft;
 
         let gh_client = if self.should_poll_github(key) {
             GitHubClient::from_repo_path(worker.path()).ok()
@@ -218,14 +226,6 @@ impl MonitorActor {
         if state.status == WorkerStatus::Created {
             return Ok((state, vec![]));
         }
-
-        let old_state = self
-            .previous_states
-            .lock()
-            .unwrap()
-            .get(key)
-            .cloned()
-            .unwrap_or_default();
 
         // Dispatch rules-based actions
         let mut actions = dispatch_actions(
