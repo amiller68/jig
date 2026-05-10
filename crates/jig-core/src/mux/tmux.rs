@@ -214,7 +214,8 @@ impl TmuxWindow {
     pub fn new(session: impl Into<String>, window: impl Into<String>) -> Self {
         Self {
             session: session.into(),
-            window: window.into(),
+            // tmux interprets / as a pane separator in target strings
+            window: window.into().replace('/', "-"),
         }
     }
 
@@ -526,7 +527,7 @@ mod tests {
     #[test]
     fn window_target_str() {
         let w = TmuxWindow::new("jig-repo", "feat/auth");
-        assert_eq!(w.target_str(), "jig-repo:feat/auth");
+        assert_eq!(w.target_str(), "jig-repo:feat-auth");
     }
 
     #[test]

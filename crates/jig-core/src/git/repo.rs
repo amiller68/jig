@@ -191,8 +191,6 @@ impl Repo {
             return Err(GitError::WorktreeExists(branch.to_string()));
         }
 
-        self.ensure_worktree(base)?;
-
         let branch_str: &str = branch;
         let path = self.worktrees_path().join(branch_str);
         self.add_worktree(&path, branch, base)?;
@@ -517,20 +515,6 @@ impl Repo {
     // Private helpers
     // ------------------------------------------------------------------
 
-    /// Ensure a worktree exists for `branch`. No-op if it's already
-    /// checked out in the main workdir or any linked worktree.
-    fn ensure_worktree(&self, branch: &Branch) -> Result<()> {
-        if self.is_branch_checked_out(branch)? {
-            return Ok(());
-        }
-
-        let branch_str: &str = branch;
-        let wt_path = self.worktrees_path().join(branch_str);
-        self.add_worktree(&wt_path, branch, branch)?;
-
-        Ok(())
-    }
-
     /// Check if a branch is checked out in the main workdir or any linked worktree.
     fn is_branch_checked_out(&self, branch: &Branch) -> Result<bool> {
         let clone = self.open_clone()?;
@@ -562,8 +546,7 @@ impl Repo {
         // in the name create nested dirs that don't exist. Use a flat name.
         let wt_name = local.replace('/', "-");
 
-        if self.branch_exists(branch)? {
-            let branch_ref = self.inner.find_branch(local, git2::BranchType::Local)?;
+        if let Ok(branch_ref) = self.inner.find_branch(local, git2::BranchType::Local) {
             let reference = branch_ref.into_reference();
             let mut opts = git2::WorktreeAddOptions::new();
             opts.reference(Some(&reference));

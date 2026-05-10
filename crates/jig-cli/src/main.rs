@@ -31,8 +31,6 @@ fn init_tracing(log_file: Option<std::path::PathBuf>) {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_level));
 
-    let stderr_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
-
     let file_layer = log_file.and_then(|path| {
         std::fs::File::create(&path).ok().map(|file| {
             tracing_subscriber::fmt::layer()
@@ -40,6 +38,15 @@ fn init_tracing(log_file: Option<std::path::PathBuf>) {
                 .with_ansi(false)
         })
     });
+
+    // Only write to stderr when there's no log file — the watch mode
+    // reads logs from the file via LogTailer, and stderr output corrupts
+    // the table display.
+    let stderr_layer = if file_layer.is_none() {
+        Some(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+    } else {
+        None
+    };
 
     tracing_subscriber::registry()
         .with(env_filter)
