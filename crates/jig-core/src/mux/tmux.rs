@@ -248,6 +248,9 @@ impl TmuxWindow {
 
     pub fn create(&self, dir: &Path) -> Result<()> {
         TmuxSession::new(&self.session).ensure()?;
+        if self.exists() {
+            return Ok(());
+        }
         let dir_str = dir.to_string_lossy();
         let output = run_tmux(
             &[
