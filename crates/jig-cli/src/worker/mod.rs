@@ -164,12 +164,18 @@ impl Worker {
     }
 
     pub fn repo_name(&self) -> String {
-        self.path
-            .parent()
-            .and_then(|jig_dir| jig_dir.parent())
-            .and_then(|root| root.file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unknown".to_string())
+        let path: &Path = &self.path;
+        for ancestor in path.ancestors() {
+            if ancestor.file_name().map(|n| n == crate::context::JIG_DIR).unwrap_or(false) {
+                if let Some(root) = ancestor.parent() {
+                    return root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                }
+            }
+        }
+        "unknown".to_string()
     }
 
     // ── Mux operations ─────────────────────────────────────────────
