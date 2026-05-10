@@ -196,6 +196,7 @@ impl Actor for SpawnActor {
                     }
                     Err(msg) => {
                         tracing::warn!(worker = %worker_name, "auto-spawn failed: {}", msg);
+                        spawning.retain(|s| s != &worker_name);
                     }
                 }
                 repo_spawned += 1;

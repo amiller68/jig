@@ -211,7 +211,8 @@ fn startup_recovery(global_config: &Config, registry: &RepoRegistry) {
             }
         }
         Err(e) => {
-            tracing::warn!("failed to read daemon event log: {}", e);
+            tracing::warn!("stale daemon event log, resetting: {}", e);
+            let _ = log.reset();
         }
     }
 

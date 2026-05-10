@@ -231,7 +231,8 @@ impl Repo {
     pub fn prune_worktree(&self, branch: &Branch, force: bool) -> Result<()> {
         let name: &str = branch;
         let local = name.strip_prefix("origin/").unwrap_or(name);
-        self.prune_worktree_named(local, force)
+        let wt_name = local.replace('/', "-");
+        self.prune_worktree_named(&wt_name, force)
     }
 
     // ------------------------------------------------------------------
@@ -557,13 +558,16 @@ impl Repo {
 
         let branch_str: &str = branch;
         let local = branch_str.strip_prefix("origin/").unwrap_or(branch_str);
+        // git stores worktree metadata in .git/worktrees/<name>/ — slashes
+        // in the name create nested dirs that don't exist. Use a flat name.
+        let wt_name = local.replace('/', "-");
 
         if self.branch_exists(branch)? {
             let branch_ref = self.inner.find_branch(local, git2::BranchType::Local)?;
             let reference = branch_ref.into_reference();
             let mut opts = git2::WorktreeAddOptions::new();
             opts.reference(Some(&reference));
-            self.inner.worktree(local, path, Some(&opts))?;
+            self.inner.worktree(&wt_name, path, Some(&opts))?;
         } else {
             let base_str: &str = base;
             let start_commit = self.find_valid_start_point(base_str)?;
@@ -571,7 +575,7 @@ impl Repo {
             let reference = new_branch.into_reference();
             let mut opts = git2::WorktreeAddOptions::new();
             opts.reference(Some(&reference));
-            self.inner.worktree(local, path, Some(&opts))?;
+            self.inner.worktree(&wt_name, path, Some(&opts))?;
 
             let wt_repo = Self::open(path)?;
             if let Ok(mut config) = wt_repo.inner.config() {
